@@ -25,6 +25,7 @@ render.
 
 import json
 import random
+import re
 import sys
 import time
 import urllib.error
@@ -42,6 +43,8 @@ PROC_NEXT = "plug-in-imanganation-place-next-panel"
 PROC_PLACE = "plug-in-imanganation-place-panel"
 PROC_REFINE = "plug-in-imanganation-refine-panel"
 PROC_REGEN = "plug-in-imanganation-regenerate-panel"
+PROC_SETREF = "plug-in-imanganation-set-character-reference"
+REF_MAX = 1024  # reference export cap; the CLIP encoder only sees 224-448 px anyway
 PARASITE = "imanganation-panelspec"
 CURSOR_FILE = "gimp_cursor.json"  # per project: which panel comes next
 ENGINE_URL = "http://127.0.0.1:8790"
@@ -477,6 +480,106 @@ def regenerate_panel(procedure, run_mode, image, drawables, config, data):
     return _success(procedure, new)
 
 
+def _image_project(image):
+    """The project of any placed panel in this image (from its recorded file)."""
+    def walk(layers):
+        for layer in layers:
+            p = layer.get_parasite(PARASITE)
+            if p:
+                meta = json.loads(bytes(p.get_data()))
+                f = meta.get("file") or (meta.get("render") or {}).get("path")
+                if f and (Path(f).parent.parent / "panels.json").exists():
+                    return Path(f).parent.parent
+            if layer.is_group():
+                found = walk(layer.get_children())
+                if found:
+                    return found
+        return None
+
+    return walk(image.get_layers())
+
+
+def _export_reference(image, drawable, path):
+    """Export ``drawable`` (or its part inside the selection) as a square PNG.
+
+    The CLIP encoder centre-crops references to a square, so the region is grown to
+    a square around its centre here, on white, instead of being cropped there. Layer
+    masks apply (a panel's frame clip), so only what the artist sees is exported."""
+    _, lx, ly = drawable.get_offsets()
+    lw, lh = drawable.get_width(), drawable.get_height()
+    x1, y1, x2, y2 = lx, ly, lx + lw, ly + lh
+    _, non_empty, sx1, sy1, sx2, sy2 = Gimp.Selection.bounds(image)
+    if non_empty:
+        x1, y1, x2, y2 = max(x1, sx1), max(y1, sy1), min(x2, sx2), min(y2, sy2)
+        if x2 <= x1 or y2 <= y1:
+            raise ValueError("The selection doesn't overlap the selected layer.")
+    side = max(x2 - x1, y2 - y1)
+    ox, oy = (x1 + x2) // 2 - side // 2, (y1 + y2) // 2 - side // 2
+
+    out = Gimp.Image.new(side, side, image.get_base_type())
+    try:
+        copy = Gimp.Layer.new_from_drawable(drawable, out)
+        copy.set_visible(True)
+        out.insert_layer(copy, None, 0)
+        copy.set_offsets(lx - ox, ly - oy)
+        bg_type = (Gimp.ImageType.RGB_IMAGE if image.get_base_type() == Gimp.ImageBaseType.RGB
+                   else Gimp.ImageType.GRAY_IMAGE)
+        bg = Gimp.Layer.new(out, "white", side, side, bg_type, 100, Gimp.LayerMode.NORMAL)
+        out.insert_layer(bg, None, 1)
+        bg.fill(Gimp.FillType.WHITE)
+        out.flatten()
+        if out.get_base_type() != Gimp.ImageBaseType.RGB:
+            out.convert_rgb()
+        if side > REF_MAX:
+            out.scale(REF_MAX, REF_MAX)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        Gimp.file_save(Gimp.RunMode.NONINTERACTIVE, out, Gio.File.new_for_path(str(path)), None)
+    finally:
+        out.delete()
+    return side
+
+
+def set_character_reference(procedure, run_mode, image, drawables, config, data):
+    layers = [d for d in drawables if isinstance(d, Gimp.Layer)]
+    if not layers:
+        return _error(procedure, "Select the layer that shows the character.")
+    if run_mode == Gimp.RunMode.INTERACTIVE and not _dialog(procedure, config, PROC_SETREF):
+        return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
+
+    root = _image_project(image)
+    if root is None:
+        chosen = config.get_property("project-dir")
+        if chosen is None:
+            return _error(procedure, "No placed panel in this image to find the project "
+                                     "from; choose the project folder.")
+        root = Path(chosen.get_path())
+    name = (config.get_property("character") or "").strip()
+    engine = config.get_property("engine-url").rstrip("/")
+    try:
+        from urllib.parse import quote
+
+        cast = _http("GET", f"{engine}/characters?project_dir={quote(str(root))}")
+        known = {c["name"].lower(): c["name"] for c in cast}
+        for c in cast:
+            known.update({a.lower(): c["name"] for a in c.get("aliases", [])})
+        if name.lower() not in known:
+            return _error(procedure, f"Unknown character {name!r}. This project has: "
+                                     f"{', '.join(c['name'] for c in cast) or 'none'}.")
+        name = known[name.lower()]
+        slug = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_") or "character"
+        path = root / "tmp" / f"gimp_ref_{slug}_{time.strftime('%Y%m%d-%H%M%S')}.png"
+        side = _export_reference(image, layers[0], path)
+        result = _http("POST", f"{engine}/characters/reference",
+                       {"project_dir": str(root), "name": name, "image_path": str(path)})
+    except (EngineError, ValueError) as exc:
+        return _error(procedure, str(exc))
+
+    Gimp.message(f"{result['name']}'s reference is now {result['version']} ({side}px square; "
+                 f"was {result['previous']}). New renders of {result['name']} use it; earlier "
+                 f"versions are kept in characters/{slug}/.")
+    return _success(procedure, layers[0])
+
+
 def place_next_panel(procedure, run_mode, image, drawables, config, data):
     if run_mode == Gimp.RunMode.INTERACTIVE and not _dialog(procedure, config, PROC_NEXT):
         return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
@@ -533,11 +636,12 @@ class Imanganation(Gimp.PlugIn):
         return False, None, None
 
     def do_query_procedures(self):
-        return [PROC_RENDER, PROC_NEXT, PROC_REGEN, PROC_REFINE, PROC_PLACE]
+        return [PROC_RENDER, PROC_NEXT, PROC_REGEN, PROC_REFINE, PROC_SETREF, PROC_PLACE]
 
     def do_create_procedure(self, name):
         run = {PROC_RENDER: render_panel, PROC_NEXT: place_next_panel,
                PROC_REFINE: refine_panel, PROC_REGEN: regenerate_panel,
+               PROC_SETREF: set_character_reference,
                PROC_PLACE: place_panel}[name]
         proc = Gimp.ImageProcedure.new(self, name, Gimp.PDBProcType.PLUGIN, run, None)
         proc.set_image_types("*")
@@ -549,6 +653,26 @@ class Imanganation(Gimp.PlugIn):
         proc.set_attribution("imanganation", "imanganation", "2026")
         proc.add_layer_return_value(
             "layer", "Layer", "The placed panel layer", False, GObject.ParamFlags.READWRITE)
+
+        if name == PROC_SETREF:
+            proc.set_menu_label("Set _Character Reference from Layer...")
+            proc.set_documentation(
+                "Use the selected layer as a character's reference",
+                "Export the selected layer (or its part inside the selection) as a square "
+                "image and register it as the character's new active reference. Earlier "
+                "reference versions are kept.",
+                name)
+            proc.add_string_argument(
+                "character", "_Character", "Character name (or alias) in the project",
+                "", GObject.ParamFlags.READWRITE)
+            proc.add_file_argument(
+                "project-dir", "_Project folder", "Only needed if no placed panel is in "
+                "this image", Gimp.FileChooserAction.SELECT_FOLDER, True, None,
+                GObject.ParamFlags.READWRITE)
+            proc.add_string_argument(
+                "engine-url", "_Engine URL", "imanganation engine (manganation serve)",
+                ENGINE_URL, GObject.ParamFlags.READWRITE)
+            return proc
 
         if name == PROC_REGEN:
             proc.set_menu_label("Re_generate Panel...")

@@ -41,7 +41,7 @@ GIMP also gives three things for free that a custom web UI would have to build:
 ## Built so far
 
 `gimp/imanganation/imanganation.py` is installed by symlink into
-`~/.config/GIMP/3.2/plug-ins/imanganation`. It adds five commands under *Filters →
+`~/.config/GIMP/3.2/plug-ins/imanganation`. It adds six commands under *Filters →
 imanganation*:
 
 - **Render Panel into Frame…** (the main flow): needs a selection, which is the target
@@ -58,6 +58,15 @@ imanganation*:
   seed. *Same seed* reuses the seed that composed the take (traced back through a
   hi-res refine to the original render), keeping the composition while applying
   your edits. The script cursor is not moved.
+- **Set Character Reference from Layer…**: select the layer that shows a character
+  (optionally drag a selection around them) and type their name or alias. The region
+  is grown to a square around its centre on white, with layer masks applied, capped at
+  1024 px. It's exported to `<project>/tmp/` and registered through
+  `POST /characters/reference` as a **new** version (`gimp-01`, `gimp-02`…) that
+  becomes the active reference. `base` and earlier versions are never overwritten.
+  The project comes from any placed panel in the image; the folder argument is only
+  needed for an image without one. Unknown names are refused, listing the project's
+  characters, and never create a new character.
 - **Refine Panel (Hi-res)…**: select a placed panel (its layer or group). The plug-in
   sends the exact take that layer shows to the engine's hi-res fix (`POST /refine`
   with `source`: polish + Real-ESRGAN, `docs/phase6a.md`). The result is swapped in
@@ -100,6 +109,7 @@ ComfyUI and the engine running) run headless against GIMP 3.2.6 (flatpak):
 | Next Panel walks `panels.json` in order into hand-drawn frames; cursor advances | ✅ |
 | Dialogue/SFX arrive as **hidden** text layers in the panel group (lettering reference) | ✅ |
 | Unrendered panel gives a clear "not rendered yet: expected panels/003*.png" and doesn't advance | ✅ |
+| **Live** (`gimp/setref_smoke_test.py`): reference from a selection (420 px square crop) and from a whole panel group (800 px square, hidden takes/text excluded) → `gimp-01`, `gimp-02` become active, `base` kept; lower-case name resolves; unknown name refused, nothing created | ✅ |
 | **Live** (`gimp/regenerate_smoke_test.py`): regenerate a placed hi-res take → *same seed* recovers the original render's seed, *new seed* gives a fresh take; both cover the frame tightly with its mask, the previous take hidden, the selection and cursor untouched | ✅ |
 | **Live** (`gimp/refine_smoke_test.py`): refine a placed panel → 1920×2048 hi-res swapped in at the same footprint and mask, old take hidden, selection kept; next placement picks the newer `_hires` | ✅ |
 | **Live:** opaque template, three Fuzzy Select clicks → three real renders sized to each frame, placed beneath the frame lines, template re-selected each time, cursor → 4 | ✅ |
@@ -173,7 +183,8 @@ None of these create or arrange pages.
 4. **Inpaint Selection**: selection → mask, active layer → init image, short prompt →
    engine img2img/inpaint → result layer clipped to the selection. Needs a new
    ComfyUI inpaint workflow.
-5. **Set Character Reference from Layer**.
+5. **Set Character Reference from Layer** ✅ (built). Engine: `GET /characters`,
+   `POST /characters/reference`.
 6. **Engine Status…**: health, queue and VRAM.
 7. **Refine Panel (Hi-res)** ✅ (built on Phase 6a's `/refine`).
 

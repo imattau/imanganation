@@ -37,3 +37,6 @@ imanganation-gimp/
 projects/*/datasets/**/*.png
 projects/*/panels*/*.png
 projects/*/characters*/**/*.png
+
+# Scratch exports (e.g. GIMP reference crops before registration)
+projects/*/tmp/

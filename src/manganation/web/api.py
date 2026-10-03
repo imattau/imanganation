@@ -43,6 +43,13 @@ class RefineRequest(BaseModel):
     seed: int | None = None
 
 
+class ReferenceRequest(BaseModel):
+    project_dir: str
+    name: str = Field(min_length=1, description="An existing character (name or alias)")
+    image_path: str = Field(description="PNG inside the project, e.g. exported by GIMP")
+    version_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{1,40}$")
+
+
 class Job(BaseModel):
     id: str
     status: Literal["queued", "running", "done", "error"] = "queued"
@@ -124,6 +131,56 @@ def create_app(
             lambda: refine(Path(req.project_dir), req.seq, source=source, scale=req.scale,
                            denoise=req.denoise, seed=req.seed),
         )
+
+    @app.get("/characters")
+    def characters(project_dir: str) -> list[dict]:
+        from manganation.characters.registry import CharacterRegistry
+
+        reg = CharacterRegistry.from_path(resolve_project(project_dir, root))
+        return [
+            {"name": c.name, "aliases": c.aliases, "default_version": c.default_version,
+             "versions": [v.id for v in c.versions],
+             "reference": str(reg.reference_path(c.name) or "") or None}
+            for c in reg.cast.characters
+        ]
+
+    @app.post("/characters/reference")
+    def set_reference(req: ReferenceRequest) -> dict:
+        """Register an image as a character's new active reference (a new version;
+        earlier versions are kept). Synchronous: a file copy, no GPU."""
+        from PIL import Image, UnidentifiedImageError
+
+        from manganation.characters.registry import CharacterRegistry
+
+        project = resolve_project(req.project_dir, root)
+        image = Path(req.image_path).resolve()
+        if project not in image.parents:
+            raise HTTPException(400, f"image must be inside the project ({project})")
+        if not image.is_file():
+            raise HTTPException(404, f"image not found: {image}")
+        try:
+            with Image.open(image) as im:
+                im.verify()
+        except (UnidentifiedImageError, OSError) as exc:
+            raise HTTPException(400, f"not a readable image: {exc}") from exc
+
+        reg = CharacterRegistry.from_path(project)
+        character = reg.get(req.name)
+        if character is None:
+            known = ", ".join(c.name for c in reg.cast.characters) or "none"
+            raise HTTPException(404, f"no character {req.name!r} (known: {known})")
+        previous = character.default_version
+        version_id = req.version_id
+        if version_id is None:  # never overwrite: gimp-01, gimp-02, …
+            n = 1
+            while character.version(f"gimp-{n:02d}") is not None:
+                n += 1
+            version_id = f"gimp-{n:02d}"
+        elif character.version(version_id) is not None:
+            raise HTTPException(409, f"{character.name} already has version {version_id!r}")
+        reg.add_user_reference(character.name, str(image), version_id)
+        return {"name": character.name, "version": version_id, "previous": previous,
+                "reference": str(reg.reference_path(character.name))}
 
     @app.get("/jobs/{job_id}")
     def status(job_id: str) -> Job:
