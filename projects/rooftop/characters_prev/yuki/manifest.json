@@ -28,11 +28,11 @@
       "id": "base",
       "kind": "base",
       "image": "characters/yuki/base.png",
-      "prompt": "solo focus, solo, 1 character, 1girl, messy white bob with pink tips, loose pigtails tied with red ribbons, amber eyes, navy blue sailor collar school uniform with red necktie and pleated skirt, white wristwatch, silver hair barrettes, wide toothed grin, snowflake pin on blazer lapel, energetic stance, slightly messy strands flying, masterpiece, best quality, cowboy shot, looking at viewer, facing viewer, simple white background, clean lineart, anime, highly detailed",
-      "seed": 777,
+      "prompt": "1girl, messy white bob with pink tips, loose pigtails tied with red ribbons, amber eyes, navy blue sailor collar school uniform with red necktie and pleated skirt, white wristwatch, silver hair barrettes, wide toothed grin, snowflake pin on blazer lapel, energetic stance, slightly messy strands flying, masterpiece, best quality, solo, 1 character, character reference sheet, full body, standing, front view, arms at sides, simple white background, clean lineart, anime, highly detailed",
+      "seed": 1554774908,
       "parent": null,
-      "note": "auto design sheet (solo focus)",
-      "created_at": "2026-10-03T23:40:26.798449Z"
+      "note": "auto design sheet (1girl)",
+      "created_at": "2026-10-03T21:41:47.228732Z"
     }
   ],
   "default_version": "base",

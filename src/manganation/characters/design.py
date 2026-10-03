@@ -43,7 +43,10 @@ DESIGN_NEGATIVE = (
     "bad hands, extra digits, missing fingers, worst quality, low quality, "
     "jpeg artifacts, multiple views, multiple characters, 2people, 2boys, 2girls, "
     "cropped, out of frame, busy background, props, bag, inset, border, panel border, "
-    "character sheet, reference sheet, turnaround, expression sheet, chibi"
+    "character sheet, reference sheet, turnaround, expression sheet, chibi, "
+    # A shadowed/gradient backdrop rides along into IP-Adapter panels and dataset
+    # variants (docs/phase6b.md); references want a flat, evenly lit background.
+    "shadow, cast shadow, dramatic lighting, gradient background"
 )
 
 # Sane defaults when a trait is unknown, so generation never produces a blank look.
