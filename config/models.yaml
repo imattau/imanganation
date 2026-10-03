@@ -1,0 +1,66 @@
+# Model registry.
+# `id` is the filename ComfyUI expects under models/<subdir>/.
+# Download in Phase 0; swap freely — the renderer references models by role, not path.
+
+checkpoints:
+  primary:
+    id: noobaiXL.safetensors
+    display: NoobAI-XL (SDXL, anime/manga)
+    source: https://huggingface.co/Laxhar/noobai-XL-1.1
+    subdir: checkpoints
+  fallbacks:
+    - id: illustriousXL.safetensors
+      display: Illustrious-XL
+      source: https://huggingface.co/OnomaAIResearch/Illustrious-XL-v1.1
+      subdir: checkpoints
+    - id: animagineXL40.safetensors
+      display: Animagine XL 4.0
+      source: https://huggingface.co/cagliostrolab/animagine-xl-4.0
+      subdir: checkpoints
+
+loras:
+  color_style:
+    id: color_style.safetensors
+    display: Colour style LoRA (optional)
+    subdir: loras
+    trigger: ""
+
+# Adapters name the CLIP-vision encoder they were trained with (`encoder:`); the
+# active adapter is settings.yaml -> defaults.ipadapter.adapter.
+ipadapter:
+  noob_mark1:
+    id: noobIPAMARK1_mark1.safetensors
+    display: NoobAI IP-Adapter Mark 1 (trained on NoobAI-XL EPS v1.1; ViT-bigG)
+    source: https://huggingface.co/r3gm/noob-ipa (model_G; sha256 5cdb6a00…919a, same in wtz37/sdxl)
+    encoder: clip_vision_g
+    subdir: ipadapter
+  plus:
+    id: ip-adapter-plus_sdxl_vit-h.safetensors
+    display: IP-Adapter Plus SDXL (ViT-H) - base SDXL; tiles/glows on NoobAI
+    source: https://huggingface.co/h94/IP-Adapter
+    encoder: clip_vision
+    subdir: ipadapter
+  clip_vision:
+    id: CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors
+    display: CLIP Vision ViT-H
+    subdir: ipadapter
+  clip_vision_g:
+    id: CLIP-ViT-bigG-14-laion2B-39B-b160k.safetensors
+    display: CLIP Vision ViT-bigG (vision tower only)
+    source: https://huggingface.co/h94/IP-Adapter (sdxl_models/image_encoder; sha256 657723e0…d64d)
+    subdir: ipadapter
+
+# Multi-character regional conditioning nodes live in custom node packs,
+# not model files: ComfyUI_IPAdapter_plus, ComfyUI-ppm (Attention Couple).
+
+# Image upscalers for the Phase 6a hi-res fix (docs/phase6a.md). `id` is the
+# filename ComfyUI expects under models/upscale_models/.
+upscalers:
+  realesrgan:
+    id: RealESRGAN_x4plus_anime_6B.pth
+    display: Real-ESRGAN x4plus anime (6B) — fast detail-preserving upscale
+    source: https://huggingface.co/ai-forever/Real-ESRGAN
+    subdir: upscale_models
+
+# Roles in models.yaml -> upscalers; the active one is settings.yaml -> defaults.refiner.upscaler.
+

@@ -1,0 +1,10 @@
+{
+  "path": "/home/lostcause/workspace/imanganation/projects/_gimp_smoke/panels/001_hires.png",
+  "seq": 1,
+  "source": "/home/lostcause/workspace/imanganation/projects/_gimp_smoke/panels/001.png",
+  "width": 1920,
+  "height": 2048,
+  "upscaler": "realesrgan",
+  "denoise": 0.25,
+  "seed": 0
+}

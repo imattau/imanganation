@@ -1,0 +1,62 @@
+# imanganation global settings
+
+paths:
+  projects_dir: projects
+  models_dir: models
+  workflows_dir: workflows
+  comfyui_dir: vendor/ComfyUI
+
+# ComfyUI runs as a separate local service; orchestrator talks to it over HTTP.
+comfyui:
+  host: 127.0.0.1
+  port: 8188
+  base_url: http://127.0.0.1:8188
+  # where ComfyUI reads models from (symlinked from ./models)
+  checkpoint_subdir: checkpoints
+  lora_subdir: loras
+  ipadapter_subdir: ipadapter
+
+# Local LLM for script parsing (script -> PanelSpec JSON).
+llm:
+  provider: ollama
+  base_url: http://127.0.0.1:11434
+  model: qwen3.5:latest
+  # Unload the LLM before handing the GPU to ComfyUI/SDXL on 16 GB.
+  unload_before_render: true
+
+# VRAM scheduling: never run LLM and diffusion concurrently.
+scheduling:
+  mode: sequential
+  gpu_index: 0
+
+defaults:
+  color_mode: color       # recorded only (engine is colour-only); see docs/color-policy.md
+  reading_order: rtl      # rtl (manga) | ltr (manhwa/western)
+  panel:
+    width: 768
+    height: 768
+    steps: 30
+    cfg: 7.0
+    sampler: dpmpp_2m
+    scheduler: karras
+  # IP-Adapter reference strength; lower = less colour bleed, more prompt control.
+  ipadapter:
+    adapter: noob_mark1   # models.yaml -> ipadapter role (each names its CLIP encoder)
+    weight_single: 0.45  # NoobAI Mark 1: 0.3 = light, 0.6+ = reference background bleeds in
+    weight_regional: 0.5
+    feather: 48         # regional mask feather (px)
+  # Two-pass hi-res fix of a finished panel; see docs/phase6a.md.
+  refiner:
+    enabled: true
+    upscaler: realesrgan  # models.yaml -> upscalers role (anime 6B)
+    scale: 2.0            # target multiplier of the source panel
+    denoise: 0.25         # img2img polish strength (0 = pure upscale)
+    steps: 16
+    cfg: 5.0
+    max_pixels: 16777216  # 4096x4096 guard
+  # Synthetic per-character training sets (dataset for a future LoRA); see docs/phase6b.md.
+  dataset:
+    count: 24        # images planned per character
+    denoise: 0.6     # img2img strength: identity (low) vs variation (high)
+    steps: 28
+    cfg: 6.0

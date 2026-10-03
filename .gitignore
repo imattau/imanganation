@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.uv/
+
+# Models & generated binaries
+models/**/*.safetensors
+models/**/*.ckpt
+models/**/*.pth
+models/**/*.bin
+models/**/*.gguf
+!models/**/.gitkeep
+
+# ComfyUI
+vendor/ComfyUI/
+comfyui.log
+.comfyui.pid
+
+# Project outputs (keep manifests, drop heavy images by default)
+projects/*/panels/*.png
+projects/*/panels/*.webp
+projects/*/characters/**/*.png
+projects/*/characters/**/*.webp
+
+
+# OS / editor
+.DS_Store
+*.swp
+.env
+
+# Customised GIMP fork: its own git repo (github.com/imattau/imanganation-gimp)
+imanganation-gimp/
+
+# More generated images: datasets, retake/backup folders (panels_*, characters_*)
+projects/*/datasets/**/*.png
+projects/*/panels*/*.png
+projects/*/characters*/**/*.png

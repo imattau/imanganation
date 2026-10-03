@@ -1,0 +1,69 @@
+{
+  "character": "Akira",
+  "seed_image": "/home/lostcause/workspace/imanganation/projects/rooftop/characters/akira/base.png",
+  "count": 6,
+  "denoise": 0.6,
+  "base_seed": 42,
+  "items": [
+    {
+      "index": 1,
+      "image": "01.png",
+      "caption": "1boy, messy charcoal brown with blue tips, medium length swept to left side covering right eye, amber eyes, white dress shirt tucked into navy pleated trousers, grey blazer and red necktie, silver wristwatch, black canvas backpack strap visible on shoulder, loose collar button undone, small scar above left eyebrow, quiet demeanor, relaxed slouch, front view, neutral expression, standing, cowboy shot, white background",
+      "positive": "1boy, messy charcoal brown with blue tips, medium length swept to left side covering right eye, amber eyes, white dress shirt tucked into navy pleated trousers, grey blazer and red necktie, silver wristwatch, black canvas backpack strap visible on shoulder, loose collar button undone, small scar above left eyebrow, quiet demeanor, relaxed slouch, front view, neutral expression, standing, arms at sides, cowboy shot, simple white background, masterpiece, best quality, looking at viewer, facing viewer, clean lineart, anime, highly detailed",
+      "negative": "text, speech bubble, watermark, signature, username, lowres, bad anatomy, bad hands, extra digits, missing fingers, worst quality, low quality, jpeg artifacts, multiple characters, 2people, multiple views, inset, border, panel border, character sheet, reference sheet, turnaround, chibi",
+      "note": "front-neutral-stand-cowboy-white",
+      "seed": 43,
+      "denoise": 0.6
+    },
+    {
+      "index": 2,
+      "image": "02.png",
+      "caption": "1boy, messy charcoal brown with blue tips, medium length swept to left side covering right eye, amber eyes, white dress shirt tucked into navy pleated trousers, grey blazer and red necktie, silver wristwatch, black canvas backpack strap visible on shoulder, loose collar button undone, small scar above left eyebrow, quiet demeanor, relaxed slouch, three quarter view, neutral expression, standing, cowboy shot, white background",
+      "positive": "1boy, messy charcoal brown with blue tips, medium length swept to left side covering right eye, amber eyes, white dress shirt tucked into navy pleated trousers, grey blazer and red necktie, silver wristwatch, black canvas backpack strap visible on shoulder, loose collar button undone, small scar above left eyebrow, quiet demeanor, relaxed slouch, three quarter view, neutral expression, standing, arms at sides, cowboy shot, simple white background, masterpiece, best quality, looking at viewer, facing viewer, clean lineart, anime, highly detailed",
+      "negative": "text, speech bubble, watermark, signature, username, lowres, bad anatomy, bad hands, extra digits, missing fingers, worst quality, low quality, jpeg artifacts, multiple characters, 2people, multiple views, inset, border, panel border, character sheet, reference sheet, turnaround, chibi",
+      "note": "3/4-neutral-stand-cowboy-white",
+      "seed": 44,
+      "denoise": 0.6
+    },
+    {
+      "index": 3,
+      "image": "03.png",
+      "caption": "1boy, messy charcoal brown with blue tips, medium length swept to left side covering right eye, amber eyes, white dress shirt tucked into navy pleated trousers, grey blazer and red necktie, silver wristwatch, black canvas backpack strap visible on shoulder, loose collar button undone, small scar above left eyebrow, quiet demeanor, relaxed slouch, side profile, neutral expression, standing, cowboy shot, white background",
+      "positive": "1boy, messy charcoal brown with blue tips, medium length swept to left side covering right eye, amber eyes, white dress shirt tucked into navy pleated trousers, grey blazer and red necktie, silver wristwatch, black canvas backpack strap visible on shoulder, loose collar button undone, small scar above left eyebrow, quiet demeanor, relaxed slouch, from side, profile, neutral expression, standing, arms at sides, cowboy shot, simple white background, masterpiece, best quality, looking at viewer, facing viewer, clean lineart, anime, highly detailed",
+      "negative": "text, speech bubble, watermark, signature, username, lowres, bad anatomy, bad hands, extra digits, missing fingers, worst quality, low quality, jpeg artifacts, multiple characters, 2people, multiple views, inset, border, panel border, character sheet, reference sheet, turnaround, chibi",
+      "note": "profile-neutral-stand-cowboy-white",
+      "seed": 45,
+      "denoise": 0.6
+    },
+    {
+      "index": 4,
+      "image": "04.png",
+      "caption": "1boy, messy charcoal brown with blue tips, medium length swept to left side covering right eye, amber eyes, white dress shirt tucked into navy pleated trousers, grey blazer and red necktie, silver wristwatch, black canvas backpack strap visible on shoulder, loose collar button undone, small scar above left eyebrow, quiet demeanor, relaxed slouch, back view, neutral expression, standing, cowboy shot, white background",
+      "positive": "1boy, messy charcoal brown with blue tips, medium length swept to left side covering right eye, amber eyes, white dress shirt tucked into navy pleated trousers, grey blazer and red necktie, silver wristwatch, black canvas backpack strap visible on shoulder, loose collar button undone, small scar above left eyebrow, quiet demeanor, relaxed slouch, from behind, back view, neutral expression, standing, arms at sides, cowboy shot, simple white background, masterpiece, best quality, looking at viewer, facing viewer, clean lineart, anime, highly detailed",
+      "negative": "text, speech bubble, watermark, signature, username, lowres, bad anatomy, bad hands, extra digits, missing fingers, worst quality, low quality, jpeg artifacts, multiple characters, 2people, multiple views, inset, border, panel border, character sheet, reference sheet, turnaround, chibi",
+      "note": "back-neutral-stand-cowboy-white",
+      "seed": 46,
+      "denoise": 0.6
+    },
+    {
+      "index": 5,
+      "image": "05.png",
+      "caption": "1boy, messy charcoal brown with blue tips, medium length swept to left side covering right eye, amber eyes, white dress shirt tucked into navy pleated trousers, grey blazer and red necktie, silver wristwatch, black canvas backpack strap visible on shoulder, loose collar button undone, small scar above left eyebrow, quiet demeanor, relaxed slouch, looking up, neutral expression, standing, cowboy shot, white background",
+      "positive": "1boy, messy charcoal brown with blue tips, medium length swept to left side covering right eye, amber eyes, white dress shirt tucked into navy pleated trousers, grey blazer and red necktie, silver wristwatch, black canvas backpack strap visible on shoulder, loose collar button undone, small scar above left eyebrow, quiet demeanor, relaxed slouch, looking up, neutral expression, standing, arms at sides, cowboy shot, simple white background, masterpiece, best quality, looking at viewer, facing viewer, clean lineart, anime, highly detailed",
+      "negative": "text, speech bubble, watermark, signature, username, lowres, bad anatomy, bad hands, extra digits, missing fingers, worst quality, low quality, jpeg artifacts, multiple characters, 2people, multiple views, inset, border, panel border, character sheet, reference sheet, turnaround, chibi",
+      "note": "lookup-neutral-stand-cowboy-white",
+      "seed": 47,
+      "denoise": 0.6
+    },
+    {
+      "index": 6,
+      "image": "06.png",
+      "caption": "1boy, messy charcoal brown with blue tips, medium length swept to left side covering right eye, amber eyes, white dress shirt tucked into navy pleated trousers, grey blazer and red necktie, silver wristwatch, black canvas backpack strap visible on shoulder, loose collar button undone, small scar above left eyebrow, quiet demeanor, relaxed slouch, looking down, neutral expression, standing, cowboy shot, white background",
+      "positive": "1boy, messy charcoal brown with blue tips, medium length swept to left side covering right eye, amber eyes, white dress shirt tucked into navy pleated trousers, grey blazer and red necktie, silver wristwatch, black canvas backpack strap visible on shoulder, loose collar button undone, small scar above left eyebrow, quiet demeanor, relaxed slouch, looking down, neutral expression, standing, arms at sides, cowboy shot, simple white background, masterpiece, best quality, looking at viewer, facing viewer, clean lineart, anime, highly detailed",
+      "negative": "text, speech bubble, watermark, signature, username, lowres, bad anatomy, bad hands, extra digits, missing fingers, worst quality, low quality, jpeg artifacts, multiple characters, 2people, multiple views, inset, border, panel border, character sheet, reference sheet, turnaround, chibi",
+      "note": "lookdown-neutral-stand-cowboy-white",
+      "seed": 48,
+      "denoise": 0.6
+    }
+  ]
+}

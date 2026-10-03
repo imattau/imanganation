@@ -1,0 +1,10 @@
+{
+  "path": "projects/rooftop/panels/001.png",
+  "seq": 1,
+  "seed": 1500752611,
+  "width": 1024,
+  "height": 1024,
+  "color_mode": "bw",
+  "prompt": "manga panel, monochrome, greyscale, screentone, 1boy, messy charcoal brown with blue tips, medium length swept to left side covering right eye, amber eyes, white dress shirt tucked into navy pleated trousers, grey blazer and red necktie, silver wristwatch, black canvas backpack strap visible on shoulder, loose collar button undone, small scar above left eyebrow, quiet demeanor, relaxed slouch, wide shot, Wide shot. Akira sits alone against the chain-link fence, lunchbox on his knees., School rooftop \u2014 late afternoon",
+  "reference": "projects/rooftop/characters/akira/base.png"
+}

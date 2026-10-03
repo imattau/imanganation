@@ -1,0 +1,230 @@
+# Exploration: imanganation as a GIMP plug-in
+
+Status: **exploration + working spike (PASS)**, 2026-10-04. This doc doesn't change the
+plan yet. It suggests how the plan would shift if a GIMP plug-in became the final
+interface.
+
+## The workflow
+
+**The AI makes panels and the artist makes pages.** The engine renders one text-free
+panel at a time. Every page is built **by hand** in GIMP: the artist decides the layout,
+draws each frame, places each panel into it, then letters it. The plug-in never lays
+out, sizes, or arranges anything on a page. It only answers one question: "what's the
+next panel, and can you drop it into the frame I've selected?"
+
+```
+artist's page template in GIMP (frame lines on a layer named "Template…")
+   │
+   ├─ click inside a frame (Fuzzy Select)
+   ├─ Filters → imanganation → Render Panel into Frame
+   │      plug-in ──POST /jobs {seq, frame w×h}──▶ engine ──▶ ComfyUI
+   │      renders the next script panel at the frame's proportions (~15 s)
+   │      ◀── panels/003.png ── placed, clipped to the frame, beneath the frame lines
+   └─ click the next frame … repeat; new page image whenever the artist decides
+```
+
+## Why GIMP fits this project
+
+PLAN.md already has two gaps that GIMP fills by design:
+
+1. **Panels are text-free on purpose.** Someone still has to letter them: speech
+   bubbles, SFX, captions. GIMP's text layers, paths and brushes are where that work
+   happens.
+2. **The engine renders one panel per image and never composites.** A page still has
+   to be assembled: panel frames, gutters, bleed. That's the artist's job, done by hand
+   in GIMP. It keeps the engine's "one panel per image" rule intact.
+
+GIMP also gives three things for free that a custom web UI would have to build:
+**selections as masks** (inpaint or fix a hand), **layer history and undo**, and
+**XCF as the project file**.
+
+## Built so far
+
+`gimp/imanganation/imanganation.py` is installed by symlink into
+`~/.config/GIMP/3.2/plug-ins/imanganation`. It adds four commands under *Filters →
+imanganation*:
+
+- **Render Panel into Frame…** (the main flow): needs a selection, which is the target
+  frame. It sends the next panel's `seq` and the frame's size to the engine, which
+  picks the ~1 MP SDXL size on the 64-px grid closest to the frame's ratio (e.g.
+  522×640 → 896×1088). It polls with a progress bar, then places the result clipped
+  to the frame. The frame is saved to a channel while rendering, so the artist can
+  keep clicking. Seed, size and prompt are stored on the layer for a later
+  regenerate.
+- **Refine Panel (Hi-res)…**: select a placed panel (its layer or group). The plug-in
+  sends the exact take that layer shows to the engine's hi-res fix (`POST /refine`
+  with `source`: polish + Real-ESRGAN, `docs/phase6a.md`). The result is swapped in
+  at the same footprint and mask, and the previous take is kept, hidden. *Scale* and
+  *Polish* default to `settings.yaml`.
+- **Place Next Panel…**: same, for panels that are already rendered. It reads `<project>/panels.json`, takes the next panel in script
+  order, and fits `panels/{seq:03d}*.png` into the current selection. A small
+  `gimp_cursor.json` in the project tracks where you are, so it carries across page
+  images. Set *Panel number* to place a specific panel again (this doesn't move the
+  cursor). The script's page numbers only show up in a note like "the script starts a
+  new page here". They never restrict which image a panel goes into.
+- **Place Panel…**: places any PNG manually.
+
+**Which take gets placed:** the newest file matching `panels/{seq:03d}*.png` by
+modification time. A fresh retake beats an older hi-res, and a hi-res made from the
+current take beats that take. Name order can't do this, because `003_hires` sorts
+before `003_take02`. Every placed layer records the exact `file` it shows.
+
+**Template handling.** Name the frame-lines layer `Template…`. New panels go directly
+beneath it. A Normal-mode (opaque white page) template is switched to Multiply so
+panels show through the white. The template is re-selected after each placement, so
+the next Fuzzy Select click samples the frames, not the last render.
+
+**Engine.** `uv run manganation serve` (127.0.0.1:8790) exposes `POST /jobs`,
+`GET /jobs/{id}` and `GET /health`. One worker thread means one render at a time on
+the GPU. Projects must live under `projects/`. `uv run manganation render <project>
+<seq> --width W --height H` does the same thing without GIMP. Code is in
+`render/panel.py` and `web/api.py`, tests in `tests/test_render_panel.py`.
+
+`gimp/smoke_test.py` (placement, no GPU) and `gimp/render_smoke_test.py` (live: needs
+ComfyUI and the engine running) run headless against GIMP 3.2.6 (flatpak):
+
+| Check | Result |
+|---|---|
+| Plug-in registers in GIMP 3.2 (Python, GI) | ✅ |
+| Plug-in reaches local ComfyUI over HTTP from inside the flatpak sandbox | ✅ `ok 200` |
+| Plug-in loads a rendered panel PNG straight from the project dir (host fs shared) | ✅ |
+| Panel is fitted to the selected frame, clipped by a mask, and placed in a `Panel p.n` group | ✅ |
+| PanelSpec JSON is attached as a persistent parasite and survives XCF save and reload | ✅ |
+| Next Panel walks `panels.json` in order into hand-drawn frames; cursor advances | ✅ |
+| Dialogue/SFX arrive as **hidden** text layers in the panel group (lettering reference) | ✅ |
+| Unrendered panel gives a clear "not rendered yet: expected panels/003*.png" and doesn't advance | ✅ |
+| **Live** (`gimp/refine_smoke_test.py`): refine a placed panel → 1920×2048 hi-res swapped in at the same footprint and mask, old take hidden, selection kept; next placement picks the newer `_hires` | ✅ |
+| **Live:** opaque template, three Fuzzy Select clicks → three real renders sized to each frame, placed beneath the frame lines, template re-selected each time, cursor → 4 | ✅ |
+
+Environment facts that shape the design:
+
+- The flatpak's Python is **3.14** with `gi` only: **no numpy, PIL, pydantic or httpx**.
+  The plug-in can't import `manganation`. The venv is 3.12 and its wheels are compiled
+  for 3.12.
+- The flatpak has `network` and `filesystems=host`, so HTTP to `127.0.0.1` and direct
+  file paths both work.
+- The flatpak does **not** have `org.freedesktop.Flatpak`, so the plug-in can't
+  `flatpak-spawn --host` to start ComfyUI or the engine itself.
+- Panels are keyed by **position in `panels.json`** (`seq`), not page/panel. The
+  rooftop script legitimately repeats "page 2, panel 1" after `CUT TO:`. The Phase 3
+  renderer should write `panels/{seq:03d}.png` (or `{seq:03d}_take2.png` for retakes;
+  the newest match wins by name sort).
+- GIMP 3.x API quirk: `new_return_values()` pre-allocates the return slots, so you
+  overwrite them; `append` doesn't work. Expect more churn like this between 3.0, 3.2
+  and 3.4.
+
+## Architecture: thick engine, thin plug-in
+
+```
+GIMP (flatpak)                         host
+┌───────────────────────┐   HTTP    ┌──────────────────────────┐    ┌─────────┐
+│ imanganation.py       │ ───────▶  │ manganation engine       │──▶ │ ComfyUI │
+│ stdlib + gi only      │  JSON +   │ (FastAPI, uv venv)       │    └─────────┘
+│ - dialogs / menus     │  paths    │ script · characters ·    │    ┌─────────┐
+│ - layers, masks, XCF  │ ◀───────  │ prompts · jobs · memory  │──▶ │ Ollama  │
+│ - parasites (spec)    │           └──────────────────────────┘    └─────────┘
+└───────────────────────┘        shared project dir (host fs)
+```
+
+- **Every bit of intelligence stays in the engine** (script parsing, character memory,
+  prompt building, ComfyUI workflows). The plug-in only moves pixels and metadata in
+  and out of the document.
+- **Images pass by file path, not by upload.** The engine writes to
+  `projects/<name>/panels/`, and the plug-in exports masks and reference crops to
+  `projects/<name>/tmp/`. Both sides can see the host filesystem.
+- **Jobs are async.** Use `POST /jobs` → `GET /jobs/{id}` polling. Renders take 11–16 s,
+  so the plug-in polls with `Gimp.progress_update` and doesn't block on one long request.
+- **The engine runs as a user service** (e.g. a systemd `--user` unit that also brings
+  up ComfyUI). The plug-in can't start it, so it has to show a clear "engine not
+  running" message.
+- The CLI and the GIMP plug-in talk to the **same engine code**, so the engine stays
+  testable without GIMP.
+
+## Mapping imanganation onto a GIMP document
+
+| imanganation | GIMP |
+|---|---|
+| Project | folder: `panels.json`, `panels/`, `gimp_cursor.json`, plus the artist's XCFs |
+| Page | an image the artist creates, sized and laid out by hand |
+| Panel frame | the artist's selection (rectangle, polygon, anything). Later it could also pass its size to the renderer |
+| Panel render | layer inside a `Panel p.n` group, clipped by a frame mask |
+| PanelSpec + seed + model/workflow version | persistent **parasite** on the render layer |
+| Revisions | sibling layers in the group (hidden older takes) |
+| Lettering / SFX | done by hand. Script dialogue/SFX sit as hidden text layers in each group, for reference |
+| Character reference | engine registry. "Use layer as reference" exports a layer into it |
+
+## Candidate procedures (menu *Filters → imanganation*)
+
+Each one is a PDB procedure, so you can also script it from Python-Fu or batch mode.
+
+None of these create or arrange pages.
+
+1. **Render Panel into Frame** ✅ (built).
+2. **Place Next Panel** ✅ (built).
+3. **Regenerate Panel**: read the parasite, then re-render with the same seed (after
+   spec edits) or a new one. Adds a new take and hides the old one.
+4. **Inpaint Selection**: selection → mask, active layer → init image, short prompt →
+   engine img2img/inpaint → result layer clipped to the selection. Needs a new
+   ComfyUI inpaint workflow.
+5. **Set Character Reference from Layer**.
+6. **Engine Status…**: health, queue and VRAM.
+7. **Refine Panel (Hi-res)** ✅ (built on Phase 6a's `/refine`).
+
+## Risks and trade-offs
+
+| Risk | Notes / mitigation |
+|---|---|
+| **No Python dockable panels in GIMP 3** | Each action is a dialog. For a persistent "storyboard" view, open a non-modal GTK window from a long-lived plug-in with `GLib.timeout_add` polling. This works, but it's clunkier than a real dock |
+| **Krita is the stronger host for live AI painting** | Krita AI Diffusion (also on ComfyUI) has dockers, live mode and regions. If interactive painting-with-AI becomes a goal, reconsider. For script → panels → lettering → page, GIMP is adequate and a better fit for lettering and print prep |
+| GIMP 3.x API churn | Keep the plug-in small; pin a smoke test (`gimp/smoke_test.py`) per GIMP minor version |
+| Flatpak vs distro GIMP differ (Python version, sandbox) | Stdlib-only plug-in avoids dependency problems; engine URL is configurable |
+| Users without the engine/GPU | The plug-in degrades to "engine unreachable". Remote engine is possible later (the URL is just HTTP) |
+| B&W pages | The engine is colour-only (`docs/color-policy.md`). B&W, screentone and tone work are done by the artist in GIMP, on a colour panel that can always be redone |
+
+## Impact on PLAN.md (adopted 2026-10-04)
+
+- **Interface:** the GIMP plug-in replaces the SvelteKit UI. There's no Node toolchain.
+  See "Where the old web-UI jobs went" below.
+- **Phase 3 renderer:** frame-sized renders (`render/panel.py`), outputs as
+  `panels/{seq:03d}.png` with a sidecar `.json` (seed, size, prompt), served through the
+  async job API (`web/api.py`).
+- **Phase 4:** regional multi-character references were built on top of it. Still to
+  add: an inpaint/img2img workflow for selection-driven fixes.
+- **Quality:** the stock SDXL IP-Adapter breaks on NoobAI (tiled, glowing panels).
+  Fixed by switching to NoobAI's own IP-Adapter Mark 1 + ViT-bigG, with single-figure
+  references. See `docs/quality/2026-10-04_live_quality_check.md`. Open: two-shot
+  identity bleed.
+- **"No page compositing" holds for the whole system.** Pages are made by hand in
+  GIMP. Neither the engine nor the plug-in makes layout decisions.
+- **New requirement:** the engine runs as a background user service, managed outside
+  GIMP.
+
+### Where the old web-UI jobs went
+
+| Planned SvelteKit feature | Now |
+|---|---|
+| Script import / parse | CLI: `manganation script parse` |
+| Character manager (designs, references) | CLI: `manganation character …`. GIMP: *Set Character Reference from Layer* (planned) |
+| Storyboard view, per-panel regenerate | The page in GIMP is the storyboard. *Regenerate Panel* (planned) reads the layer's parasite |
+| B&W / colour toggle | Gone: engine is colour-only, B&W is done in GIMP |
+| Project save/load | Project folder + the artist's XCF files |
+| Progress / status overview | Not covered yet. If needed: *Engine Status…* in GIMP, or a plain HTML page served by FastAPI (no build step) |
+
+## Try it
+
+```bash
+./scripts/comfy.sh start
+```
+
+```bash
+uv run manganation serve
+```
+
+```bash
+flatpak run org.gimp.GIMP
+```
+
+Open your page template and name its frame-lines layer `Template`. Click inside a
+frame with Fuzzy Select, then run *Filters → imanganation → Render Panel into Frame…*
+and pick the project folder (GIMP remembers it after the first run). Click the next
+frame and repeat.

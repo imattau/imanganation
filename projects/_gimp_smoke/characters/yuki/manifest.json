@@ -1,0 +1,41 @@
+{
+  "name": "Yuki",
+  "aliases": [],
+  "appearance": {
+    "gender": "1girl",
+    "age": "",
+    "hair_color": "messy white bob with pink tips",
+    "hair_style": "loose pigtails tied with red ribbons",
+    "eye_color": "amber eyes",
+    "skin": "",
+    "build": "",
+    "outfit": "navy blue sailor collar school uniform with red necktie and pleated skirt",
+    "accessories": [
+      "white wristwatch",
+      "silver hair barrettes"
+    ],
+    "distinguishing": [
+      "wide toothed grin",
+      "snowflake pin on blazer lapel"
+    ],
+    "descriptors": [
+      "energetic stance",
+      "slightly messy strands flying"
+    ]
+  },
+  "versions": [
+    {
+      "id": "base",
+      "kind": "base",
+      "image": "characters/yuki/base.png",
+      "prompt": "1girl, messy white bob with pink tips, loose pigtails tied with red ribbons, amber eyes, navy blue sailor collar school uniform with red necktie and pleated skirt, white wristwatch, silver hair barrettes, wide toothed grin, snowflake pin on blazer lapel, energetic stance, slightly messy strands flying, masterpiece, best quality, solo, 1 character, cowboy shot, looking at viewer, facing viewer, simple white background, clean lineart, anime, highly detailed",
+      "seed": 777,
+      "parent": null,
+      "note": "auto design sheet (1girl)",
+      "created_at": "2026-10-03T22:41:57.407329Z"
+    }
+  ],
+  "default_version": "base",
+  "source": "auto",
+  "notes": ""
+}

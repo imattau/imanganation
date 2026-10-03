@@ -1,0 +1,10 @@
+# Point ComfyUI at imanganation's model store.
+# Launch with: python main.py --extra-model-paths-config <this file>
+imanganation:
+    base_path: /home/lostcause/workspace/imanganation/models
+    checkpoints: checkpoints
+    loras: loras
+    ipadapter: ipadapter
+    controlnet: controlnet
+    clip_vision: ipadapter
+    upscale_models: upscale_models

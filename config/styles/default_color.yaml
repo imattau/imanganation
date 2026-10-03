@@ -1,0 +1,6 @@
+name: default_color
+color_mode: color
+checkpoint: primary
+loras: []
+prompt_prefix: "manga panel, anime illustration, "
+negative: "text, speech bubble, watermark, signature, monochrome, greyscale, lowres, bad anatomy, worst quality, low quality"

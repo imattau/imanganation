@@ -1,0 +1,86 @@
+{
+  "characters": [
+    {
+      "name": "Akira",
+      "aliases": [],
+      "appearance": {
+        "gender": "1boy",
+        "age": "",
+        "hair_color": "messy charcoal brown with blue tips",
+        "hair_style": "medium length swept to left side covering right eye",
+        "eye_color": "amber eyes",
+        "skin": "",
+        "build": "",
+        "outfit": "white dress shirt tucked into navy pleated trousers, grey blazer and red necktie",
+        "accessories": [
+          "silver wristwatch",
+          "black canvas backpack strap visible on shoulder"
+        ],
+        "distinguishing": [
+          "loose collar button undone",
+          "small scar above left eyebrow"
+        ],
+        "descriptors": [
+          "quiet demeanor",
+          "relaxed slouch"
+        ]
+      },
+      "versions": [
+        {
+          "id": "base",
+          "kind": "base",
+          "image": "characters/akira/base.png",
+          "prompt": "solo focus, solo, 1 character, 1boy, messy charcoal brown with blue tips, medium length swept to left side covering right eye, amber eyes, white dress shirt tucked into navy pleated trousers, grey blazer and red necktie, silver wristwatch, black canvas backpack strap visible on shoulder, loose collar button undone, small scar above left eyebrow, quiet demeanor, relaxed slouch, masterpiece, best quality, cowboy shot, looking at viewer, facing viewer, simple white background, clean lineart, anime, highly detailed",
+          "seed": 1932743038,
+          "parent": null,
+          "note": "auto design sheet (solo focus)",
+          "created_at": "2026-10-03T23:32:34.193335Z"
+        }
+      ],
+      "default_version": "base",
+      "source": "auto",
+      "notes": ""
+    },
+    {
+      "name": "Yuki",
+      "aliases": [],
+      "appearance": {
+        "gender": "1girl",
+        "age": "",
+        "hair_color": "messy white bob with pink tips",
+        "hair_style": "loose pigtails tied with red ribbons",
+        "eye_color": "amber eyes",
+        "skin": "",
+        "build": "",
+        "outfit": "navy blue sailor collar school uniform with red necktie and pleated skirt",
+        "accessories": [
+          "white wristwatch",
+          "silver hair barrettes"
+        ],
+        "distinguishing": [
+          "wide toothed grin",
+          "snowflake pin on blazer lapel"
+        ],
+        "descriptors": [
+          "energetic stance",
+          "slightly messy strands flying"
+        ]
+      },
+      "versions": [
+        {
+          "id": "base",
+          "kind": "base",
+          "image": "characters/yuki/base.png",
+          "prompt": "1girl, messy white bob with pink tips, loose pigtails tied with red ribbons, amber eyes, navy blue sailor collar school uniform with red necktie and pleated skirt, white wristwatch, silver hair barrettes, wide toothed grin, snowflake pin on blazer lapel, energetic stance, slightly messy strands flying, masterpiece, best quality, solo, 1 character, character reference sheet, full body, standing, front view, arms at sides, simple white background, clean lineart, anime, highly detailed",
+          "seed": 1554774908,
+          "parent": null,
+          "note": "auto design sheet (1girl)",
+          "created_at": "2026-10-03T21:41:47.228732Z"
+        }
+      ],
+      "default_version": "base",
+      "source": "auto",
+      "notes": ""
+    }
+  ]
+}

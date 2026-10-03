@@ -1,0 +1,152 @@
+{
+  "title": "rooftop_canonical",
+  "reading_order": "rtl",
+  "default_color_mode": "bw",
+  "panels": [
+    {
+      "page": 1,
+      "panel": 1,
+      "reading_order": "rtl",
+      "scene_heading": "School rooftop — late afternoon",
+      "location": "",
+      "characters": [
+        "Akira"
+      ],
+      "action": "Wide shot. Akira sits alone against the chain-link fence, lunchbox on his knees.",
+      "camera": "wide shot",
+      "expressions": {},
+      "dialogue": [
+        {
+          "speaker": "Akira",
+          "text": "Finally, some peace and quiet.",
+          "kind": "speech"
+        }
+      ],
+      "sfx": [],
+      "notes": "",
+      "flashback": false,
+      "color_mode": "inherit",
+      "aspect_ratio": "1:1",
+      "refs": {},
+      "seed": null
+    },
+    {
+      "page": 1,
+      "panel": 2,
+      "reading_order": "rtl",
+      "scene_heading": "School rooftop — late afternoon",
+      "location": "",
+      "characters": [
+        "Yuki"
+      ],
+      "action": "Close-up. Akira's head snaps up, eyes wide.",
+      "camera": "close-up",
+      "expressions": {},
+      "dialogue": [
+        {
+          "speaker": "Yuki",
+          "text": "There you are!",
+          "kind": "speech"
+        }
+      ],
+      "sfx": [
+        "BANG"
+      ],
+      "notes": "",
+      "flashback": false,
+      "color_mode": "inherit",
+      "aspect_ratio": "1:1",
+      "refs": {},
+      "seed": null
+    },
+    {
+      "page": 2,
+      "panel": 1,
+      "reading_order": "rtl",
+      "scene_heading": "School rooftop — cont.",
+      "location": "",
+      "characters": [
+        "Yuki",
+        "Akira"
+      ],
+      "action": "Two-shot. Yuki stands over him, hands on her hips, grinning.",
+      "camera": "two-shot",
+      "expressions": {},
+      "dialogue": [
+        {
+          "speaker": "Yuki",
+          "text": "You're impossible to find, you know that?",
+          "kind": "speech"
+        },
+        {
+          "speaker": "Akira",
+          "text": "Not again...",
+          "kind": "thought"
+        }
+      ],
+      "sfx": [],
+      "notes": "",
+      "flashback": false,
+      "color_mode": "inherit",
+      "aspect_ratio": "1:1",
+      "refs": {},
+      "seed": null
+    },
+    {
+      "page": 2,
+      "panel": 2,
+      "reading_order": "rtl",
+      "scene_heading": "School rooftop — cont.",
+      "location": "",
+      "characters": [
+        "Akira"
+      ],
+      "action": "Reaction shot. Akira sighs, shoulders slumping.",
+      "camera": "reaction shot",
+      "expressions": {},
+      "dialogue": [
+        {
+          "speaker": "Akira",
+          "text": "What do you want, Yuki?",
+          "kind": "speech"
+        }
+      ],
+      "sfx": [],
+      "notes": "keep his uniform consistent with the character sheet",
+      "flashback": false,
+      "color_mode": "inherit",
+      "aspect_ratio": "1:1",
+      "refs": {},
+      "seed": null
+    },
+    {
+      "page": 2,
+      "panel": 1,
+      "reading_order": "rtl",
+      "scene_heading": "School rooftop — cont.",
+      "location": "the stairwell",
+      "characters": [
+        "Yuki"
+      ],
+      "action": "Medium shot. Yuki drags Akira by the wrist down the stairs.",
+      "camera": "medium shot",
+      "expressions": {},
+      "dialogue": [
+        {
+          "speaker": "Yuki",
+          "text": "Come on, you're going to miss it!",
+          "kind": "speech"
+        }
+      ],
+      "sfx": [
+        "CLATTER"
+      ],
+      "notes": "",
+      "flashback": false,
+      "color_mode": "inherit",
+      "aspect_ratio": "1:1",
+      "refs": {},
+      "seed": null
+    }
+  ]
+}

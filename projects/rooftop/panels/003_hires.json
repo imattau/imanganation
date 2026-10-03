@@ -1,0 +1,10 @@
+{
+  "path": "/home/lostcause/workspace/imanganation/projects/rooftop/panels/003_hires.png",
+  "seq": 3,
+  "source": "/home/lostcause/workspace/imanganation/projects/rooftop/panels/003.png",
+  "width": 2048,
+  "height": 2048,
+  "upscaler": "realesrgan",
+  "denoise": 0.25,
+  "seed": 0
+}
