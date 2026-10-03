@@ -24,6 +24,7 @@ render.
 """
 
 import json
+import random
 import sys
 import time
 import urllib.error
@@ -40,6 +41,7 @@ PROC_RENDER = "plug-in-imanganation-render-panel"
 PROC_NEXT = "plug-in-imanganation-place-next-panel"
 PROC_PLACE = "plug-in-imanganation-place-panel"
 PROC_REFINE = "plug-in-imanganation-refine-panel"
+PROC_REGEN = "plug-in-imanganation-regenerate-panel"
 PARASITE = "imanganation-panelspec"
 CURSOR_FILE = "gimp_cursor.json"  # per project: which panel comes next
 ENGINE_URL = "http://127.0.0.1:8790"
@@ -311,17 +313,83 @@ def _panel_layer(drawables):
     return None
 
 
-def refine_panel(procedure, run_mode, image, drawables, config, data):
+def _selected_panel(drawables):
+    """-> (layer, meta, seq, source Path) for the selected placed panel, or raise
+    ValueError with a message for the artist."""
     layer = _panel_layer(drawables)
     if layer is None:
-        return _error(procedure, "Select a placed imanganation panel (its layer or group).")
+        raise ValueError("Select a placed imanganation panel (its layer or group).")
     meta = json.loads(bytes(layer.get_parasite(PARASITE).get_data()))
     seq = meta.get("seq")
     source = meta.get("file") or (meta.get("render") or {}).get("path")
     if not seq or not source:
-        return _error(procedure, "This layer has no panel number or source file "
-                                 "(placed with Place Panel?). Re-place it with Place Next Panel.")
-    source = Path(source)
+        raise ValueError("This layer has no panel number or source file (placed with "
+                         "Place Panel?). Re-place it with Place Next Panel.")
+    return layer, meta, seq, Path(source)
+
+
+def _frame_box(image, layer):
+    """The panel's frame as (x, y, w, h): its mask's extent, else the layer itself."""
+    _, ox, oy = layer.get_offsets()
+    own = (ox, oy, layer.get_width(), layer.get_height())
+    mask = layer.get_mask()
+    if mask is None:
+        return own
+    saved = Gimp.Selection.save(image)
+    try:
+        image.select_item(Gimp.ChannelOps.REPLACE, mask)
+        _, non_empty, x1, y1, x2, y2 = Gimp.Selection.bounds(image)
+        image.select_item(Gimp.ChannelOps.REPLACE, saved)
+    finally:
+        image.remove_channel(saved)
+    return (x1, y1, x2 - x1, y2 - y1) if non_empty else own
+
+
+def _swap_in(image, old, path, stored, name):
+    """Put a new take of ``old``'s panel beside it: same group, cover-fitted to the
+    panel's frame, same frame mask. The old take is kept, hidden; selection untouched.
+
+    Fit to the frame, not the old layer: the old take already overhangs the frame, so
+    covering *it* would crop more than necessary when the new take's shape differs."""
+    fx, fy, fw, fh = _frame_box(image, old)
+    image.undo_group_start()
+    saved = Gimp.Selection.save(image)  # the artist's selection, restored below
+    try:
+        new = Gimp.file_load_layer(Gimp.RunMode.NONINTERACTIVE, image,
+                                   Gio.File.new_for_path(path))
+        new.set_name(name)
+        image.insert_layer(new, old.get_parent(), image.get_item_position(old))
+        s = max(fw / new.get_width(), fh / new.get_height())
+        nw, nh = round(new.get_width() * s), round(new.get_height() * s)
+        new.scale(nw, nh, False)
+        new.set_offsets(fx + (fw - nw) // 2, fy + (fh - nh) // 2)
+        mask = old.get_mask()
+        if mask is not None:
+            image.select_item(Gimp.ChannelOps.REPLACE, mask)
+            new.add_mask(new.create_mask(Gimp.AddMaskType.SELECTION))
+        new.attach_parasite(Gimp.Parasite.new(
+            PARASITE, Gimp.PARASITE_PERSISTENT, list(json.dumps(stored).encode())))
+        old.set_visible(False)
+        image.select_item(Gimp.ChannelOps.REPLACE, saved)
+    finally:
+        image.remove_channel(saved)
+        image.undo_group_end()
+    template = _find_template(image)
+    if template is not None:
+        image.set_selected_layers([template])
+    Gimp.displays_flush()
+    return new
+
+
+def _base_name(layer):
+    return layer.get_name().rsplit(" render", 1)[0].rsplit(" hi-res", 1)[0].rsplit(" take", 1)[0]
+
+
+def refine_panel(procedure, run_mode, image, drawables, config, data):
+    try:
+        layer, meta, seq, source = _selected_panel(drawables)
+    except ValueError as exc:
+        return _error(procedure, str(exc))
 
     if run_mode == Gimp.RunMode.INTERACTIVE and not _dialog(procedure, config, PROC_REFINE):
         return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
@@ -337,38 +405,76 @@ def refine_panel(procedure, run_mode, image, drawables, config, data):
     except EngineError as exc:
         return _error(procedure, str(exc))
 
-    image.undo_group_start()
-    saved = Gimp.Selection.save(image)  # the artist's selection, restored below
-    try:
-        hires = Gimp.file_load_layer(Gimp.RunMode.NONINTERACTIVE, image,
-                                     Gio.File.new_for_path(result["path"]))
-        hires.set_name(layer.get_name().replace(" render", "") + " hi-res")
-        image.insert_layer(hires, layer.get_parent(), image.get_item_position(layer))
-        # Same footprint as the take it replaces, but with the extra pixels.
-        hires.scale(layer.get_width(), layer.get_height(), False)
-        _, ox, oy = layer.get_offsets()
-        hires.set_offsets(ox, oy)
-        mask = layer.get_mask()
-        if mask is not None:
-            image.select_item(Gimp.ChannelOps.REPLACE, mask)
-            hires.add_mask(hires.create_mask(Gimp.AddMaskType.SELECTION))
-        stored = dict(meta, file=result["path"],
-                      refined={k: result.get(k) for k in ("source", "width", "height",
-                                                          "upscaler", "denoise", "seed")})
-        hires.attach_parasite(Gimp.Parasite.new(
-            PARASITE, Gimp.PARASITE_PERSISTENT, list(json.dumps(stored).encode())))
-        layer.set_visible(False)  # keep the previous take, hidden
-        image.select_item(Gimp.ChannelOps.REPLACE, saved)
-    finally:
-        image.remove_channel(saved)
-        image.undo_group_end()
-    template = _find_template(image)
-    if template is not None:
-        image.set_selected_layers([template])
-    Gimp.displays_flush()
+    stored = dict(meta, file=result["path"],
+                  refined={k: result.get(k) for k in ("source", "width", "height",
+                                                      "upscaler", "denoise", "seed")})
+    hires = _swap_in(image, layer, result["path"], stored, f"{_base_name(layer)} hi-res")
     Gimp.message(f"Refined panel {seq:03d}: {result['width']}×{result['height']} "
                  f"(previous take kept, hidden).")
     return _success(procedure, hires)
+
+
+def _recorded_seed(meta, source):
+    """The seed that *composed* ``source``. A hi-res take's own sidecar seed is the
+    refine polish seed, so follow its ``source`` back to the original render."""
+    if "refined" not in meta and (meta.get("render") or {}).get("seed") is not None:
+        return meta["render"]["seed"]
+    path = Path((meta.get("refined") or {}).get("source") or source)
+    for _ in range(4):  # render <- hi-res (<- …), never loop forever
+        try:
+            side = json.loads(path.with_suffix(".json").read_text())
+        except (OSError, ValueError):
+            return None
+        if "upscaler" in side and side.get("source"):
+            path = Path(side["source"])
+            continue
+        return side.get("seed")
+    return None
+
+
+def regenerate_panel(procedure, run_mode, image, drawables, config, data):
+    try:
+        layer, meta, seq, source = _selected_panel(drawables)
+    except ValueError as exc:
+        return _error(procedure, str(exc))
+
+    if run_mode == Gimp.RunMode.INTERACTIVE and not _dialog(procedure, config, PROC_REGEN):
+        return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
+
+    root = source.parent.parent
+    try:
+        panels = json.loads((root / "panels.json").read_text())["panels"]
+        spec = panels[seq - 1]  # the script as it is *now*: edits apply
+    except (OSError, ValueError, KeyError, IndexError) as exc:
+        return _error(procedure, f"Panel {seq:03d} not found in {root / 'panels.json'}: {exc}")
+
+    if config.get_property("same-seed"):
+        seed = _recorded_seed(meta, source)
+        if seed is None:
+            return _error(procedure, "No seed is recorded for this take; untick Same seed.")
+    else:
+        # Explicit, so a seed pinned in the script can't hand back the same image.
+        seed = random.randrange(2**31)
+
+    _, _, fw, fh = _frame_box(image, layer)
+    body = {"project_dir": str(root), "seq": seq, "frame_width": fw, "frame_height": fh,
+            "seed": seed}
+    try:
+        result = _run_job(config.get_property("engine-url").rstrip("/"), "/jobs", body,
+                          f"Regenerating panel {seq:03d} (script page {spec['page']}, "
+                          f"panel {spec['panel']})…")
+    except EngineError as exc:
+        return _error(procedure, str(exc))
+
+    stored = dict(spec, seq=seq, file=result["path"],
+                  render={k: result.get(k) for k in ("seed", "width", "height", "prompt",
+                                                     "path")})
+    take = Path(result["path"]).stem.split("_", 1)[-1] if "_" in Path(result["path"]).stem \
+        else "take01"
+    new = _swap_in(image, layer, result["path"], stored, f"{_base_name(layer)} {take}")
+    Gimp.message(f"Regenerated panel {seq:03d} as {Path(result['path']).name} "
+                 f"(seed {seed}; previous take kept, hidden).")
+    return _success(procedure, new)
 
 
 def place_next_panel(procedure, run_mode, image, drawables, config, data):
@@ -427,11 +533,11 @@ class Imanganation(Gimp.PlugIn):
         return False, None, None
 
     def do_query_procedures(self):
-        return [PROC_RENDER, PROC_NEXT, PROC_REFINE, PROC_PLACE]
+        return [PROC_RENDER, PROC_NEXT, PROC_REGEN, PROC_REFINE, PROC_PLACE]
 
     def do_create_procedure(self, name):
         run = {PROC_RENDER: render_panel, PROC_NEXT: place_next_panel,
-               PROC_REFINE: refine_panel,
+               PROC_REFINE: refine_panel, PROC_REGEN: regenerate_panel,
                PROC_PLACE: place_panel}[name]
         proc = Gimp.ImageProcedure.new(self, name, Gimp.PDBProcType.PLUGIN, run, None)
         proc.set_image_types("*")
@@ -443,6 +549,23 @@ class Imanganation(Gimp.PlugIn):
         proc.set_attribution("imanganation", "imanganation", "2026")
         proc.add_layer_return_value(
             "layer", "Layer", "The placed panel layer", False, GObject.ParamFlags.READWRITE)
+
+        if name == PROC_REGEN:
+            proc.set_menu_label("Re_generate Panel...")
+            proc.set_documentation(
+                "Render a new take of the selected panel",
+                "Re-render the selected panel from the current script at its frame's "
+                "size, and swap the new take in at the same footprint and mask. The "
+                "previous take is kept, hidden.",
+                name)
+            proc.add_boolean_argument(
+                "same-seed", "Same _seed",
+                "Reuse this take's seed (keep the composition, apply script edits); "
+                "off = a new random take", False, GObject.ParamFlags.READWRITE)
+            proc.add_string_argument(
+                "engine-url", "_Engine URL", "imanganation engine (manganation serve)",
+                ENGINE_URL, GObject.ParamFlags.READWRITE)
+            return proc
 
         if name == PROC_REFINE:
             proc.set_menu_label("Re_fine Panel (Hi-res)...")

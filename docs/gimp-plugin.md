@@ -41,7 +41,7 @@ GIMP also gives three things for free that a custom web UI would have to build:
 ## Built so far
 
 `gimp/imanganation/imanganation.py` is installed by symlink into
-`~/.config/GIMP/3.2/plug-ins/imanganation`. It adds four commands under *Filters →
+`~/.config/GIMP/3.2/plug-ins/imanganation`. It adds five commands under *Filters →
 imanganation*:
 
 - **Render Panel into Frame…** (the main flow): needs a selection, which is the target
@@ -51,6 +51,13 @@ imanganation*:
   to the frame. The frame is saved to a channel while rendering, so the artist can
   keep clicking. Seed, size and prompt are stored on the layer for a later
   regenerate.
+- **Regenerate Panel…**: select a placed panel (its layer or group). It is re-rendered
+  from the **current** `panels.json`, so script edits apply, at its frame's size. The
+  new take (`003_take02.png`…) goes into the same group, cover-fitted to the frame
+  with the same mask, and the previous take is kept, hidden. Default is a new random
+  seed. *Same seed* reuses the seed that composed the take (traced back through a
+  hi-res refine to the original render), keeping the composition while applying
+  your edits. The script cursor is not moved.
 - **Refine Panel (Hi-res)…**: select a placed panel (its layer or group). The plug-in
   sends the exact take that layer shows to the engine's hi-res fix (`POST /refine`
   with `source`: polish + Real-ESRGAN, `docs/phase6a.md`). The result is swapped in
@@ -93,6 +100,7 @@ ComfyUI and the engine running) run headless against GIMP 3.2.6 (flatpak):
 | Next Panel walks `panels.json` in order into hand-drawn frames; cursor advances | ✅ |
 | Dialogue/SFX arrive as **hidden** text layers in the panel group (lettering reference) | ✅ |
 | Unrendered panel gives a clear "not rendered yet: expected panels/003*.png" and doesn't advance | ✅ |
+| **Live** (`gimp/regenerate_smoke_test.py`): regenerate a placed hi-res take → *same seed* recovers the original render's seed, *new seed* gives a fresh take; both cover the frame tightly with its mask, the previous take hidden, the selection and cursor untouched | ✅ |
 | **Live** (`gimp/refine_smoke_test.py`): refine a placed panel → 1920×2048 hi-res swapped in at the same footprint and mask, old take hidden, selection kept; next placement picks the newer `_hires` | ✅ |
 | **Live:** opaque template, three Fuzzy Select clicks → three real renders sized to each frame, placed beneath the frame lines, template re-selected each time, cursor → 4 | ✅ |
 
@@ -161,8 +169,7 @@ None of these create or arrange pages.
 
 1. **Render Panel into Frame** ✅ (built).
 2. **Place Next Panel** ✅ (built).
-3. **Regenerate Panel**: read the parasite, then re-render with the same seed (after
-   spec edits) or a new one. Adds a new take and hides the old one.
+3. **Regenerate Panel** ✅ (built).
 4. **Inpaint Selection**: selection → mask, active layer → init image, short prompt →
    engine img2img/inpaint → result layer clipped to the selection. Needs a new
    ComfyUI inpaint workflow.
