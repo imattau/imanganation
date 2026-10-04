@@ -229,7 +229,7 @@ def test_api_inpaint_endpoint(tmp_path):
     project = _project(tmp_path / "proj")
 
     def fake(path, seq, *, mask, prompt, source=None, denoise=None, grow_mask_by=None,
-             seed=None):
+             seed=None, characters=None, character_weight=None):
         return InpaintResult(path=str(project / "panels/001_inpaint.png"), seq=seq,
                              source=str(project / "panels/001.png"), mask=str(mask),
                              prompt=prompt, width=128, height=128, denoise=denoise or 0.85,

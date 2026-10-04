@@ -120,6 +120,18 @@ class InpaintRequest(BaseModel):
     denoise: float | None = Field(default=None, gt=0, le=1)
     grow_mask_by: int | None = Field(default=None, ge=0, le=256)
     seed: int | None = None
+    # Who is in the patch: names, or container-style {"name", "version"}. Their traits
+    # join the prompt; with exactly one, their reference guides it (on-model faces).
+    characters: list[str | dict] | None = None
+    # Identity strength for a single named character (IP-Adapter weight); default from
+    # settings. Lower lets the prompt change more (e.g. an expression), higher holds
+    # the reference closer.
+    character_weight: float | None = Field(default=None, ge=0, le=1.5)
+
+    def character_list(self) -> list[dict] | None:
+        if not self.characters:
+            return None
+        return [c if isinstance(c, dict) else {"name": c} for c in self.characters]
 
     @model_validator(mode="after")
     def _one_form(self):
@@ -381,7 +393,8 @@ def create_app(
                 "inpaint", req.model_dump(exclude_none=True),
                 lambda: inpaint_inline(req.project, src, mask, prompt=req.prompt,
                                        denoise=req.denoise, grow_mask_by=req.grow_mask_by,
-                                       seed=req.seed),
+                                       seed=req.seed, characters=req.character_list(),
+                                       character_weight=req.character_weight),
             )
         project = resolve_project(req.project_dir, root)
         req.project_dir = str(project)
@@ -393,7 +406,9 @@ def create_app(
             "inpaint", req.model_dump(),
             lambda: inpaint(Path(req.project_dir), req.seq, mask=mask, prompt=req.prompt,
                             source=source, denoise=req.denoise,
-                            grow_mask_by=req.grow_mask_by, seed=req.seed),
+                            grow_mask_by=req.grow_mask_by, seed=req.seed,
+                            characters=req.character_list(),
+                            character_weight=req.character_weight),
         )
 
     @app.get("/characters")

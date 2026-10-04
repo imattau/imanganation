@@ -25,6 +25,31 @@ mask ──▶ bbox + context ──▶ crop (take + mask) ──▶ resize to ~
   grown by `grow_mask_by` and Gaussian-softened. Outside that, pixels are the
   original's exactly, guaranteed in Python rather than relying on the graph.
 
+## Character identity
+
+Without it, repainting a face draws *a* character: "surprised face" on Yuki gave a
+different girl (`docs/quality/2026-10-04_inpaint_identity.png`). Requests name who is
+in the patch (`characters`):
+
+- Their **appearance traits** join the prompt, *after* the artist's prompt, which says
+  what to paint.
+- With **exactly one** character, IP-Adapter (the project's adapter) guides the patch
+  with their reference (`version` honoured) at `ipadapter_weight` (0.45), or the
+  request's `character_weight`. Several: traits only, since one reference would pull
+  every face to one identity.
+- **Expression/pose words are dropped from the traits** (`identity_tags`). Character
+  traits store some ("wide toothed grin", "quiet demeanor", "relaxed slouch"), and they
+  overrode "surprised face, open mouth" even at IP-Adapter weight 0.3. Physical
+  distinguishing marks (a scar, a pin) stay.
+
+Live (Yuki, whole-face mask, same seed): no characters gave an open mouth on another
+face; Yuki without the filter gave her stored grin; Yuki with the filter at 0.45 gave
+her face, surprised.
+
+**Follow-up (characters):** the trait schema should keep expression/pose apart from
+appearance (e.g. a `default_expression` field). The same stored grin also fights a
+render's per-panel `expressions`, not just inpaint.
+
 ## Mask convention
 
 Either form works, **white/opaque = repaint**:

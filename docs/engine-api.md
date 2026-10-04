@@ -81,14 +81,22 @@ sidecars (`docs/phase6a.md`).
 
 ```json
 {"project": "prj_…", "source": "/abs/…/takes/….png", "mask": "/abs/…/masks/….png",
- "prompt": "lunchbox", "denoise": 0.85, "grow_mask_by": 8}
+ "prompt": "surprised face, open mouth", "characters": ["Yuki"],
+ "character_weight": 0.45, "denoise": 0.85, "grow_mask_by": 8}
 ```
 
 Crop-and-stitch, with outside-mask pixels kept exactly (`docs/inpaint.md`). Output:
 `outputs/<project>/<source stem>-inpaint-<random>.png`; record it as an `inpaint` take
 (`parent` = source, `engine.mask` = the mask copied into `masks/`).
-**Known gap:** inpaint carries no character identity (no character tags, no
-IP-Adapter), so repainting a face can drift off-model. It's fine for props and hands.
+**Character identity:** `characters` names who is in the patch (names, or
+`{"name", "version"}`). Their appearance traits follow the artist's prompt, and with
+exactly one character, IP-Adapter guides the patch with their reference (`version`
+honoured; `character_weight` overrides `defaults.inpaint.ipadapter_weight`, 0.45).
+With several characters, traits only. Expression and pose words are filtered out of the
+traits ("wide toothed grin", "quiet demeanor"), so the prompt decides the expression.
+Unknown characters or versions fail, listing what exists. Leave `characters` out for
+props and backgrounds. Recommended plug-in default: the panel's characters as choices,
+none preselected for a two-shot.
 
 ## Characters
 

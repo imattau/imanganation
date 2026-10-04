@@ -118,6 +118,7 @@ def inpaint(
     grow_mask_by: int = 8,
     mask_channel: str = "alpha",
     sampling: Sampling = Sampling(),
+    ipadapter: dict | None = None,
 ) -> dict:
     """Repaint only the masked region of an existing image.
 
@@ -135,8 +136,12 @@ def inpaint(
     ``mask_channel`` selects which channel of the uploaded mask image is the mask. Use a
     colour channel of an opaque white-on-black mask (what ``render.inpaint`` uploads):
     ComfyUI's ``alpha`` reads ``1 - alpha``, i.e. transparent = masked.
+
+    ``ipadapter`` (``ref_image``, ``ipadapter_file``, ``clip_name``, ``weight``) routes
+    the model through IP-Adapter with a character's reference, so a repainted face stays
+    on-model. Its nodes use ids 20-23 (8-15 are the inpaint chain's).
     """
-    return {
+    graph = {
         "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": ckpt}},
         "2": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["1", 1]}},
         "3": {"class_type": "CLIPTextEncode", "inputs": {"text": negative, "clip": ["1", 1]}},
@@ -190,6 +195,23 @@ def inpaint(
             "inputs": {"filename_prefix": prefix, "images": ["15", 0]},
         },
     }
+    if ipadapter is not None:
+        graph["20"] = {"class_type": "LoadImage", "inputs": {"image": ipadapter["ref_image"]}}
+        graph["21"] = {"class_type": "IPAdapterModelLoader",
+                       "inputs": {"ipadapter_file": ipadapter["ipadapter_file"]}}
+        graph["22"] = {"class_type": "CLIPVisionLoader",
+                       "inputs": {"clip_name": ipadapter["clip_name"]}}
+        graph["23"] = {
+            "class_type": "IPAdapterAdvanced",
+            "inputs": {
+                "model": ["1", 0], "ipadapter": ["21", 0], "image": ["20", 0],
+                "clip_vision": ["22", 0], "weight": ipadapter.get("weight", 0.6),
+                "weight_type": "linear", "combine_embeds": "concat",
+                "start_at": 0.0, "end_at": 1.0, "embeds_scaling": "V only",
+            },
+        }
+        graph["5"]["inputs"]["model"] = ["23", 0]
+    return graph
 
 
 def with_ipadapter(
