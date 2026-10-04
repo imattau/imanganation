@@ -91,8 +91,9 @@ def test_assemble_cast_uses_the_scripts_cast_block(tmp_path, monkeypatch):
         return AppearanceSpec(gender="1girl", hair_color="red hair")
 
     monkeypatch.setattr("manganation.characters.cast.derive_appearance", fake_derive)
-    script = parse_canonical("CHARACTERS\nRIN (aka Rinny): red hair, sharp eyes\n\n"
-                             "PAGE 1\nPanel 1: Akira looks at Rin.\nAKIRA: Hi.\n")
+    script = parse_canonical("[CHARACTERS]\nRIN (aka Rinny): red hair, sharp eyes\n"
+                             "AKIRA:\n\nPAGE 1\nPANEL 1\n[ACTION]\nAkira looks at Rin.\n"
+                             "[DIALOGUE]\nAKIRA: Hi.\n")
     reg = CharacterRegistry.from_path(tmp_path)
     plan = assemble_cast(script, "x", registry=reg, script_text="...")
     assert plan.names == ["Rin", "Akira"]
@@ -131,7 +132,7 @@ def test_api_queues_a_character_job(tmp_path):
 def test_api_parses_a_script_into_plain_dicts(tmp_path):
     client = TestClient(create_app(root=tmp_path, outputs=tmp_path / "out"))
     job = client.post("/scripts/parse", json={
-        "text": "CHARACTERS\nRIN: red hair\n\nPAGE 1\nPanel 1: Rin waves.\n"}).json()
+        "text": "[CHARACTERS]\nRIN: red hair\n\nPAGE 1\nPANEL 1\n[ACTION]\nRin waves.\n"}).json()
     assert job["kind"] == "parse"
     for _ in range(100):
         state = client.get(f"/jobs/{job['id']}").json()
@@ -142,3 +143,4 @@ def test_api_parses_a_script_into_plain_dicts(tmp_path):
     assert result["format"] == "canonical"
     assert result["cast"] == [{"name": "Rin", "aliases": [], "description": "red hair"}]
     assert result["panels"][0]["characters"] == ["Rin"]
+    assert result["problems"] == []

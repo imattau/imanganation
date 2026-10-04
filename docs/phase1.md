@@ -16,52 +16,55 @@ parsed into a validated list of `PanelSpec` objects, written as `panels.json`.
 
 ## Input formats
 
-**Canonical (deterministic path).** Token grammar, parsed by plain Python:
+**Script (deterministic path).** Pages of panels, each panel in labelled sections,
+parsed by plain Python. The user guide is [script-template.md](script-template.md), with
+a full example in [script-template.txt](script-template.txt):
 
 ```
-PAGE 7
-[SCENE: School rooftop — afternoon]
-[FLASHBACK START] / [FLASHBACK END]
+[CHARACTERS]
+AKIRA: 17, boy, messy black hair with blue tips, amber eyes, school uniform.
+YUKI (aka Yuki-chan): 16, girl, silver bob with pink tips, sailor uniform.
 
-Panel 1: Wide shot. Akira sits alone, eating lunch.
+PAGE 1
+[SCENE: School rooftop — afternoon]
+
+PANEL 1
+[SHOT: wide shot]
+[CHARACTERS: Akira]
+[EXPRESSIONS: Akira: content]
+[LOCATION: the fence]
+[ACTION]
+Akira sits alone, eating lunch.
+[DIALOGUE]
 AKIRA: Finally, some peace and quiet.
 AKIRA (thought): Not again...
-SFX: BANG
-CUT TO: the stairwell          -> annotates the NEXT panel's location
-[[any production note]]
+[SFX]
+BANG
+[NOTES]
+any production note
 ```
 
-- `PAGE n`, `Panel n:` (also `Panel n -`), `[SCENE: ...]`, `[FLASHBACK START/END]`,
-  `CHARACTER:` dialogue, `SPEAKER (kind):` for thought/whisper/shout/narration,
-  `SFX:`, `CUT TO:`, `[[notes]]`.
-- **Names normalised:** `AKIRA:` → `Akira` (stable key for the character registry).
-- **Camera auto-detected** from action prose (wide shot, close-up, dutch angle…).
+- Every line sits under a label, so nothing is guessed from a line's shape (a colon in
+  an action line is action). Lines that break the format come back as `problems`
+  (line number and message); New Project from Script shows them, the CLI prints them.
+- `[SCENE: …]` and `[FLASHBACK START/END]` apply to the panels after them;
+  `[LOCATION: …]` overrides one panel's place.
+- **Characters in a panel:** `[CHARACTERS: …]` when given (empty = nobody); otherwise
+  the speakers (never narration) plus cast members named in the action, as written or
+  in capitals. Aliases resolve to the cast name everywhere.
+- **Names normalised:** `AKIRA` → `Akira`. The cast block's descriptions are the
+  author's design and win over the LLM when traits are derived.
 - Dialogue is captured but **never rendered** (text-free panels).
-- **Writing a script:** [script-template.md](script-template.md) is the user guide, with
-  a full example in [script-template.txt](script-template.txt).
-- **Cast block (optional):** before the first page, `CHARACTERS` (or `CAST`) and one
-  unindented `NAME (aka Alias, Other): description` per character; indented lines
-  continue a description. Each description is the author's design and wins over the
-  LLM when traits are derived (`character suggest`, `POST /characters`).
-
-  ```
-  CHARACTERS
-  AKIRA: 17, boy, messy black hair with blue tips, amber eyes,
-    school uniform with red tie. Quiet loner, slouches.
-  YUKI (aka Yuki-chan): 16, girl, silver bob with pink tips, sailor uniform.
-  ```
-- **Characters in a panel:** its speakers, plus any known character (declared, by name or
-  alias, or speaking anywhere in the script) named in its action text as a whole word,
-  as written or in capitals ("Yuki drags Akira by the wrist" has both).
-- The tokenizer is `script/formats/canonical.py`, standard library only, so the GIMP
+- The parser is `script/formats/canonical.py`, standard library only, so the GIMP
   plug-in imports the same file (`gimp/imanganation/script_canonical.py` links to it).
 
 **Prose (LLM path).** Free-form story text is normalised by the local model,
 constrained by a **JSON schema** (Ollama structured outputs), then pydantic-validated.
 If validation fails once, a repair turn is appended and retried.
 
-Routing is automatic: canonical input never touches the LLM. A cast block is
-parsed the same way on both paths; the LLM only sees the story.
+Routing is automatic: a text with `PAGE` / `PANEL` lines is a script and never
+touches the LLM. A `[CHARACTERS]` block is read the same way on both paths; the LLM
+only sees the story.
 
 ## Interface
 

@@ -154,11 +154,12 @@ def test_project_from_a_script_is_a_valid_container(tmp_path):
     from gimp.imanganation.project_store import project_from_script
     from manganation.script.formats import canonical
 
-    text = ("CHARACTERS\nYUKI (aka Snow): silver bob\n\nPAGE 1\n"
+    text = ("[CHARACTERS]\nYUKI (aka Snow): silver bob\n\nPAGE 1\n"
             "[SCENE: School rooftop — late afternoon]\n"
-            "Panel 1: Wide shot. Yuki drags Akira by the wrist.\nAKIRA: Hey!\n"
-            "CUT TO: the stairwell\nPanel 2: Akira trips.\n"
-            "PAGE 2\n[SCENE: School rooftop - cont.]\nPanel 1: Yuki laughs.\n")
+            "PANEL 1\n[SHOT: wide shot]\n[ACTION]\nYuki drags Akira by the wrist.\n"
+            "[DIALOGUE]\nAKIRA: Hey!\n"
+            "PANEL 2\n[LOCATION: the stairwell]\n[ACTION]\nAkira trips.\n"
+            "PAGE 2\n[SCENE: School rooftop - cont.]\nPANEL 1\n[ACTION]\nYuki laughs.\n")
     document = project_from_script(canonical.parse(text), title="Rooftop",
                                    script_file="script/script.md", script_text=text,
                                    script_format="canonical")

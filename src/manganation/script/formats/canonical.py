@@ -1,196 +1,178 @@
-"""Deterministic parser for the canonical page/panel manga script format.
+"""Parser for imanganation scripts: pages of panels, each panel in labelled sections.
 
 Standard library only: the engine wraps the result in its pydantic models
 (:mod:`manganation.script.formats.mangaplay`), and the GIMP plug-in imports this same
 file (``gimp/imanganation/script_canonical.py`` is a symlink to it) to build a project
-from a script without the engine. Free-form prose goes through the engine's LLM
-parser instead (:mod:`manganation.script.parser`).
+from a script without the engine. Free-form prose (no ``PAGE`` / ``PANEL`` lines) goes
+through the engine's LLM parser instead (:mod:`manganation.script.parser`).
 
-Grammar (line-oriented, case-insensitive tokens):
+The format (user guide: docs/script-template.md)::
 
-    CHARACTERS                                    -> optional cast block, before
-    AKIRA: 17, boy, messy black hair, ...            the first page: one entry per
-      indented lines continue the description        character, NAME (aka A, B):
-    YUKI (aka Yuki-chan): 16, girl, silver bob       description
-    PAGE 7
-    [SCENE: School rooftop — afternoon]
+    [CHARACTERS]                       optional, before the first page
+    MIO: 15, girl, teal bob, ...       NAME (aka Alias, Other): description;
+      indented lines continue it
+
+    PAGE 1
+    [SCENE: Harbor pier — dawn]        for the panels after it
     [FLASHBACK START] / [FLASHBACK END]
-    Panel 1: Wide shot. Akira sits alone, eating lunch.
-    AKIRA: Finally, some peace and quiet.        -> dialogue
-    AKIRA (thought): ...                          -> thought
-    SFX: BANG                                     -> sfx
-    CUT TO: the classroom                         -> transition (new panel hint)
-    [[any note]]                                  -> notes
 
-A panel's characters are its speakers (not narration) plus any known character
-(declared in the cast block, by name or alias, or speaking anywhere in the script)
-named in its action text. ``[SCENE: ...]`` and ``[FLASHBACK START]`` apply to the
-panels that follow them. See docs/script-template.md.
+    PANEL 1
+    [SHOT: wide shot]                  one-line fields
+    [CHARACTERS: Mio, Kaito]           exactly who is in the picture
+    [EXPRESSIONS: Mio: grin; Kaito: bored]
+    [LOCATION: the boat]
+    [ACTION]                           sections: every line until the next header
+    Mio runs along the pier.           is of that kind (colons are just text)
+    [DIALOGUE]
+    MIO: Hurry up!                     SPEAKER: text / SPEAKER (kind): text
+    KAITO (thought): Why me.           kinds: thought, whisper, shout, narration
+    [SFX]
+    CREAK                              one sound per line
+    [NOTES]
+    Keep the earring visible.
+
+Sections need no end marker (``[END DIALOGUE]`` is accepted). Nothing is guessed: a
+line the format does not allow is reported in ``problems`` with its line number.
+Without ``[CHARACTERS: ...]`` a panel's characters are its speakers (not narration)
+plus known characters named in its action; without ``[SHOT: ...]`` the shot is read
+from the action.
 
 Output (plain dicts, keys as in ``PanelSpec`` / ``CastEntry``)::
 
     {"cast": [{"name", "aliases", "description"}],
      "panels": [{"page", "panel", "scene_heading", "location", "characters", "action",
-                 "camera", "dialogue": [{"speaker", "text", "kind"}], "sfx", "notes",
-                 "flashback"}]}
+                 "camera", "expressions", "dialogue": [{"speaker", "text", "kind"}],
+                 "sfx", "notes", "flashback"}],
+     "problems": [{"line": n, "message": "..."}]}
 """
 
 from __future__ import annotations
 
 import re
 
-# --- line recognisers -------------------------------------------------------
-
 _PAGE_RE = re.compile(r"^\s*PAGE\s+(\d+)\s*$", re.IGNORECASE)
-_PANEL_RE = re.compile(r"^\s*Panel\s+(\d+)\s*[:\-]\s*(.*)$", re.IGNORECASE)
-_SCENE_RE = re.compile(r"^\s*\[SCENE\s*:\s*(.*?)\]\s*$", re.IGNORECASE)
-_FLASH_START_RE = re.compile(r"^\s*\[FLASHBACK\s+START\]\s*$", re.IGNORECASE)
-_FLASH_END_RE = re.compile(r"^\s*\[FLASHBACK\s+END\]\s*$", re.IGNORECASE)
-_CUT_RE = re.compile(r"^\s*CUT\s+TO\s*:\s*(.*)$", re.IGNORECASE)
-_SFX_RE = re.compile(r"^\s*SFX\s*:\s*(.*)$", re.IGNORECASE)
-_NOTE_RE = re.compile(r"^\s*\[\[(.*?)\]\]\s*$", re.IGNORECASE)
-_CAST_RE = re.compile(r"^\s*(?:CHARACTERS|CAST)\s*:?\s*$", re.IGNORECASE)
-# NAME (aka Other, Another): description — unindented; indented lines continue it
-_CAST_ENTRY_RE = re.compile(
-    r"^(?P<name>[A-Za-z][\w .'\-]{0,30}?)"
-    r"(?:\s*\((?:aka|a\.k\.a\.?)\s+(?P<aliases>[^)]*)\))?"
-    r"\s*:\s*(?P<description>.*?)\s*$",
-    re.IGNORECASE,
-)
-# SPEAKER (kind): text  — speaker is 1-4 words, kind optional
+_PANEL_RE = re.compile(r"^\s*PANEL\s+(\d+)\s*$", re.IGNORECASE)
+# [NAME] or [NAME: value]
+_HEADER_RE = re.compile(r"^\s*\[\s*([A-Za-z][A-Za-z ]*?)\s*(?::\s*(.*?))?\s*\]\s*$")
 _DIALOGUE_RE = re.compile(
-    r"^\s*(?P<speaker>[A-Za-z][\w .'\-]{0,30}?)"
-    r"(?:\s*\((?P<kind>thought|whisper|shout|narration|speech)\))?"
-    r"\s*:\s*(?P<text>.+?)\s*$"
-)
-_KINDS = {"thought", "whisper", "shout", "narration", "speech"}
-# tokens that look like SPEAKER: but are not spoken dialogue
-_NON_DIALOGUE_TOKENS = {"scene", "sfx", "panel", "page", "cut to", "cut"}
+    r"^\s*(?P<speaker>[^\s:(][^:(]*?)\s*(?:\((?P<kind>[^)]*)\))?\s*:\s*(?P<text>.+?)\s*$")
+_CAST_ENTRY_RE = re.compile(
+    r"^(?P<name>[^\s:(][^:(]*?)\s*(?:\((?:aka|a\.k\.a\.?)\s+(?P<aliases>[^)]*)\))?"
+    r"\s*:\s*(?P<description>.*?)\s*$", re.IGNORECASE)
+KINDS = ("speech", "thought", "whisper", "shout", "narration")
+SECTIONS = {"ACTION": "action", "DIALOGUE": "dialogue", "DIALOG": "dialogue",
+            "SFX": "sfx", "NOTES": "notes", "NOTE": "notes"}
+FIELDS = {"SHOT", "CHARACTERS", "EXPRESSIONS", "LOCATION"}
 
-# camera / shot hints we can recognise inside a panel's action text
+# shots recognised in the action when a panel has no [SHOT: ...]
 _CAMERA_PATTERNS = [
-    "extreme close-up",
-    "close-up",
-    "wide shot",
-    "medium shot",
-    "full shot",
-    "establishing shot",
-    "over-the-shoulder",
-    "over the shoulder",
-    "bird's-eye",
-    "worm's-eye",
-    "low angle",
-    "high angle",
-    "dutch angle",
-    "pov",
-    "two-shot",
+    "extreme close-up", "close-up", "wide shot", "medium shot", "full shot",
+    "establishing shot", "over-the-shoulder", "over the shoulder", "bird's-eye",
+    "worm's-eye", "low angle", "high angle", "dutch angle", "pov", "two-shot",
     "reaction shot",
 ]
 
 
 def _detect_camera(text: str) -> str:
     low = text.lower()
-    for pat in _CAMERA_PATTERNS:
-        if pat in low:
-            return pat
-    return ""
+    return next((pattern for pattern in _CAMERA_PATTERNS if pattern in low), "")
 
 
 def canonical_name(name: str) -> str:
-    """Normalise a speaker/character name to a stable display form.
-
-    Manga scripts write speakers in ALL CAPS (``AKIRA:``); we store ``Akira`` so
-    names match across prose and canonical inputs and key the character registry
-    consistently.
-    """
-    name = name.strip()
-    if name.isupper():
-        return name.title()
-    return name
+    """``AKIRA`` -> ``Akira`` (scripts write names in capitals); others as written."""
+    name = " ".join(name.split())
+    return name.title() if name.isupper() else name
 
 
 def looks_canonical(text: str) -> bool:
-    """Heuristic: does this script already use the token grammar?"""
-    return bool(
-        _PAGE_RE.search(text)
-        or _PANEL_RE.search(text)
-        or re.search(r"^\s*Panel\s+\d+", text, re.IGNORECASE | re.MULTILINE)
-    )
-
-
-def _ends_cast(line: str) -> bool:
-    return bool(_PAGE_RE.match(line) or _PANEL_RE.match(line) or _SCENE_RE.match(line))
+    """Is this a page-and-panel script (rather than prose for the LLM)?"""
+    return any(_PAGE_RE.match(line) or _PANEL_RE.match(line) for line in text.splitlines())
 
 
 def split_cast(text: str) -> tuple[list[dict], str]:
-    """Take the ``CHARACTERS`` block off the front of a script.
+    """The ``[CHARACTERS]`` block at the top -> (cast, the rest with the block blanked,
+    so line numbers stay true). Used on its own for prose scripts."""
+    cast, _problems, rest = _read_cast(text.splitlines())
+    return cast, "\n".join(rest)
 
-    Returns the declared cast and the script without the block (its lines blanked in
-    place, so the rest parses exactly as before). The block ends at the first page,
-    panel or scene token.
-    """
-    lines = text.splitlines()
+
+def _read_cast(lines: list[str]) -> tuple[list[dict], list[dict], list[str]]:
     start = None
     for index, line in enumerate(lines):
-        if _ends_cast(line):
+        if _PAGE_RE.match(line) or _PANEL_RE.match(line):
             break
-        if _CAST_RE.match(line):
+        header = _HEADER_RE.match(line)
+        if header and header.group(1).upper() == "CHARACTERS" and header.group(2) is None:
             start = index
             break
     if start is None:
-        return [], text
+        return [], [], lines
     entries: list[dict] = []
+    problems: list[dict] = []
     end = len(lines)
     for index in range(start + 1, len(lines)):
         line = lines[index]
-        if _ends_cast(line):
+        if _PAGE_RE.match(line) or _PANEL_RE.match(line) or _HEADER_RE.match(line):
             end = index
             break
         if not line.strip():
             continue
         m = _CAST_ENTRY_RE.match(line) if not line[:1].isspace() else None
         if m:
-            aliases = [a.strip() for a in (m.group("aliases") or "").split(",") if a.strip()]
+            aliases = [canonical_name(a) for a in (m.group("aliases") or "").split(",")
+                       if a.strip()]
             entries.append({"name": canonical_name(m.group("name")), "aliases": aliases,
-                            "parts": [m.group("description")]})
-        elif entries:
+                            "parts": [m.group("description")], "line": index + 1})
+        elif entries and line[:1].isspace():  # only indented lines continue
             entries[-1]["parts"].append(line.strip())
+        else:
+            problems.append({"line": index + 1, "message":
+                             "Expected a character, NAME: description (indent a line to "
+                             "continue the description above)"})
     cast: list[dict] = []
     seen: set[str] = set()
     for entry in entries:
-        if entry["name"].lower() in seen:
+        if entry["name"].casefold() in seen:
+            problems.append({"line": entry["line"],
+                             "message": f"{entry['name']} is declared twice"})
             continue
-        seen.add(entry["name"].lower())
+        seen.add(entry["name"].casefold())
         cast.append({"name": entry["name"], "aliases": entry["aliases"],
                      "description": " ".join(p for p in entry["parts"] if p).strip()})
-    rest = lines[:start] + [""] * (end - start) + lines[end:]
-    return cast, "\n".join(rest)
+    return cast, problems, lines[:start] + [""] * (end - start) + lines[end:]
+
+
+def _resolver(cast: list[dict]):
+    """name or alias (any case) -> the cast name; unknown names pass through."""
+    known = {}
+    for entry in cast:
+        for spelling in (entry["name"], *entry.get("aliases", [])):
+            known.setdefault(spelling.casefold(), entry["name"])
+    return lambda name: known.get(name.casefold(), name)
 
 
 def add_mentions(cast: list[dict], panels: list[dict]) -> None:
-    """Add known characters named in each panel's action text to its characters.
-
-    Known: the declared cast (names and aliases) and everyone who speaks somewhere in
-    the script. Names match as whole words, as written or in capitals, so "Akira's"
-    counts but a lowercase common word never does. Mentions go after the speakers,
-    which keep their order. Edits ``panels`` in place.
-    """
-    known: dict[str, str] = {}  # spelling -> character name
+    """For panels without an explicit character list (``characters_given`` false), add
+    known characters named in the action: the cast (names and aliases) and everyone who
+    speaks somewhere (not narration). Whole words, as written or in capitals. Edits
+    ``panels`` in place."""
+    known: dict[str, str] = {}
     for entry in cast:
         for spelling in (entry["name"], *entry.get("aliases", [])):
             known.setdefault(spelling, entry["name"])
     for panel in panels:
         for line in panel.get("dialogue", []):
-            if line.get("kind") != "narration":  # a narrator is never on the page
+            if line.get("kind") != "narration":
                 known.setdefault(line["speaker"], line["speaker"])
     if not known:
         return
     spellings = sorted(known, key=len, reverse=True)  # "Yuki-chan" before "Yuki"
-    pattern = re.compile(
-        r"(?<![\w-])(" + "|".join(
-            re.escape(s) + "|" + re.escape(s.upper()) for s in spellings) + r")(?![\w-])")
+    pattern = re.compile(r"(?<![\w-])(" + "|".join(
+        re.escape(s) + "|" + re.escape(s.upper()) for s in spellings) + r")(?![\w-])")
     by_upper = {s.upper(): name for s, name in known.items()}
     for panel in panels:
+        if panel.get("characters_given"):
+            continue
         characters = panel.setdefault("characters", [])
         for m in pattern.finditer(panel.get("action", "")):
             name = known.get(m.group(1)) or by_upper[m.group(1).upper()]
@@ -199,106 +181,143 @@ def add_mentions(cast: list[dict], panels: list[dict]) -> None:
 
 
 def parse(text: str) -> dict:
-    """Parse a token-grammar script into ``{"cast": [...], "panels": [...]}``.
-
-    Raises :class:`ValueError` if no panels are found.
-    """
-    cast, text = split_cast(text)
+    """Parse a script -> ``{"cast", "panels", "problems"}``. Raises ValueError only if
+    there is no panel at all."""
+    lines = text.splitlines()
+    cast, problems, lines = _read_cast(lines)
+    resolve = _resolver(cast)
+    declared = {c["name"] for c in cast}
     panels: list[dict] = []
     current: dict | None = None
-    page = 1
+    section: str | None = None
+    page: int | None = None
     scene = ""
     flashback = False
-    pending_cut = ""
 
-    def flush() -> None:
+    def problem(number, message):
+        problems.append({"line": number, "message": message})
+
+    def finish():
         nonlocal current
-        if current is not None:
-            action = " ".join(p.strip() for p in current.pop("action_parts")
-                              if p.strip()).strip()
-            current["action"] = action
-            current["camera"] = _detect_camera(action)
-            current["notes"] = " ".join(current["notes"]).strip()
-            panels.append(current)
-            current = None
+        if current is None:
+            return
+        current["action"] = " ".join(current.pop("action_lines")).strip()
+        current["notes"] = " ".join(current["notes"]).strip()
+        current["camera"] = current["camera"] or _detect_camera(current["action"])
+        panels.append(current)
+        current = None
 
-    for raw in text.splitlines():
-        line = raw.rstrip()
-        if not line.strip():
+    for number, raw in enumerate(lines, start=1):
+        line = raw.strip()
+        if not line:
             continue
-
         m = _PAGE_RE.match(line)
         if m:
-            flush()
-            page = int(m.group(1))
+            finish()
+            page, section = int(m.group(1)), None
             continue
-
-        # Scene headings and flashback markers introduce the panels that follow
-        # (written between panels, they used to rename the panel before them)
-        m = _SCENE_RE.match(line)
-        if m:
-            scene = m.group(1).strip()
-            continue
-
-        if _FLASH_START_RE.match(line):
-            flashback = True
-            continue
-        if _FLASH_END_RE.match(line):
-            flashback = False
-            continue
-
         m = _PANEL_RE.match(line)
         if m:
-            flush()
+            finish()
+            section = None
+            if page is None:
+                problem(number, "PANEL before any PAGE (assumed PAGE 1)")
+                page = 1
             current = {"page": page, "panel": int(m.group(1)), "scene_heading": scene,
-                       "location": pending_cut, "characters": [], "action_parts": [],
+                       "location": "", "characters": [], "characters_given": False,
+                       "camera": "", "expressions": {}, "action_lines": [],
                        "dialogue": [], "sfx": [], "notes": [], "flashback": flashback}
-            pending_cut = ""
-            rest = m.group(2).strip()
-            if rest:
-                current["action_parts"].append(rest)
             continue
-
-        m = _CUT_RE.match(line)
-        if m:
-            # A transition annotates the NEXT panel's location; it is not a panel.
-            pending_cut = m.group(1).strip()
+        header = _HEADER_RE.match(line)
+        if header:
+            name, value = header.group(1).upper(), header.group(2)
+            name = " ".join(name.split())
+            if name.startswith("END ") and value is None:
+                if section and SECTIONS.get(name[4:]) == section:
+                    section = None
+                else:
+                    problem(number, f"[{name}] does not close an open section")
+                continue
+            if name == "SCENE" and value is not None:
+                if current is not None:
+                    finish()  # a scene heading ends the panel before it
+                scene, section = value, None
+                continue
+            if name in ("FLASHBACK START", "FLASHBACK END") and value is None:
+                if current is not None:
+                    finish()
+                flashback, section = name == "FLASHBACK START", None
+                continue
+            if current is None:
+                problem(number, f"[{header.group(1)}] belongs inside a PANEL")
+                continue
+            if name in SECTIONS and value is None:
+                section = SECTIONS[name]
+                continue
+            if name in FIELDS and value is not None:
+                section = None
+                if name == "SHOT":
+                    current["camera"] = value.lower()
+                elif name == "LOCATION":
+                    current["location"] = value
+                elif name == "CHARACTERS":
+                    current["characters_given"] = True
+                    for who in (canonical_name(n) for n in value.split(",") if n.strip()):
+                        who = resolve(who)
+                        if declared and who not in declared:
+                            problem(number, f"{who} is not in the [CHARACTERS] block")
+                        if who not in current["characters"]:
+                            current["characters"].append(who)
+                else:  # EXPRESSIONS: Name: expression; Name: expression
+                    for part in value.split(";"):
+                        who, colon, what = part.partition(":")
+                        if not part.strip():
+                            continue
+                        if not colon or not who.strip() or not what.strip():
+                            problem(number, "Write expressions as Name: expression; "
+                                            "Name: expression")
+                            continue
+                        current["expressions"][resolve(canonical_name(who))] = what.strip()
+                continue
+            problem(number, f"Unknown header [{header.group(1)}]"
+                    + (" (sections take no value)" if name in SECTIONS else
+                       " (needs a value, e.g. [SHOT: wide shot])" if name in FIELDS else ""))
             continue
-
-        m = _NOTE_RE.match(line)
-        if m:
-            if current is not None:
-                current["notes"].append(m.group(1).strip())
-            continue
-
+        # an ordinary line: it belongs to the open section
         if current is None:
-            # Free text before any panel: keep as scene/heading context.
-            scene = scene or line.strip()
+            problem(number, "Text outside a panel (start one with PANEL n)"
+                    if page is not None else "Text before the first PAGE")
             continue
-
-        m = _SFX_RE.match(line)
-        if m:
-            current["sfx"].append(m.group(1).strip())
+        if section is None:
+            problem(number, "Text outside a section: put it under [ACTION], [DIALOGUE], "
+                            "[SFX] or [NOTES]")
             continue
-
-        d = _DIALOGUE_RE.match(line)
-        if d and d.group("speaker").strip().lower() not in _NON_DIALOGUE_TOKENS:
-            speaker = canonical_name(d.group("speaker"))
-            kind = (d.group("kind") or "speech").lower()
-            kind = kind if kind in _KINDS else "speech"
-            current["dialogue"].append({"speaker": speaker, "text": d.group("text"),
+        if section == "action":
+            current["action_lines"].append(line)
+        elif section == "sfx":
+            current["sfx"].append(line)
+        elif section == "notes":
+            current["notes"].append(line)
+        else:
+            m = _DIALOGUE_RE.match(line)
+            kind = (m.group("kind") or "speech").strip().lower() if m else ""
+            if not m or kind not in KINDS:
+                problem(number, "Dialogue lines are SPEAKER: text or SPEAKER (kind): text"
+                        if not m else
+                        f"Unknown kind ({kind}); use one of {', '.join(KINDS)}")
+                continue
+            speaker = resolve(canonical_name(m.group("speaker")))
+            current["dialogue"].append({"speaker": speaker, "text": m.group("text"),
                                         "kind": kind})
-            # a narrator is not in the picture
-            if speaker and kind != "narration" and speaker not in current["characters"]:
-                current["characters"].append(speaker)
-            continue
-
-        # Otherwise: descriptive action text for the current panel.
-        current["action_parts"].append(line.strip())
-
-    flush()
-
+            if kind != "narration":
+                if declared and speaker not in declared:
+                    problem(number, f"{speaker} speaks but is not in the [CHARACTERS] block")
+                if not current["characters_given"] and speaker not in current["characters"]:
+                    current["characters"].append(speaker)
+    finish()
     if not panels:
-        raise ValueError("no panels found in canonical script")
+        raise ValueError("no panels found: start each panel with PANEL n under a PAGE n")
     add_mentions(cast, panels)
-    return {"cast": cast, "panels": panels}
+    for panel in panels:
+        panel.pop("characters_given", None)
+    return {"cast": cast, "panels": panels, "problems": problems}

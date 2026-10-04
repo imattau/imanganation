@@ -1,11 +1,14 @@
 # Writing an imanganation script
 
-An imanganation script is a plain text file (`.md` or `.txt`) in the page-and-panel
-format manga and comic writers already use. **New Project from Script…** in GIMP reads
-it and builds the whole project: the script panels, the cast (with your character
-designs), the locations, and one page document per `PAGE`. The engine is not needed
-for this, and nothing in the script is ever drawn as text: dialogue becomes speech
-bubbles only when you letter a page.
+An imanganation script is a plain text file (`.md` or `.txt`) made of **pages**, each
+page made of **panels**, and each panel made of labelled **sections**. Every line sits
+under a label that says what it is, so nothing is guessed: an action line with a colon
+in it is still action, and a line in the wrong place is reported with its line number.
+
+**New Project from Script…** in GIMP reads the script and builds the whole project: the
+script panels, the cast (with your character designs), the locations, and one page
+document per `PAGE`. The engine is not needed for this. Nothing in the script is ever
+drawn as text; dialogue becomes speech bubbles only when you letter a page.
 
 A complete example that uses every feature is in
 [`script-template.txt`](script-template.txt): copy it, keep the layout, replace the
@@ -14,50 +17,79 @@ story.
 ## The skeleton
 
 ```
-CHARACTERS
+[CHARACTERS]
 NAME: age, gender, hair, eyes, build, outfit, marks. Personality, body language.
   An indented line continues the description above it.
-OTHER NAME (aka Nickname, Title): ...
+OTHER NAME (aka Nickname): ...
 
 PAGE 1
 [SCENE: Place — time of day]
 
-Panel 1: Shot. What we see, naming every character who is in the picture.
+PANEL 1
+[SHOT: wide shot]
+[CHARACTERS: Name, Other Name]
+[EXPRESSIONS: Name: smiling; Other Name: worried]
+[ACTION]
+What we see in the picture.
+[DIALOGUE]
 NAME: A spoken line.
-NAME (thought): A thought.
-SFX: BANG
-[[A note for yourself or the artist.]]
+OTHER NAME (thought): A thought.
+[SFX]
+BANG
+[NOTES]
+A note for yourself or the artist.
 
-Panel 2: ...
+PANEL 2
+[ACTION]
+...
 
 PAGE 2
 [SCENE: Another place — time]
 
-Panel 1: ...
+PANEL 1
+[ACTION]
+...
 ```
 
-Tokens are not case-sensitive (`Page 1`, `panel 1:` and `Panel 1 -` all work), blank
-lines are ignored, and a long action line can continue on the next lines.
+## The building blocks
+
+| Line | Where | What it does |
+|---|---|---|
+| `[CHARACTERS]` | top, before `PAGE 1` | starts the cast block (optional) |
+| `PAGE n` | own line | starts a page |
+| `[SCENE: Place — time]` | between panels | the scene for the panels after it |
+| `[FLASHBACK START]` / `[FLASHBACK END]` | between panels | panels between them are a flashback |
+| `PANEL n` | own line, under a page | starts a panel, numbered within its page |
+| `[SHOT: …]` | in a panel | the shot (framing) |
+| `[CHARACTERS: …]` | in a panel | exactly who is in the picture |
+| `[EXPRESSIONS: …]` | in a panel | each character's expression |
+| `[LOCATION: …]` | in a panel | this panel's place, when it differs from the scene |
+| `[ACTION]` | in a panel | section: what we see |
+| `[DIALOGUE]` (or `[DIALOG]`) | in a panel | section: spoken lines, thoughts, narration |
+| `[SFX]` | in a panel | section: sound effects, one per line |
+| `[NOTES]` | in a panel | section: notes, never drawn |
+
+Labels and `PAGE` / `PANEL` are not case-sensitive, and blank lines are ignored. A
+section runs until the next label, `PANEL` or `PAGE`, so no end marker is needed
+(`[END DIALOGUE]` is accepted if you like closing them). Sections can come in any
+order within a panel.
 
 ## Characters (the cast block)
 
-Optional, but it is how you design your characters. It goes **before the first
-`PAGE`**:
-
 ```
-CHARACTERS
+[CHARACTERS]
 MIO: 15, girl, short teal bob with a yellow hairclip, green eyes, freckles,
   oversized grey hoodie over a school skirt, white sneakers. Curious and restless.
 KAITO (aka Kai): 16, boy, tall and lanky, spiky brown hair, silver earring.
   Calm, sarcastic, slouches.
 ```
 
-- One entry per character, starting at the left edge: `NAME: description`. Lines that
-  start with spaces continue the description above.
-- `(aka …)` lists other names the script uses for them, comma-separated. Dialogue and
-  action written with an alias count as that character.
-- Names are written in capitals as in dialogue; `MIO` becomes `Mio`, `GRANDPA SATO`
-  becomes `Grandpa Sato`.
+- One entry per character, at the left edge: `NAME: description`. Indented lines
+  continue the description above; any other line is reported.
+- `(aka …)` lists other names the script uses for them, comma-separated. Wherever a
+  name is used (`[CHARACTERS: Kai]`, `KAI: …`), an alias counts as that character.
+- Names in capitals become title case: `MIO` is `Mio`, `GRANDPA SATO` is
+  `Grandpa Sato`.
 - **The description is your design and it wins.** The engine turns it into the traits
   every render uses, keeping your words and only filling what you leave open, then
   draws the character's reference sheet. Describe what a reader would see: age,
@@ -65,110 +97,116 @@ KAITO (aka Kai): 16, boy, tall and lanky, spiky brown hair, silver earring.
   (scars, glasses, earrings). End with personality and body language (demeanour,
   posture, a habitual expression); these guide expressions without being drawn as
   appearance.
-- A character who speaks in the story but is not in the block still joins the cast,
-  with no design: write a description in their notes in Context, then use **Design
-  character** (or right-click them in the Project tree).
+- With a cast block, a speaker or a `[CHARACTERS: …]` name that is not in it is
+  reported, which catches typos (`Kiato`). A character listed without a description
+  joins the cast with no design: write one in their notes in Context, then use
+  **Design character**.
 
-## Pages, scenes and flashbacks
+## Pages and scenes
 
 ```
 PAGE 3
 [FLASHBACK START]
 [SCENE: Harbor pier — fifty years ago]
-Panel 1: ...
+
+PANEL 1
+...
+
 [FLASHBACK END]
 [SCENE: Grandpa's house — morning]
-Panel 2: ...
+
+PANEL 2
+...
 ```
 
-- `PAGE n` starts a page. Each page becomes its own page document, in the order the
-  pages appear.
-- `[SCENE: Place — time]` sets the scene for **the panels after it**, until the next
-  scene heading. Put it before the panels it covers, never in the middle of a
-  panel's lines. The part before the dash (`Harbor pier`) becomes a location in the
-  project's assets.
-- `CUT TO: place` on its own line sets the location of the **next** panel only (the
-  panel after the cut). That place also joins the locations.
-- `[FLASHBACK START]` … `[FLASHBACK END]` mark the panels between them as a flashback.
+- Each `PAGE` becomes its own page document, in the order the pages appear.
+- `[SCENE: …]` applies to **the panels after it**, until the next scene. The part before
+  the dash (`Harbor pier`) becomes a location in the project's assets.
+- `[LOCATION: …]` inside a panel gives that one panel a different place (a cutaway)
+  and joins the locations too.
 
 ## Panels
 
 ```
-Panel 2: Wide shot. Mio runs along the pier, Kaito trailing far behind her.
+PANEL 2
+[SHOT: wide shot]
+[CHARACTERS: Mio, Kaito]
+[EXPRESSIONS: Mio: excited grin; Kaito: half asleep]
+[ACTION]
+Mio runs along the pier, Kaito trailing far behind her.
 ```
 
-- `Panel n:` starts a panel, numbered within its page. Everything after the colon,
-  and any plain lines that follow, is the panel's **action**: the picture to draw.
-- **Name every character who is in the picture** in the action, as written in the cast
-  block or by an alias (`Kai yawns`). That is how a panel knows who to draw. Someone
-  who speaks in the panel is included automatically, even off-panel, so describe who
-  is visible. Unnamed people ("a young woman", "the crowd") are drawn but not as cast
-  members.
-- Open the action with a **shot** so the framing is recorded. These are recognised:
-  `extreme close-up`, `close-up`, `medium shot`, `full shot`, `wide shot`,
-  `establishing shot`, `two-shot`, `reaction shot`, `over-the-shoulder`, `low angle`,
-  `high angle`, `bird's-eye`, `worm's-eye`, `dutch angle`, `POV`.
-- Keep one moment per panel: what a single still picture can show.
+- **`[SHOT: …]`** sets the framing. Common shots: `extreme close-up`, `close-up`,
+  `medium shot`, `full shot`, `wide shot`, `establishing shot`, `two-shot`,
+  `reaction shot`, `over-the-shoulder`, `low angle`, `high angle`, `bird's-eye`,
+  `worm's-eye`, `dutch angle`, `POV`. Without it, one of these words in the action is
+  used.
+- **`[CHARACTERS: …]`** is exactly who is drawn, comma-separated; `[CHARACTERS: ]`
+  (empty) means nobody, as in an establishing shot. Without it, the panel's speakers
+  (not narration) and any cast member named in the action are drawn. Giving it is the
+  surest way: someone speaking off-panel is then not drawn.
+- **`[EXPRESSIONS: …]`** is `Name: expression; Name: expression`. Without it, each
+  character's usual expression from their design is used.
+- **`[ACTION]`** is the picture: one moment that a single still image can show. Every
+  line under it is action, colons and all.
 
 ## Dialogue and sound effects
 
 ```
+[DIALOGUE]
 MIO: Hurry up!
 KAITO (thought): Why did I agree to this.
 MIO (whisper): Fifty years...?
 MIO (shout): LOOK AT IT!
 NARRATOR (narration): The summer everything changed started with a ship.
-SFX: VRRRMMMM
+[SFX]
+VRRRMMMM
 ```
 
-- `NAME: line` is spoken dialogue. Add a kind in brackets for anything else:
-  `(thought)`, `(whisper)`, `(shout)` or `(narration)`. A narrator is never treated as
-  a character in the picture.
-- `SFX: sound` is a sound effect.
-- Lines stay in order. In GIMP each one gets a **Bubble…** button in the panel's
-  Context, and the bubble picker opens on the matching style: speech → Speech,
-  thought → Thought (cloud), whisper → Whisper (dashed), shout → Shout (burst),
-  narration → Narration (box), SFX → Sound effect.
+- Every line under `[DIALOGUE]` is `SPEAKER: text` or `SPEAKER (kind): text`, where the
+  kind is `thought`, `whisper`, `shout` or `narration` (plain speech needs none). Any
+  other line there is reported.
+- A narrator is never drawn and need not be in the cast.
+- Under `[SFX]`, each line is one sound effect.
+- In GIMP each line gets a **Bubble…** button in the panel's Context, and the bubble
+  picker opens on the matching style: speech → Speech, thought → Thought (cloud),
+  whisper → Whisper (dashed), shout → Shout (burst), narration → Narration (box),
+  SFX → Sound effect.
 - Dialogue is never drawn into the renders; panels are rendered without text.
 
 ## Notes
 
-```
-[[Grandpa is always in his yellow raincoat. Keep the rod in his left hand.]]
-```
+`[NOTES]` holds anything for yourself or the artist. It stays with the panel (shown in
+Context) and is never drawn.
 
-`[[ … ]]` on its own line inside a panel is a note: kept with the panel (shown in
-Context), never treated as action or dialogue.
+## When something is wrong
 
-## What the script does not set
+The script is read strictly, and anything that does not fit is reported with its line
+number, for example:
 
-These are set in GIMP after the project is built:
+- `Text outside a section: put it under [ACTION], [DIALOGUE], [SFX] or [NOTES]`
+- `Dialogue lines are SPEAKER: text or SPEAKER (kind): text`
+- `Unknown kind (sings); use one of speech, thought, whisper, shout, narration`
+- `Kiato speaks but is not in the [CHARACTERS] block`
+- `Unknown header [WEATHER]`
 
-- **Expressions** per character (`Mio: wide grin; Kaito: bored`), in the panel's
-  Context.
-- **Aspect ratio** of a panel, in its Context (otherwise the frame you render into
-  decides).
-- **Character designs beyond the first**, with **Design character** (a new version)
-  or *Set Character Reference from Layer*.
+New Project from Script… lists these before building the project, so you can fix the
+script first or go ahead without the reported lines.
+
+## Set later in GIMP
+
+- **Aspect ratio** of a panel: the frame you render into decides it, or set it in the
+  panel's Context.
+- **Character designs beyond the first**: **Design character** (a new version) or
+  *Set Character Reference from Layer*.
 - **Page layouts and panel frames**: you draw these, or choose a layout for a page.
 
-## Common mistakes
+Everything the script sets (shot, characters, expressions, location, action, notes) can
+also be edited afterwards in the panel's Context.
 
-- **A colon in an action line.** `Note: the sky is red` reads as dialogue from a
-  character called "Note". Use `[[note]]` for notes and rephrase action lines
-  (`The sky is red.`).
-- **A scene heading after a panel's lines** applies to the next panels, not the one
-  above it. Put it before the panels it covers.
-- **A character in the picture but never named in the action** (and silent) is not
-  drawn as a cast member. Name them.
-- **Cast entries indented by mistake** continue the previous description instead of
-  starting a new character. Start each `NAME:` at the left edge.
-- **A different spelling** (`Kaito`, `Kai`, `KT`) is a different person unless it is
-  listed as an alias.
+## Prose instead of a script
 
-## Prose instead of panels
-
-A script without `PAGE` / `Panel` lines is treated as prose: the engine's language
-model breaks it into panels (the engine must be running). A `CHARACTERS` block at the
-top still works the same way and is read exactly, not by the model. Panel scripts are
-recommended: they are read instantly, exactly as written, with the engine off.
+A text with no `PAGE` / `PANEL` lines is treated as prose: the engine's language model
+breaks it into panels (the engine must be running). A `[CHARACTERS]` block at the top
+still works and is read exactly, not by the model. Scripts are recommended: they are
+read instantly, exactly as written, with the engine off.

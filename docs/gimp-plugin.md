@@ -74,11 +74,12 @@ layouts, then offers **Generate layout** when a built-in frame count matches. Th
 action opens the selected page and layout picker in one step.
 **New project from script…** (Context, before a project is open, or *Filters →
 imanganation*) builds a project from a script file: panels, the cast (with the script's
-`CHARACTERS` descriptions as their notes), locations from scene headings, and one page
-document per script page, at the chosen size; then it opens page 1. A PAGE / Panel
-script is parsed in the plug-in itself (the engine's own tokenizer,
-`script_canonical.py`), so this works with the engine off; prose goes to the engine's
-LLM (`POST /scripts/parse`). With *Design the cast now*, every described character is
+`[CHARACTERS]` descriptions as their notes), locations from scene headings, and one page
+document per script page, at the chosen size; then it opens page 1. A script (the
+format in [script-template.md](script-template.md)) is parsed in the plug-in itself
+(the engine's own parser, `script_canonical.py`), so this works with the engine off;
+lines that break the format are listed first, to fix or skip. Prose goes to the
+engine's LLM (`POST /scripts/parse`). With *Design the cast now*, every described character is
 queued for a design sheet (`POST /characters`), and Context refreshes as each one
 lands. A character's **Design character** button designs it from its notes, or makes a
 new design version if it has one. In the Project tree, right-click **Characters** for

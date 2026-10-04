@@ -173,7 +173,7 @@ def test_panels_to_script_applies_defaults():
 def test_engine_defaults_to_colour():
     """Policy: the engine is colour-only (docs/color-policy.md)."""
     assert Script().default_color_mode is ColorMode.COLOR
-    assert parse_canonical("Panel 1: a scene").default_color_mode is ColorMode.COLOR
+    assert parse_canonical("PAGE 1\nPANEL 1\n[ACTION]\na scene").default_color_mode is ColorMode.COLOR
 
 
 # --- project helpers --------------------------------------------------------

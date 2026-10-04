@@ -2335,7 +2335,8 @@ def _dock_action(procedure, config, data):
             options = _choose_new_project()
             if options is None:
                 return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
-            _create_project_from_script(**options)
+            if _create_project_from_script(**options) is False:
+                return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
         elif data == "design-character":
             _design_selected_character()
         else:
@@ -2421,14 +2422,50 @@ def _parse_script(text, title):
     """-> (parsed dict, format). Page/panel scripts parse here, instantly and with the
     engine off; prose needs the engine's LLM."""
     if script_looks_canonical(text):
-        return parse_script_text(text), "canonical"
+        try:
+            return parse_script_text(text), "canonical"
+        except ValueError as exc:
+            raise ValueError(f"{exc}. The script format is described in "
+                             "docs/script-template.md.") from exc
     try:
         result = _run_job(ENGINE_URL, "/scripts/parse", {"text": text, "title": title},
                           "Reading the script (prose, via the engine)…")
     except EngineError as exc:
         raise EngineError("This script is prose, not PAGE / Panel format, so it needs the "
                           f"engine to read it: {exc}") from exc
-    return {"cast": result["cast"], "panels": result["panels"]}, result["format"]
+    return ({"cast": result["cast"], "panels": result["panels"],
+             "problems": result.get("problems", [])}, result["format"])
+
+
+def _confirm_script_problems(problems):
+    """List the script's format problems -> True to build the project anyway."""
+    dialog = Gtk.Dialog(title="Script problems", flags=Gtk.DialogFlags.MODAL)
+    dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+                       "Create anyway", Gtk.ResponseType.OK)
+    dialog.set_default_response(Gtk.ResponseType.CANCEL)
+    dialog.set_default_size(560, 360)
+    box = dialog.get_content_area()
+    box.set_spacing(8)
+    intro = Gtk.Label(
+        label=(f"{len(problems)} lines of the script don't" if len(problems) != 1
+               else "1 line of the script doesn't")
+              + " fit the format (see docs/script-template.md). Fix the script and try "
+              "again, or create the project without them.",
+        xalign=0.0, wrap=True, max_width_chars=70, margin=8)
+    box.pack_start(intro, False, False, 0)
+    view = Gtk.TextView(editable=False, cursor_visible=False, monospace=True,
+                        left_margin=8, top_margin=6, wrap_mode=Gtk.WrapMode.WORD_CHAR)
+    view.get_buffer().set_text("\n".join(f"Line {p['line']}: {p['message']}"
+                                          for p in problems))
+    scrolled = Gtk.ScrolledWindow(vexpand=True, margin=8)
+    scrolled.set_shadow_type(Gtk.ShadowType.IN)
+    scrolled.add(view)
+    box.pack_start(scrolled, True, True, 0)
+    dialog.show_all()
+    try:
+        return dialog.run() == Gtk.ResponseType.OK
+    finally:
+        dialog.destroy()
 
 
 def _create_project_from_script(script_path, title, parent, page_size, design):
@@ -2437,6 +2474,8 @@ def _create_project_from_script(script_path, title, parent, page_size, design):
     sheet for each described character."""
     text = Path(script_path).read_text(encoding="utf-8")
     parsed, script_format = _parse_script(text, title)
+    if parsed.get("problems") and not _confirm_script_problems(parsed["problems"]):
+        return False
     root = Path(parent) / f"{_slug(title)}.imanga"
     root.mkdir(parents=True)
     try:

@@ -171,10 +171,14 @@ def script_parse(
 ) -> None:
     """Parse a script (canonical page/panel format OR prose) into panels.json."""
     from manganation.project import ensure_project, panels_json_path
+    from manganation.script.formats import canonical
     from manganation.script.parser import parse
 
     text = source.read_text()
     script = parse(text, title=title or source.stem, force_llm=force_llm)
+    if not force_llm and canonical.looks_canonical(text):
+        for problem in canonical.parse(text)["problems"]:  # the format guide: script-template
+            rprint(f"[yellow]line {problem['line']}[/yellow]: {problem['message']}")
 
     if json_out:
         rprint(script.to_json())
