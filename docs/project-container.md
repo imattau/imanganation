@@ -218,9 +218,11 @@ selection as the group's mask in the XCF, and atomically writes `placement.page`
 selection's bounding rectangle to the manifest. **Render Panel** and **Place Next Panel**
 use that saved rectangle when the active XCF is the referenced project page, so a live
 selection is not needed to fit the take. The group mask preserves the original selection
-shape. Save the XCF after setting the frame so the group and its mask persist with the
-manifest placement. This first slice requires a page image opened from the project and
-does not yet reshape an existing panel group.
+shape. Rendering a new panel directly from a selection on a linked project page also
+records its first placement in the same atomic manifest write as its take. Save the XCF
+after setting the frame or rendering so the group and its mask persist with the manifest
+placement. This first slice requires a page image opened from the project and does not
+yet reshape an existing panel group.
 For container projects it also copies newly rendered, refined, and inpainted images into
 unique files under `takes/`, adds a new take id, and advances `active_take`; a legacy
 image used from `panels/` is first imported as an immutable take. Opened page images and

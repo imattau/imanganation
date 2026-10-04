@@ -445,20 +445,28 @@ def _registered_take_id(root, manifest, source, panel_id):
     return None
 
 
-def _placed_frame_for_image(image, manifest, panel):
-    """Return this panel's saved frame when the active XCF is its placed page."""
-    placement = panel.get("placement") if panel else None
-    if not manifest or not placement:
+def _project_page_id_for_image(image, manifest):
+    if not manifest:
         return None
     parasite = image.get_parasite(PROJECT_PARASITE)
     if parasite is None:
         return None
     try:
         page_ref = json.loads(bytes(parasite.get_data()))
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (AttributeError, TypeError, ValueError, json.JSONDecodeError):
         return None
     if (page_ref.get("project") != manifest["project"]["id"]
-            or page_ref.get("page") != placement.get("page")):
+            or not any(page["id"] == page_ref.get("page")
+                       for page in manifest["pages"])):
+        return None
+    return page_ref["page"]
+
+
+def _placed_frame_for_image(image, manifest, panel):
+    """Return this panel's saved frame when the active XCF is its placed page."""
+    placement = panel.get("placement") if panel else None
+    if (not placement
+            or _project_page_id_for_image(image, manifest) != placement.get("page")):
         return None
     frame = placement.get("frame")
     if (not isinstance(frame, list) or len(frame) != 4
@@ -519,6 +527,11 @@ def render_panel(procedure, run_mode, image, drawables, config, data):
 
     panel = manifest["panels"][seq - 1] if manifest else None
     saved_frame = _placed_frame_for_image(image, manifest, panel)
+    page_id = _project_page_id_for_image(image, manifest)
+    if (manifest and panel.get("placement")
+            and panel["placement"].get("page") != page_id):
+        return _error(procedure, "This panel is placed on another project page. Open that "
+                                 "page before rendering it.")
     _, non_empty, x1, y1, x2, y2 = Gimp.Selection.bounds(image)
     if saved_frame is None and not non_empty:
         return _error(procedure, "Select the target frame first (e.g. Fuzzy Select inside "
@@ -526,6 +539,9 @@ def render_panel(procedure, run_mode, image, drawables, config, data):
     if saved_frame is not None:
         x1, y1, width, height = saved_frame
         x2, y2 = x1 + width, y1 + height
+    if manifest and page_id and saved_frame is None:
+        panel["placement"] = {"page": page_id, "frame": [x1, y1, x2 - x1, y2 - y1]}
+        panel["status"] = "placed"
 
     # Keep the frame safe while the engine works; the artist may keep clicking.
     frame = Gimp.Selection.save(image)
