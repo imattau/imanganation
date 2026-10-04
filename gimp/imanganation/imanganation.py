@@ -83,6 +83,13 @@ DOCK_ACTIONS = {
     DOCK_PANEL: "plug-in-imanganation-dock-panel-refresh",
 }
 DOCK_OPEN_PROJECT = "plug-in-imanganation-dock-open-project"
+# Windows > Imanganation: reopen a closed dock (the host keeps closed docks closed).
+DOCK_SHOW = {dock: f"plug-in-imanganation-show-dock-{dock}" for dock in DOCK_IDS}
+DOCK_MENU_LABELS = {
+    DOCK_PROJECT: "_Project", DOCK_INSPECTOR: "_Inspector",
+    DOCK_FILMSTRIP: "Page _Filmstrip", DOCK_SCRIPT: "_Script",
+    DOCK_CHARACTERS: "_Character Bible", DOCK_PANEL: "P_anel",
+}
 DOCK_ITEMS = {
     DOCK_PROJECT: "plug-in-imanganation-dock-project-item",
     DOCK_FILMSTRIP: "plug-in-imanganation-dock-filmstrip-item",
@@ -1183,7 +1190,7 @@ def _dock_pdb_call(name, values):
     for key, value in values.items():
         config.set_property(key, value)
     result = procedure.run(config)
-    if result.index(0).get_enum() != Gimp.PDBStatusType.SUCCESS:
+    if result.index(0) != Gimp.PDBStatusType.SUCCESS:
         raise RuntimeError(f"GIMP procedure failed: {name}")
 
 
@@ -1214,9 +1221,15 @@ def _choose_project_folder():
     dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
                        Gtk.STOCK_OPEN, Gtk.ResponseType.ACCEPT)
     dialog.set_modal(True)
+    dialog.set_default_response(Gtk.ResponseType.ACCEPT)  # Enter accepts a typed path
     previous = _remembered_project()
     if previous is not None:
-        dialog.set_current_folder(str(previous))
+        # Start beside the last project with it selected, so switching to a sibling
+        # project is one click (and Open works without clicking anything).
+        dialog.set_current_folder(str(previous.parent))
+        dialog.select_filename(str(previous))
+    else:
+        dialog.set_current_folder(str(Path.home()))  # "Recent" leaves Open disabled
     response = dialog.run()
     filename = dialog.get_filename() if response == Gtk.ResponseType.ACCEPT else None
     dialog.destroy()
@@ -1389,7 +1402,7 @@ def _page_thumbnail(root, manifest, page):
         config = procedure.create_config()
         config.set_property("file", Gio.File.new_for_path(str(source)))
         result = procedure.run(config)
-        if result.index(0).get_enum() != Gimp.PDBStatusType.SUCCESS:
+        if result.index(0) != Gimp.PDBStatusType.SUCCESS:
             return None
         width = result.index(1).get_int()
         height = result.index(2).get_int()
@@ -1464,7 +1477,7 @@ def _refresh_project_docks(sync_canvas=False):
             (DOCK_FILMSTRIP, "filmstrip", "filmstrip_selected"),
             (DOCK_SCRIPT, "script", "script_selected"),
             (DOCK_CHARACTERS, "characters", "character_selected"),
-            (DOCK_PANEL, "panel", "panel_selected")):
+            (DOCK_PANEL, "panel", None)):  # properties rows have no selection
         values = {"identifier": identifier, "content": contents[content_key],
                   "selected-item": contents[selection_key] if selection_key else ""}
         _dock_pdb_call("gimp-extension-panel-update", values)
@@ -1837,7 +1850,7 @@ def _add_dock_callbacks(plugin):
     ]
     for name, callback, data, takes_item in callbacks:
         procedure = Gimp.Procedure.new(plugin, name, Gimp.PDBProcType.TEMPORARY,
-                                       callback, data, None)
+                                       callback, data)
         if takes_item:
             procedure.add_string_argument("item", "Item id", "Stable project row id",
                                           "", GObject.ParamFlags.READWRITE)
@@ -1893,7 +1906,7 @@ def _register_project_docks(plugin):
              contents["character_selected"], "Refresh", DOCK_ACTIONS[DOCK_CHARACTERS],
              DOCK_ITEMS[DOCK_CHARACTERS]),
             (DOCK_PANEL, "Panel", "properties", contents["panel"],
-             contents["panel_selected"], "Set frame", DOCK_ACTIONS[DOCK_PANEL], ""),
+             "", "Set frame", DOCK_ACTIONS[DOCK_PANEL], ""),
         ]
     for identifier, title, presentation, content, selected, action_label, action, item in rows:
         _dock_pdb_call("gimp-extension-panel-register", {
@@ -1911,18 +1924,37 @@ def _register_project_docks(plugin):
 
 
 def _project_docks_run(procedure, config, data):
-    folder = config.get_property("project-dir")
-    if folder is None:
-        return _error(procedure, "Choose a project folder containing project.json")
     if load_project is None or build_docks is None:
         return _error(procedure, "The plug-in install is missing project_store.py or panel_ui.py")
-    root = Path(folder.get_path())
+    folder = config.get_property("project-dir")
+    if config.get_property("run-mode") == Gimp.RunMode.INTERACTIVE:
+        gi.require_version("GimpUi", "3.0")
+        from gi.repository import GimpUi
+
+        GimpUi.init(PROC_PROJECT_DOCKS)
+        root = _choose_project_folder()  # starts in the last project
+        if root is None:
+            return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
+    elif folder is None:
+        return _error(procedure, "Choose a project folder containing project.json")
+    else:
+        root = Path(folder.get_path())
     try:
         load_project(root)
         _remember_project(root)
         _dock_pdb_call(DOCK_OPEN_PROJECT, {})
     except Exception as exc:
         return _error(procedure, str(exc))
+    return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+
+
+def _show_dock_run(procedure, config, dock):
+    """Reopen (or bring forward) one workspace dock registered by the extension."""
+    try:
+        _dock_pdb_call("gimp-extension-panel-show", {"identifier": dock})
+    except Exception:
+        return _error(procedure, "The Imanganation workspace is not running; restart GIMP "
+                                 "to start it")
     return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
 
 
@@ -1958,7 +1990,8 @@ class Imanganation(Gimp.PlugIn):
 
     def do_query_procedures(self):
         return [PROC_RENDER, PROC_NEXT, PROC_REGEN, PROC_INPAINT, PROC_REFINE, PROC_SETREF,
-                PROC_PLACE, PROC_STATUS, PROC_PROJECT_DOCKS, PROC_AUTOSTART]
+                PROC_PLACE, PROC_STATUS, PROC_PROJECT_DOCKS, PROC_AUTOSTART,
+                *DOCK_SHOW.values()]
 
     def do_create_procedure(self, name):
         global _DOCK_PLUGIN
@@ -1969,6 +2002,20 @@ class Imanganation(Gimp.PlugIn):
             proc.set_documentation(
                 "Start the Imanganation workspace",
                 "Registers the Imanganation project docks at GIMP startup.", name)
+            proc.set_attribution("imanganation", "imanganation", "2026")
+            return proc
+        dock = next((d for d, proc_name in DOCK_SHOW.items() if proc_name == name), None)
+        if dock is not None:
+            proc = Gimp.Procedure.new(
+                self, name, Gimp.PDBProcType.PLUGIN, _show_dock_run, dock)
+            proc.set_menu_label(DOCK_MENU_LABELS[dock])
+            proc.add_enum_argument("run-mode", "Run mode", "How to run the procedure",
+                                   Gimp.RunMode, Gimp.RunMode.INTERACTIVE,
+                                   GObject.ParamFlags.READWRITE)
+            proc.add_menu_path("<Image>/Windows/Imanganation")
+            proc.set_documentation(
+                "Show an Imanganation dock",
+                "Reopen a closed Imanganation workspace dock, or bring it forward.", name)
             proc.set_attribution("imanganation", "imanganation", "2026")
             return proc
         if name == PROC_PROJECT_DOCKS:

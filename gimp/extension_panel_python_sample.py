@@ -24,7 +24,7 @@ def _pdb_call(name, values):
     for key, value in values.items():
         config.set_property(key, value)
     result = procedure.run(config)
-    if result.index(0).get_enum() != Gimp.PDBStatusType.SUCCESS:
+    if result.index(0) != Gimp.PDBStatusType.SUCCESS:
         raise RuntimeError(f"PDB call failed: {name}")
 
 

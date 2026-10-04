@@ -49,7 +49,8 @@ GIMP and registers the Project, Script, Inspector, Panel, Page Filmstrip, and Ch
 Bible docks by default. On first launch, the Project dock offers **Open project…**; the
 chosen project folder is remembered in GIMP's user settings and its docks are restored on
 later launches. The **Open / Switch Project…** command remains available under
-*Filters → imanganation*. Row callbacks carry stable IDs.
+*Filters → imanganation*. A dock you close stays closed on later launches; reopen it from
+*Windows → Imanganation*. Row callbacks carry stable IDs.
 For container projects, generated and imported images are
 copied into immutable `takes/` files and linked through take IDs; XCF parasites and
 page placement metadata are still being migrated. It adds nine commands under
