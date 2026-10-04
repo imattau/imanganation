@@ -113,3 +113,53 @@ def test_project_tree_groups_story_assets_and_shows_notes_without_fake_ids():
     assert "\t# Props\n\t\t# Akira's lunchbox" in project_tree
     assert "asset:location" not in project_tree
     assert "asset:prop" not in project_tree
+
+
+def test_context_rows_are_editable_fields_keyed_by_row_id():
+    manifest = copy.deepcopy(EXAMPLE)
+    panel = manifest["panels"][0]
+    panel["expressions"] = {"Akira": "bored"}
+    panel["characters"][0]["version"] = "winter"
+    inspector = build_docks(manifest, panel["id"], open_page_action="proc-open")["inspector"]
+    pid = panel["id"]
+    assert f"@{pid}.characters\tCharacters\tAkira" in inspector
+    assert f"@{pid}.expressions\tExpressions\tAkira: bored" in inspector
+    assert f"@{pid}.aspect_ratio\tAspect ratio\t1:1" in inspector
+    assert f"@{pid}.action\tAction\t{panel['action']}" in inspector
+    assert "Akira\twinter" in inspector  # pinned version stays a read-only row
+    assert "!proc-open\tOpen page" in inspector  # placed panel
+    for row in inspector.splitlines():  # every field is exactly key, title, value
+        if row.startswith("@"):
+            assert row.count("\t") == 2
+
+    unplaced = manifest["panels"][2]["id"]
+    assert "Open page" not in build_docks(manifest, unplaced,
+                                          open_page_action="p")["inspector"]
+    page = build_docks(manifest, "pg_a1b2c3")["inspector"]
+    assert "@pg_a1b2c3.label\tLabel\tPage 1" in page
+    who = character_row_id("Yuki")
+    assert f"@{who}.notes\tNotes\tEnergetic, always grinning." in build_docks(
+        manifest, who)["inspector"]
+
+
+def test_page_context_offers_layout_generation_when_script_count_matches():
+    manifest = copy.deepcopy(EXAMPLE)
+    selected_page = manifest["pages"][0]["id"]
+
+    inspector = build_docks(
+        manifest, selected_page, generate_layout_action="proc-layout")["inspector"]
+
+    assert "Layout status\t2 script panels · 2 layouts · 5 frame styles" in inspector
+    assert "!proc-layout\tGenerate layout" in inspector
+
+
+def test_page_context_explains_when_label_has_no_script_page():
+    manifest = copy.deepcopy(EXAMPLE)
+    selected_page = manifest["pages"][0]["id"]
+    manifest["pages"][0]["label"] = "Bonus spread"
+
+    inspector = build_docks(
+        manifest, selected_page, generate_layout_action="proc-layout")["inspector"]
+
+    assert "Layout status\tRename this page to Page N" in inspector
+    assert "!proc-layout\tGenerate layout" not in inspector

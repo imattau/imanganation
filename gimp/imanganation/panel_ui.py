@@ -8,10 +8,24 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
+try:  # Installed plug-in imports siblings as top-level modules.
+    from layouts import FRAME_STYLES, layouts_for_count, page_panel_count
+except ImportError:  # Package import in tests and external tooling.
+    from .layouts import FRAME_STYLES, layouts_for_count, page_panel_count
+
 
 def _label(value: Any) -> str:
     """Keep host row delimiters and line breaks out of visible labels."""
     return " ".join(str(value or "").replace("\t", " ").splitlines()).strip()
+
+
+def _field(row_id: str, field: str, title: str, value: Any) -> str:
+    """An editable properties row; edits come back as ``<row id>.<field>``."""
+    return f"@{row_id}.{field}\t{title}\t{_label(value)}"
+
+
+def _expressions(expressions: dict[str, Any]) -> str:
+    return "; ".join(f"{_label(who)}: {_label(what)}" for who, what in expressions.items())
 
 
 def _panel_label(panel: dict[str, Any]) -> str:
@@ -62,8 +76,15 @@ def rgb_png(width: int, height: int, pixels: bytes) -> bytes | None:
 
 def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
                 root: str | Path | None = None,
-                previews: dict[str, str] | None = None) -> dict[str, str]:
-    """Build generic host content and stable selections from a project manifest."""
+                previews: dict[str, str] | None = None,
+                open_page_action: str = "",
+                generate_layout_action: str = "") -> dict[str, str]:
+    """Build generic host content and stable selections from a project manifest.
+
+    The Context (inspector) rows are editable fields; ``open_page_action``, a dock
+    procedure, adds an "Open page" button there for placed panels and pages.
+    ``generate_layout_action`` adds a page-specific layout action when a matching
+    built-in arrangement is available."""
     panels = manifest.get("panels", [])
     pages = manifest.get("pages", [])
     page_by_id = {page["id"]: page for page in pages}
@@ -235,19 +256,29 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
             f"Status\t{_label(panel.get('status')) or 'unplaced'}",
             "# Characters",
         ])
+        pid = panel["id"]
         characters = panel.get("characters", [])
-        inspector_rows.extend(
-            f"{_label(c.get('name'))}\t{_label(c.get('version')) or 'Active version'}"
-            for c in characters)
-        if not characters:
-            inspector_rows.append("None\tNo characters specified")
+        inspector_rows.extend([
+            _field(pid, "characters", "Characters",
+                   ", ".join(_label(c.get("name")) for c in characters)),
+            _field(pid, "expressions", "Expressions", _expressions(
+                panel.get("expressions") or {})),
+        ])
+        inspector_rows.extend(  # a pinned reference version (outfit) per character
+            f"{_label(c.get('name'))}\t{_label(c.get('version'))}"
+            for c in characters if c.get("version"))
         inspector_rows.extend([
             "# Scene",
-            f"Location\t{_label(panel.get('location')) or 'Unspecified'}",
-            f"Shot\t{_label(panel.get('camera')) or 'Unspecified'}",
-            f"Aspect ratio\t{_label(panel.get('aspect_ratio')) or 'Unspecified'}",
+            _field(pid, "location", "Location", panel.get("location")),
+            _field(pid, "camera", "Shot", panel.get("camera")),
+            _field(pid, "aspect_ratio", "Aspect ratio", panel.get("aspect_ratio")),
             "# Action",
-            _label(panel.get("action")) or "No action text",
+            _field(pid, "action", "Action", panel.get("action")),
+            _field(pid, "notes", "Notes", panel.get("notes")),
+        ])
+        if open_page_action and (panel.get("placement") or {}).get("page") in page_by_id:
+            inspector_rows.append(f"!{open_page_action}\tOpen page")
+        inspector_rows.extend([
             "# Production",
             f"ID\t{panel['id']}",
             f"Takes\t{len(panel.get('takes', []))}",
@@ -284,13 +315,36 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
                           if (p.get("placement") or {}).get("page") == selected_id]
         inspector_rows.extend([
             "# Page",
+            _field(selected_id, "label", "Label", page.get("label")),
             f"ID\t{selected_id}",
-            f"Label\t{_label(page.get('label'))}",
             f"Document\t{_label(page.get('file'))}",
             f"Document status\t{page_file_state(page)}",
             f"Progress\t{page_progress(page)}",
             f"Placed panels\t{len(panels_on_page)}",
         ])
+        script_page, script_panel_count = page_panel_count(
+            manifest, page.get("label", ""))
+        inspector_rows.append("# Page layout")
+        if script_page is None:
+            inspector_rows.append("Layout status\tRename this page to Page N")
+        elif not script_panel_count:
+            inspector_rows.append(
+                f"Layout status\tNo script panels match Page {script_page}")
+        elif not layouts_for_count(script_panel_count):
+            inspector_rows.append(
+                f"Layout status\tNo built-in layout for {script_panel_count} panels")
+        else:
+            layout_count = len(layouts_for_count(script_panel_count))
+            layout_noun = "layout" if layout_count == 1 else "layouts"
+            style_count = len(FRAME_STYLES)
+            style_noun = "frame style" if style_count == 1 else "frame styles"
+            inspector_rows.append(
+                f"Layout status\t{script_panel_count} script panels · "
+                f"{layout_count} {layout_noun} · {style_count} {style_noun}")
+            if generate_layout_action:
+                inspector_rows.append(f"!{generate_layout_action}\tGenerate layout")
+        if open_page_action:
+            inspector_rows.append(f"!{open_page_action}\tOpen page")
         if panels_on_page:
             inspector_rows.append("# On this page")
             for panel in panels_on_page:
@@ -307,9 +361,10 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
         inspector_rows.extend([
             "# Character",
             f"Name\t{_label(character.get('name'))}",
-            f"Aliases\t{', '.join(_label(a) for a in character.get('aliases', [])) or 'None'}",
+            _field(selected_id, "aliases", "Aliases",
+                   ", ".join(_label(a) for a in character.get("aliases", []))),
             "# Story notes",
-            _label(character.get("notes")) or "No project notes",
+            _field(selected_id, "notes", "Notes", character.get("notes")),
         ])
     else:
         inspector_rows.extend(["# Project", f"Title\t{title}",

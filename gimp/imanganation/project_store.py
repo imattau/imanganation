@@ -263,3 +263,96 @@ def record_take(
     document.clear()
     document.update(candidate)
     return take, destination
+
+
+# Context dock fields: "<row id>.<field>" keys, edited in place in the manifest.
+PANEL_TEXT_FIELDS = {"location", "camera", "action", "notes", "aspect_ratio"}
+_ASPECT = re.compile(r"^[0-9]+:[0-9]+$")
+
+
+def _names(text: str) -> list[str]:
+    seen: dict[str, str] = {}
+    for name in (part.strip() for part in text.split(",")):
+        if name and name.lower() not in seen:
+            seen[name.lower()] = name
+    return list(seen.values())
+
+
+def format_expressions(expressions: dict[str, str]) -> str:
+    return "; ".join(f"{who}: {what}" for who, what in expressions.items())
+
+
+def apply_field_edit(document: dict[str, Any], key: str, value: str,
+                     character_id=None) -> str:
+    """Apply one edited Context field to the loaded manifest (the caller saves it).
+
+    ``key`` is ``<panel/page/character row id>.<field>``; ``value`` is the field's
+    text, collapsed to one line. ``character_id`` maps a cast name to its row id.
+    Returns the id of the edited row. Raises ProjectFileError on a bad key or value.
+    """
+    row_id, _, field = key.rpartition(".")
+    value = " ".join(value.split())
+    panel = next((p for p in document["panels"] if p["id"] == row_id), None)
+    if panel is not None:
+        if field == "characters":
+            cast = document["cast"]
+            known = {c["name"].lower(): c["name"] for c in cast}
+            for character in cast:
+                for alias in character.get("aliases", []):
+                    known.setdefault(alias.lower(), character["name"])
+            versions = {c["name"]: c.get("version") for c in panel.get("characters", [])}
+            names = _names(", ".join(known.get(n.lower(), n) for n in _names(value)))
+            for name in names:
+                if name.lower() not in known:  # new to the story: add to the cast
+                    cast.append({"name": name})
+                    known[name.lower()] = name
+            panel["characters"] = [{"name": n, "version": versions.get(n)} for n in names]
+        elif field == "expressions":
+            expressions = {}
+            for part in value.split(";"):
+                who, colon, what = part.partition(":")
+                if not part.strip():
+                    continue
+                if not colon or not who.strip() or not what.strip():
+                    raise ProjectFileError(
+                        "write expressions as 'Name: expression; Name: expression'")
+                expressions[who.strip()] = what.strip()
+            if expressions:
+                panel["expressions"] = expressions
+            else:
+                panel.pop("expressions", None)
+        elif field in PANEL_TEXT_FIELDS:
+            if field == "aspect_ratio" and value and not _ASPECT.match(value):
+                raise ProjectFileError("aspect ratio must look like 3:2")
+            if value or field == "action":  # action is required, the rest optional
+                panel[field] = value
+            else:
+                panel.pop(field, None)
+        else:
+            raise ProjectFileError(f"panels have no editable field {field!r}")
+        return row_id
+    page = next((p for p in document["pages"] if p["id"] == row_id), None)
+    if page is not None:
+        if field != "label" or not value:
+            raise ProjectFileError("a page needs a label")
+        page["label"] = value
+        return row_id
+    character = next((c for c in document["cast"]
+                      if character_id is not None and character_id(c["name"]) == row_id),
+                     None)
+    if character is not None:
+        if field == "aliases":
+            aliases = _names(value)
+            if aliases:
+                character["aliases"] = aliases
+            else:
+                character.pop("aliases", None)
+        elif field == "notes":
+            if value:
+                character["notes"] = value
+            else:
+                character.pop("notes", None)
+        else:
+            raise ProjectFileError(f"characters have no editable field {field!r}")
+        return row_id
+    raise ProjectFileError(f"{row_id} is no longer in the project")

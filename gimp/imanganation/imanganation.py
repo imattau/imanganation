@@ -54,10 +54,17 @@ from gi.repository import (  # noqa: E402
 try:
     from layouts import FRAME_STYLES, layouts_for_count, page_panel_count
     from panel_ui import build_docks, build_welcome_docks, character_row_id, rgb_png
-    from project_store import ProjectFileError, load_project, new_id, record_take, save_project
+    from project_store import (
+        ProjectFileError,
+        apply_field_edit,
+        load_project,
+        new_id,
+        record_take,
+        save_project,
+    )
 except ImportError:  # Keep older single-file plug-in installs usable for legacy projects.
     ProjectFileError = ValueError
-    load_project = record_take = save_project = None
+    load_project = record_take = save_project = apply_field_edit = None
     new_id = None
     build_docks = None
     character_row_id = None
@@ -93,6 +100,8 @@ DOCK_ACTIONS = {
     DOCK_PANEL: "plug-in-imanganation-dock-panel-refresh",
 }
 DOCK_OPEN_PROJECT = "plug-in-imanganation-dock-open-project"
+DOCK_OPEN_PAGE = "plug-in-imanganation-dock-open-page"  # Context's "Open page" button
+DOCK_GENERATE_LAYOUT = "plug-in-imanganation-dock-generate-page-layout"
 # Windows > Imanganation: reopen a closed dock (the host keeps closed docks closed).
 DOCK_SHOW = {dock: f"plug-in-imanganation-show-dock-{dock}" for dock in DOCK_IDS}
 DOCK_MENU_LABELS = {
@@ -102,6 +111,7 @@ DOCK_MENU_LABELS = {
 }
 DOCK_ITEMS = {
     DOCK_PROJECT: "plug-in-imanganation-dock-project-item",
+    DOCK_INSPECTOR: "plug-in-imanganation-dock-inspector-field",  # an edited field
     DOCK_FILMSTRIP: "plug-in-imanganation-dock-filmstrip-item",
     DOCK_SCRIPT: "plug-in-imanganation-dock-script-item",
     DOCK_CHARACTERS: "plug-in-imanganation-dock-characters-item",
@@ -1444,7 +1454,8 @@ def page_layout(procedure, run_mode, image, drawables, config, data):
         layer = _draw_page_layout(image, layout, frame_style)
         Gimp.message(f"Added {layout['name']} with {frame_style['name']} frames to "
                      f"{page.get('label', 'page')}. "
-                     "Select inside a frame with Fuzzy Select, then render into it.")
+                     "Select inside a frame with Fuzzy Select, render into it, and "
+                     "save the page XCF.")
         return _success(procedure, layer)
     except Exception as exc:
         return _error(procedure, str(exc))
@@ -1765,8 +1776,9 @@ def _refresh_project_docks(sync_canvas=False):
     selected_id = _DOCK_CONTEXT.get("selected_id")
     if sync_canvas:
         selected_id = _selected_canvas_panel_id(manifest) or selected_id
-    contents = build_docks(manifest, selected_id, root,
-                           _project_page_thumbnails(root, manifest))
+    contents = build_docks(
+        manifest, selected_id, root, _project_page_thumbnails(root, manifest),
+        DOCK_OPEN_PAGE, DOCK_GENERATE_LAYOUT)
     _DOCK_CONTEXT["selected_id"] = contents["selected_id"]
     canvas_rows = _canvas_take_rows(manifest)
     if canvas_rows:
@@ -2172,6 +2184,27 @@ def _dock_action(procedure, config, data):
             page_id = selected if any(page["id"] == selected for page in manifest["pages"]) \
                 else (panel.get("placement") or {}).get("page") if panel else None
             _show_project_page(_DOCK_CONTEXT["root"], manifest, page_id)
+        elif data == "generate-layout":
+            root = _DOCK_CONTEXT["root"]
+            manifest = load_project(root)
+            selected = _DOCK_CONTEXT.get("selected_id")
+            if not any(page["id"] == selected for page in manifest["pages"]):
+                raise ValueError("Select a page in the Pages or Project dock first")
+            image = _show_project_page(root, manifest, selected)
+            layout_procedure = Gimp.get_pdb().lookup_procedure(PROC_PAGE_LAYOUT)
+            if layout_procedure is None:
+                raise ValueError("The page layout command is unavailable")
+            layout_config = layout_procedure.create_config()
+            layout_config.set_property("run-mode", Gimp.RunMode.INTERACTIVE)
+            layout_config.set_property("image", image)
+            drawables = image.get_selected_drawables() or image.get_layers()[:1]
+            layout_config.set_core_object_array("drawables", drawables)
+            result = layout_procedure.run(layout_config)
+            status = result.index(0)
+            error = Gimp.get_pdb().get_last_error()
+            if status not in (Gimp.PDBStatusType.SUCCESS, Gimp.PDBStatusType.CANCEL):
+                raise RuntimeError(error or "Generate layout failed")
+            _refresh_project_docks()
         elif data == "match-panel":
             _match_selected_panel()
             _refresh_project_docks()
@@ -2184,6 +2217,20 @@ def _dock_action(procedure, config, data):
         return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
     except Exception as exc:
         return _error(procedure, str(exc))
+
+
+def _dock_field_edit(procedure, config, data):
+    """A Context field was edited: write it to the manifest, then redraw the docks."""
+    try:
+        key, _, value = config.get_property("item").partition("\t")
+        root = _DOCK_CONTEXT["root"]
+        manifest = load_project(root)
+        apply_field_edit(manifest, key, value, character_row_id)
+        save_project(root, manifest)
+        _refresh_project_docks()
+    except Exception as exc:
+        return _error(procedure, f"Could not save that change: {exc}")
+    return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
 
 
 def _dock_item_action(procedure, config, data):
@@ -2221,6 +2268,9 @@ def _add_dock_callbacks(plugin):
         (DOCK_ACTIONS[DOCK_PROJECT], _dock_action, "project-action", False),
         (DOCK_OPEN_PROJECT, _dock_action, "open-project", False),
         (DOCK_ACTIONS[DOCK_INSPECTOR], _dock_action, "generate", False),
+        (DOCK_ITEMS[DOCK_INSPECTOR], _dock_field_edit, "field", True),
+        (DOCK_OPEN_PAGE, _dock_action, "open-page", False),
+        (DOCK_GENERATE_LAYOUT, _dock_action, "generate-layout", False),
         # Page strip: clicking a page opens it; the button adds one (as in Project)
         (DOCK_ACTIONS[DOCK_FILMSTRIP], _dock_action, "project-action", False),
         (DOCK_ITEMS[DOCK_PROJECT], _dock_item_action, DOCK_PROJECT, True),
@@ -2272,13 +2322,14 @@ def _register_project_docks(plugin):
         manifest = load_project(root)
         contents = build_docks(
             manifest, _DOCK_CONTEXT.get("selected_id"), root,
-            _project_page_thumbnails(root, manifest))
+            _project_page_thumbnails(root, manifest), DOCK_OPEN_PAGE,
+            DOCK_GENERATE_LAYOUT)
         rows = [
             (DOCK_PROJECT, "Project", "tree", contents["project"],
              contents["project_selected"], "Add page", DOCK_ACTIONS[DOCK_PROJECT],
              DOCK_ITEMS[DOCK_PROJECT]),
             (DOCK_INSPECTOR, "Context", "properties", contents["inspector"],
-             "", "Generate", DOCK_ACTIONS[DOCK_INSPECTOR], ""),
+             "", "Generate", DOCK_ACTIONS[DOCK_INSPECTOR], DOCK_ITEMS[DOCK_INSPECTOR]),
             (DOCK_FILMSTRIP, "Pages", "strip", contents["filmstrip"],
              contents["filmstrip_selected"], "Add page", DOCK_ACTIONS[DOCK_FILMSTRIP],
              DOCK_ITEMS[DOCK_FILMSTRIP]),

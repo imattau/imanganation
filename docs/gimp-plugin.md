@@ -59,6 +59,16 @@ work shows), click to open a page, **Add page** to add one. With a panel
 selected (in a dock or on the canvas), Context's **Generate** renders it through *Render
 Panel into Frame*: into its saved frame, or the selection on an open project page. Panel
 and Character Bible are folded into Context and open only from *Windows → Imanganation*.
+Context is also where the brief is edited: a panel's characters, expressions
+(`Name: expression; …`), location, shot, aspect ratio, action and notes, a page's label,
+and a character's aliases and notes are fields. Enter or leaving a field saves it to
+`project.json`, and Escape reverts. A typed character name matches the cast
+(case-insensitive, aliases too), and a new name joins the cast, so a parser miss such as
+a missing character is fixed in place, then regenerated. **Open page** opens the page a
+panel is placed on.
+With a page selected, Context reports the matching script-panel count and available
+layouts, then offers **Generate layout** when a built-in frame count matches. That
+action opens the selected page and layout picker in one step.
 On first launch, the Project dock offers **Open project…**; the
 chosen project folder is remembered in GIMP's user settings and its docks are restored on
 later launches. The **Open / Switch Project…** command remains available under

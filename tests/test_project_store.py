@@ -11,11 +11,13 @@ import pytest
 
 from gimp.imanganation.project_store import (
     ProjectFileError,
+    apply_field_edit,
     load_project,
     new_id,
     record_take,
     save_project,
 )
+from gimp.imanganation.panel_ui import character_row_id
 from manganation.project_container import integrity_errors
 
 
@@ -106,3 +108,43 @@ def test_derived_take_has_new_file_and_links_to_parent(tmp_path):
     assert refined_path != original_path
     assert integrity_errors(document) == []
     jsonschema.validate(document, SCHEMA)
+
+
+def test_context_field_edits_change_only_their_field_and_stay_valid(tmp_path):
+    document = copy.deepcopy(EXAMPLE)
+    edit = lambda key, value: apply_field_edit(document, key, value, character_row_id)  # noqa: E731
+    panel = document["panels"][4]
+    panel["characters"][1]["version"] = "winter"
+
+    # The parser-miss fix: names match the cast case-insensitively, keep their pinned
+    # version, and a new name joins the cast.
+    assert edit(f"{panel['id']}.characters", "akira, Yuki,  Hana , yuki") == panel["id"]
+    assert panel["characters"] == [{"name": "Akira", "version": "winter"},
+                                   {"name": "Yuki", "version": None},
+                                   {"name": "Hana", "version": None}]
+    assert {"name": "Hana"} in document["cast"]
+    edit(f"{panel['id']}.expressions", "Yuki: wide grin; Akira: sighs")
+    assert panel["expressions"] == {"Yuki": "wide grin", "Akira": "sighs"}
+    edit(f"{panel['id']}.expressions", "")
+    assert "expressions" not in panel
+    edit(f"{panel['id']}.action", "Yuki drags Akira\nby the wrist")
+    assert panel["action"] == "Yuki drags Akira by the wrist"
+    edit(f"{panel['id']}.camera", "")
+    assert "camera" not in panel
+    edit("pg_a1b2c3.label", "Opening")
+    assert document["pages"][0]["label"] == "Opening"
+    edit(f"{character_row_id('Yuki')}.aliases", "Yu, Snow")
+    assert document["cast"][1]["aliases"] == ["Yu", "Snow"]
+
+    save_project(tmp_path, document)  # still a valid container
+    jsonschema.validate(load_project(tmp_path), SCHEMA)
+    assert integrity_errors(load_project(tmp_path)) == []
+
+    with pytest.raises(ProjectFileError, match="3:2"):
+        edit(f"{panel['id']}.aspect_ratio", "wide")
+    with pytest.raises(ProjectFileError, match="Name: expression"):
+        edit(f"{panel['id']}.expressions", "grinning")
+    with pytest.raises(ProjectFileError, match="no editable field"):
+        edit(f"{panel['id']}.status", "placed")
+    with pytest.raises(ProjectFileError, match="no longer in the project"):
+        edit("pnl_gone00.action", "x")
