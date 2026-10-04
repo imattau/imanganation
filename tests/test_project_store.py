@@ -148,3 +148,30 @@ def test_context_field_edits_change_only_their_field_and_stay_valid(tmp_path):
         edit(f"{panel['id']}.status", "placed")
     with pytest.raises(ProjectFileError, match="no longer in the project"):
         edit("pnl_gone00.action", "x")
+
+
+def test_project_from_a_script_is_a_valid_container(tmp_path):
+    from gimp.imanganation.project_store import project_from_script
+    from manganation.script.formats import canonical
+
+    text = ("CHARACTERS\nYUKI (aka Snow): silver bob\n\nPAGE 1\n"
+            "[SCENE: School rooftop — late afternoon]\n"
+            "Panel 1: Wide shot. Yuki drags Akira by the wrist.\nAKIRA: Hey!\n"
+            "CUT TO: the stairwell\nPanel 2: Akira trips.\n"
+            "PAGE 2\n[SCENE: School rooftop - cont.]\nPanel 1: Yuki laughs.\n")
+    document = project_from_script(canonical.parse(text), title="Rooftop",
+                                   script_file="script/script.md", script_text=text,
+                                   script_format="canonical")
+    assert document["cast"] == [{"name": "Yuki", "aliases": ["Snow"], "notes": "silver bob"},
+                                {"name": "Akira", "aliases": []}]
+    assert [l["name"] for l in document["locations"]] == ["School rooftop", "the stairwell"]
+    first = document["panels"][0]
+    assert [c["name"] for c in first["characters"]] == ["Akira", "Yuki"]
+    assert document["cursor"]["next_panel"] == first["id"]
+    assert [p["label"] for p in document["panels"]] == [
+        {"page": 1, "panel": 1}, {"page": 1, "panel": 2}, {"page": 2, "panel": 1}]
+    (tmp_path / "script").mkdir()
+    (tmp_path / "script/script.md").write_text(text)
+    save_project(tmp_path, document)
+    jsonschema.validate(load_project(tmp_path), SCHEMA)
+    assert integrity_errors(load_project(tmp_path), root=tmp_path) == []

@@ -12,7 +12,7 @@ import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -163,8 +163,9 @@ class CharacterRequest(BaseModel):
     description: str = Field(default="", max_length=4000)
     aliases: list[str] = Field(default_factory=list)
     seed: int | None = None
-    # Re-derive traits from the description and replace an existing base design
-    replace: bool = False
+    # A character that has a design: re-derive traits from the description (empty
+    # keeps them) and add a new design version as the active reference
+    redesign: bool = False
 
     @model_validator(mode="after")
     def _one_form(self):
@@ -173,7 +174,22 @@ class CharacterRequest(BaseModel):
         return self
 
 
-JobKind = Literal["render", "refine", "inpaint", "character"]
+class ScriptParseRequest(BaseModel):
+    """A script as text. Page/panel scripts parse instantly; prose goes through the
+    LLM (queued like any job, so it never shares the GPU with a render)."""
+
+    text: str = Field(min_length=1, max_length=500_000)
+    title: str = ""
+
+
+JobKind = Literal["render", "refine", "inpaint", "character", "parse"]
+
+
+@dataclass
+class ParsedScript:
+    format: str
+    cast: list
+    panels: list
 
 
 class Job(BaseModel):
@@ -257,6 +273,7 @@ def create_app(
     inpaint_inline=inpaint_render.inpaint_inline,
     outputs: Path | None = None,
     design_character=None,
+    parse_script=None,
 ) -> FastAPI:
     app = FastAPI(title="imanganation engine")
     jobs: dict[str, Job] = {}
@@ -507,22 +524,37 @@ def create_app(
         return {"name": character.name, "version": version_id, "previous": previous,
                 "reference": str(reg.reference_path(character.name))}
 
+    @app.post("/scripts/parse", status_code=202)
+    def submit_parse(req: ScriptParseRequest) -> Job:
+        """-> result ``{"format", "cast": [...], "panels": [...]}``, the plain-dict shape
+        of ``script/formats/canonical.py`` (what the plug-in builds a project from)."""
+        from manganation.script.formats.mangaplay import looks_canonical
+        from manganation.script.parser import parse
+
+        def work():
+            script = (parse_script or parse)(req.text, title=req.title)
+            data = script.model_dump(mode="json")
+            return ParsedScript(format="canonical" if looks_canonical(req.text) else "prose",
+                                cast=data["cast"], panels=data["panels"])
+
+        return submit_job("parse", {"title": req.title, "chars": len(req.text)}, work)
+
     @app.post("/characters", status_code=202)
     def submit_character(req: CharacterRequest) -> Job:
         from manganation.characters.cast import design_character as default_design
 
         reg = _registry(req.project_dir, req.project)
         existing = reg.get(req.name)
-        if existing is not None and existing.version("base") is not None and not req.replace:
-            raise HTTPException(409, f"{existing.name} already has a design; send replace "
-                                     "to redesign it")
+        if existing is not None and existing.default_version is not None and not req.redesign:
+            raise HTTPException(409, f"{existing.name} already has a design; send redesign "
+                                     "to make a new one")
         if not req.description.strip() and (
                 existing is None or not existing.appearance.appearance_tags()):
             raise HTTPException(422, f"describe {req.name} first")
         design = design_character or default_design
         return submit_job("character", req.model_dump(), lambda: design(
             reg, req.name, req.description, aliases=req.aliases, seed=req.seed,
-            replace=req.replace))
+            redesign=req.redesign))
 
     @app.get("/jobs/{job_id}")
     def status(job_id: str) -> Job:

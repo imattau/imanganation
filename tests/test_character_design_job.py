@@ -20,7 +20,7 @@ class FakeLLM:
         self.messages, self.unloaded = [], False
 
     def chat_json(self, messages, *, schema=None):
-        assert not self.unloaded, "the LLM must not run after it was unloaded"
+        self.unloaded = False  # a call loads it again
         self.messages.append(messages)
         return {"gender": "1girl", "hair_color": "bleached blonde hair", "hair_style": "bob",
                 "eye_color": "grey eyes", "outfit": "school blazer worn open",
@@ -32,7 +32,11 @@ class FakeLLM:
 
 class FakeComfy:
     def __init__(self, llm):
-        self.llm, self.graphs = llm, []
+        self.llm, self.graphs, self.freed = llm, [], False
+
+    def free(self):
+        assert not self.llm.messages, "ComfyUI must free the GPU before the LLM runs"
+        self.freed = True
 
     def is_up(self):
         return True
@@ -61,15 +65,19 @@ def test_design_character_derives_from_the_description_then_renders(tmp_path):
     assert rin.default_version == "base"
     assert CharacterRegistry.from_path(tmp_path).reference_path("Rin").is_file()
     assert "bleached blonde hair" in comfy.graphs[0]["2"]["inputs"]["text"]
+    assert comfy.freed
 
 
-def test_existing_traits_are_kept_unless_replaced(tmp_path):
+def test_redesign_adds_a_version_and_keeps_traits_without_a_description(tmp_path):
     reg = CharacterRegistry.from_path(tmp_path)
     llm = FakeLLM()
     design_character(reg, "Rin", "girl", llm=llm, comfy=FakeComfy(llm))
     llm2 = FakeLLM()
-    design_character(reg, "Rin", "", llm=llm2, comfy=FakeComfy(llm2), replace=True)
+    again = design_character(reg, "Rin", "", llm=llm2, comfy=FakeComfy(llm2), redesign=True)
     assert llm2.messages == []  # no description: keep the traits, only redesign
+    rin = CharacterRegistry.from_path(tmp_path).get("Rin")
+    assert again.version_id == "design-02" and rin.default_version == "design-02"
+    assert [v.id for v in rin.versions] == ["base", "design-02"]  # the first is kept
     with pytest.raises(ValueError, match="describe"):
         design_character(reg, "Nobody", "", llm=FakeLLM(), comfy=FakeComfy(FakeLLM()))
 
@@ -98,8 +106,8 @@ def test_api_queues_a_character_job(tmp_path):
     projects.mkdir()
     calls = []
 
-    def fake_design(reg, name, description, *, aliases, seed, replace):
-        calls.append((name, description, aliases, replace))
+    def fake_design(reg, name, description, *, aliases, seed, redesign):
+        calls.append((name, description, aliases, redesign))
         from manganation.characters.cast import CharacterDesign
         return CharacterDesign(name=name, created=True, appearance={}, version_id="base",
                                image="x.png", seed=1, prompt="p")
@@ -118,3 +126,19 @@ def test_api_queues_a_character_job(tmp_path):
     assert calls == [("Rin", "red hair", [], False)]
     assert client.post("/characters", json={**body, "description": ""}).status_code == 422
     assert client.post("/characters", json={"name": "Rin"}).status_code == 422
+
+
+def test_api_parses_a_script_into_plain_dicts(tmp_path):
+    client = TestClient(create_app(root=tmp_path, outputs=tmp_path / "out"))
+    job = client.post("/scripts/parse", json={
+        "text": "CHARACTERS\nRIN: red hair\n\nPAGE 1\nPanel 1: Rin waves.\n"}).json()
+    assert job["kind"] == "parse"
+    for _ in range(100):
+        state = client.get(f"/jobs/{job['id']}").json()
+        if state["status"] in ("done", "error"):
+            break
+        time.sleep(0.02)
+    result = state["result"]
+    assert result["format"] == "canonical"
+    assert result["cast"] == [{"name": "Rin", "aliases": [], "description": "red hair"}]
+    assert result["panels"][0]["characters"] == ["Rin"]

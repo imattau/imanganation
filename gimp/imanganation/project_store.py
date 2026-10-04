@@ -356,3 +356,87 @@ def apply_field_edit(document: dict[str, Any], key: str, value: str,
             raise ProjectFileError(f"characters have no editable field {field!r}")
         return row_id
     raise ProjectFileError(f"{row_id} is no longer in the project")
+
+
+def _location_name(heading: str) -> str:
+    """'School rooftop — late afternoon' -> 'School rooftop' (the place, not the time)."""
+    return re.split(r"\s+[—–-]\s+", heading.strip(), maxsplit=1)[0].strip()
+
+
+def project_from_script(parsed: dict[str, Any], *, title: str, script_file: str,
+                        script_text: str, script_format: str,
+                        reading_order: str = "rtl") -> dict[str, Any]:
+    """A new project manifest from a parsed script (``script_canonical.parse`` output or
+    the engine's parse result: ``{"cast": [...], "panels": [...]}``).
+
+    Panels start unplaced; the caller adds pages (one per script page) and saves.
+    Cast entries keep the script's description as their notes; locations come from
+    scene headings and ``CUT TO:`` targets.
+    """
+    import hashlib
+
+    if not parsed.get("panels"):
+        raise ProjectFileError("the script has no panels")
+    now = datetime.now().astimezone().isoformat(timespec="seconds")
+    panels = []
+    for item in parsed["panels"]:
+        panels.append({
+            "id": new_id("pnl_"),
+            "label": {"page": int(item.get("page", 1)), "panel": int(item.get("panel", 1))},
+            "scene_heading": item.get("scene_heading", ""),
+            "location": item.get("location", ""),
+            "characters": [{"name": name, "version": None}
+                           for name in item.get("characters", [])],
+            "action": item.get("action", ""),
+            "camera": item.get("camera", ""),
+            "expressions": dict(item.get("expressions") or {}),
+            "dialogue": [{"speaker": d["speaker"], "text": d["text"],
+                          "kind": d.get("kind", "speech")}
+                         for d in item.get("dialogue", [])],
+            "sfx": list(item.get("sfx", [])),
+            "notes": item.get("notes", ""),
+            "flashback": bool(item.get("flashback", False)),
+            "aspect_ratio": item.get("aspect_ratio") or "1:1",
+            "seed": item.get("seed"),
+            "status": "unplaced",
+            "placement": None,
+            "takes": [],
+            "active_take": None,
+        })
+    cast: list[dict[str, Any]] = []
+    known: set[str] = set()
+    for entry in parsed.get("cast", []):
+        if entry["name"].lower() in known:
+            continue
+        known.add(entry["name"].lower())
+        record: dict[str, Any] = {"name": entry["name"],
+                                  "aliases": list(entry.get("aliases", []))}
+        if entry.get("description"):
+            record["notes"] = entry["description"]
+        cast.append(record)
+    for panel in panels:  # characters the cast block did not declare
+        for character in panel["characters"]:
+            if character["name"].lower() not in known:
+                known.add(character["name"].lower())
+                cast.append({"name": character["name"], "aliases": []})
+    locations = dict.fromkeys(
+        name for panel in panels
+        for name in (_location_name(panel["location"]), _location_name(panel["scene_heading"]))
+        if name)
+    return {
+        "format": FORMAT,
+        "version": VERSION,
+        "project": {"id": new_id("prj_"), "title": title, "reading_order": reading_order,
+                    "default_color_mode": "color", "created": now, "modified": now},
+        "script": {"file": script_file, "format": script_format, "parsed_at": now,
+                   "sha256": hashlib.sha256(script_text.encode("utf-8")).hexdigest(),
+                   "parser": {"kind": "plug-in" if script_format == "canonical"
+                              else "engine"}},
+        "panels": panels,
+        "pages": [],
+        "takes": {},
+        "cast": cast,
+        "locations": [{"name": name} for name in locations],
+        "props": [],
+        "cursor": {"next_panel": panels[0]["id"]},
+    }

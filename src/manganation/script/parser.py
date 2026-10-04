@@ -179,6 +179,11 @@ def parse(
     # the story, and its panels then pick up the declared names too.
     cast, story = split_cast(script_text)
     active_client: LLMClient = client or OllamaClient(settings.llm.base_url, settings.llm.model)
+    if client is None:  # a real LLM: ComfyUI lets go of the GPU first
+        from manganation.render.comfy_client import ComfyClient
+
+        active_client.unload()  # reload it onto the GPU ComfyUI just freed
+        ComfyClient(settings.comfyui.base_url).free()
     messages = _build_messages(story, reading_order)
 
     last_error: Exception | None = None

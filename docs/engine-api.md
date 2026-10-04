@@ -134,15 +134,16 @@ polled at `GET /jobs/{id}`, queued with renders):
 ```json
 {"project": "prj_…", "name": "Rin", "description": "tall delinquent girl, bleached bob,
  school blazer worn open, scar on chin", "aliases": ["Rin-san"], "seed": null,
- "replace": false}
+ "redesign": false}
 ```
 
 The LLM turns the description into traits (the description is authoritative; only
 fields it leaves open are filled), is unloaded, then ComfyUI renders the design sheet,
 locked as the `base` reference. The result has `name`, `created`, `appearance`,
 `version_id`, `image`, `seed`, `prompt`. A character that already has a design is a
-`409` unless `replace` (which re-derives traits from a new description, or keeps the
-traits when it is empty). No description and no traits is a `422`.
+`409` unless `redesign`: traits are re-derived from a new description (an empty one
+keeps them) and the sheet is added as a new version (`design-02`, …) and made active;
+earlier designs are kept. No description and no traits is a `422`.
 
 ## Paths in container forms
 

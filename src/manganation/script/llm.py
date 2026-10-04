@@ -58,6 +58,9 @@ class OllamaClient:
         }
         if json_schema is not None:
             payload["format"] = json_schema
+            # Thinking models (qwen3.5) put their answer in "thinking" and leave the
+            # constrained content empty; the schema already structures the answer.
+            payload["think"] = False
         r = httpx.post(f"{self.base_url}/api/chat", json=payload, timeout=timeout)
         if r.status_code != 200:
             raise LLMError(f"ollama chat failed ({r.status_code}): {r.text}")

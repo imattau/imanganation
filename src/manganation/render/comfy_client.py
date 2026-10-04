@@ -28,6 +28,33 @@ class ComfyClient:
         except httpx.HTTPError:
             return False
 
+    def free(self, wait: float = 20.0) -> None:
+        """Unload ComfyUI's models and free its VRAM, so the LLM fits on the GPU (on 16 GB
+        a resident SDXL leaves the LLM running on the CPU, minutes per answer). ComfyUI
+        reloads them on the next render."""
+        try:
+            before = self._vram_free()
+            httpx.post(f"{self.base_url}/free",
+                       json={"unload_models": True, "free_memory": True}, timeout=10.0)
+        except httpx.HTTPError:
+            return  # not running: nothing to free
+        # /free only queues the unload; wait for the memory to come back, or the LLM
+        # loads first and is placed on the CPU anyway.
+        deadline, last = time.monotonic() + wait, before
+        while time.monotonic() < deadline:
+            time.sleep(0.5)
+            try:
+                now = self._vram_free()
+            except httpx.HTTPError:
+                return
+            if now > before + 512 * 2**20 and now == last:  # freed, and settled
+                return
+            last = now
+
+    def _vram_free(self) -> int:
+        stats = httpx.get(f"{self.base_url}/system_stats", timeout=3.0).json()
+        return sum(d.get("vram_free", 0) for d in stats.get("devices", []))
+
     def queue(self, workflow: dict[str, Any]) -> str:
         r = httpx.post(
             f"{self.base_url}/prompt",

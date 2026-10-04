@@ -18,6 +18,7 @@ from manganation.characters.generator import DesignResult, generate_design
 from manganation.characters.registry import CharacterRegistry
 from manganation.characters.traits import derive_appearance
 from manganation.config import Settings, load_settings
+from manganation.render.comfy_client import ComfyClient
 from manganation.script.schema import Script
 
 
@@ -124,7 +125,7 @@ def design_character(
     *,
     aliases: list[str] | None = None,
     seed: int | None = None,
-    replace: bool = False,
+    redesign: bool = False,
     settings: Settings | None = None,
     llm=None,
     comfy=None,
@@ -133,8 +134,9 @@ def design_character(
     traits with the LLM, release the LLM's VRAM, then render and lock its design sheet.
 
     Used by the engine's ``POST /characters``: the GIMP plug-in's New Character… and
-    New Project from Script… both end here. ``replace`` re-derives traits from the
-    description and replaces an existing base design.
+    New Project from Script… both end here. ``redesign`` re-derives traits from a new
+    description (an empty one keeps the traits) and adds a new design version
+    (``design-02``, …) as the active reference; earlier designs are never overwritten.
     """
     from manganation.script.llm import OllamaClient
 
@@ -145,21 +147,28 @@ def design_character(
                          *[a for a in (aliases or []) if a not in character.aliases]]
     if description.strip():
         character.notes = description.strip()
-    if replace or not character.appearance.appearance_tags():
+    if redesign or not character.appearance.appearance_tags():
         if not description.strip() and not character.appearance.appearance_tags():
             raise ValueError(f"describe {character.name} first: no traits or description")
         if description.strip():
             client = llm or OllamaClient(settings.llm.base_url, settings.llm.model)
+            # LLM and diffusion take turns on the GPU: ComfyUI lets go first, and an LLM
+            # still loaded (placed on the CPU while ComfyUI held the GPU) is reloaded
+            client.unload()
+            (comfy or ComfyClient(settings.comfyui.base_url)).free()
             character.appearance = derive_appearance(
-                character.name, "", existing=None if replace else character.appearance,
+                character.name, "", existing=None if redesign else character.appearance,
                 settings=settings, client=client, description=description,
             )
             if settings.llm.unload_before_render:
                 client.unload()  # never share the GPU with SDXL
     registry.save()
-    result = generate_design(character, registry, seed=seed, settings=settings,
-                             client=comfy, replace=replace or character.version("base")
-                             is not None)
+    version_id, number = "base", 1
+    while character.version(version_id) is not None:
+        number += 1
+        version_id = f"design-{number:02d}"
+    result = generate_design(character, registry, version_id=version_id, seed=seed,
+                             settings=settings, client=comfy)
     return CharacterDesign(
         name=character.name, created=created,
         appearance=character.appearance.model_dump(), version_id=result.version_id,
