@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from layouts import FRAME_STYLES, LAYOUTS, layouts_for_count, page_panel_count
+from gimp.imanganation.layouts import FRAME_STYLES, LAYOUTS, layouts_for_count, page_panel_count
 
 
 def test_layout_presets_are_filtered_to_exact_frame_count():
