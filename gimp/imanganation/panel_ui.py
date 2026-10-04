@@ -77,10 +77,38 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
             and selected_id not in character_by_id):
         selected_id = next(iter(panel_by_id), next(iter(page_by_id), ""))
 
+    page_counts = {page["id"]: 0 for page in pages}
+    for panel in panels:
+        page_id = (panel.get("placement") or {}).get("page")
+        if page_id in page_counts:
+            page_counts[page_id] += 1
+
+    def page_file_state(page: dict[str, Any]) -> str:
+        if not page.get("file"):
+            return "No XCF"
+        if root is None:
+            return Path(page["file"]).name
+        return "XCF ready" if (Path(root) / page["file"]).is_file() else "XCF missing"
+
+    def page_progress(page: dict[str, Any]) -> str:
+        count = page_counts[page["id"]]
+        if root is not None and page.get("file") and page_file_state(page) == "XCF missing":
+            return "! XCF missing"
+        if count == 0:
+            return "○ Not started"
+        if not page.get("file"):
+            return "◐ Draft"
+        return "● In progress"
+
     title = _label(manifest.get("project", {}).get("title")) or "Untitled project"
-    project_rows = [f"# {title}", "# Pages"]
+    chapter = _label(manifest.get("project", {}).get("chapter"))
+    project_rows = [f"# {title}"]
+    if chapter:
+        project_rows.append(f"# {chapter}")
+    project_rows.append("# Pages")
     for page in pages:
-        project_rows.append(f"{page['id']}\t{_label(page.get('label')) or 'Page'}")
+        page_label = _label(page.get("label")) or "Page"
+        project_rows.append(f"{page['id']}\t{page_label} · {page_progress(page)}")
     project_rows.append("# Script panels")
     for panel in panels:
         if panel.get("status") == "orphaned":
@@ -114,29 +142,6 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
                 if len(summary) > 140:
                     summary = summary[:137].rstrip() + "…"
                 project_rows.append(f"\t\t# {summary}")
-
-    page_counts = {page["id"]: 0 for page in pages}
-    for panel in panels:
-        page_id = (panel.get("placement") or {}).get("page")
-        if page_id in page_counts:
-            page_counts[page_id] += 1
-
-    def page_file_state(page: dict[str, Any]) -> str:
-        if not page.get("file"):
-            return "No XCF"
-        if root is None:
-            return Path(page["file"]).name
-        return "XCF ready" if (Path(root) / page["file"]).is_file() else "XCF missing"
-
-    def page_progress(page: dict[str, Any]) -> str:
-        count = page_counts[page["id"]]
-        if root is not None and page.get("file") and page_file_state(page) == "XCF missing":
-            return "! XCF missing"
-        if count == 0:
-            return "○ Not started"
-        if not page.get("file"):
-            return "◐ Draft"
-        return "● In progress"
 
     previews = previews or {}
     filmstrip_rows = []
