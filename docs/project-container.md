@@ -188,19 +188,22 @@ A one-shot importer can do this. The rooftop example file was hand-converted thi
 
 The Python plug-in now reads the container cursor by panel id and writes it atomically.
 The persistent Python **Open Project Docks…** command renders Project, Script, Inspector,
-Page Filmstrip, and Character Bible from the manifest; panel, page, and cast rows send
-stable keys over the PDB. Script rows follow panel reading order and select the same
-panel in the other docks. Cast, locations, and props are grouped under Assets; location
-and prop notes are shown as non-activating summaries because those manifest entries do
-not yet have IDs. The Character Bible keeps project cast, aliases, and story notes
-separate from engine-owned versions and reference-image state.
+Panel, Page Filmstrip, and Character Bible from the manifest; panel, page, and cast rows
+send stable keys over the PDB. Script rows follow panel reading order and select the same
+panel in the other docks. Panel presents the selected script panel as a production brief:
+action, cast/version, location, shot, dialogue, sound effects, and status. Cast, locations,
+and props are grouped under Assets; location and prop notes are shown as non-activating
+summaries because those manifest entries do not yet have IDs. The Character Bible keeps
+project cast, aliases, and story notes separate from engine-owned versions and
+reference-image state.
 For container projects it also copies newly rendered, refined, and inpainted images into
 unique files under `takes/`, adds a new take id, and advances `active_take`; a legacy
-image used from `panels/` is first imported as an immutable take. The currently shipped
-engine still reads `panels.json` and writes its own compatibility files under `panels/`.
-The plug-in checks that both panel lists have matching counts and display labels before
-rendering. Manifest-only rendering, page placement references, and the XCF reference-only
-parasites are follow-on migration steps.
+image used from `panels/` is first imported as an immutable take. Opened page images and
+manifest-backed rendered/refined/inpainted layers carry reference-only XCF parasites.
+The currently shipped engine still reads `panels.json` and writes its own compatibility
+files under `panels/`. The plug-in checks that both panel lists have matching counts and
+display labels before rendering. Manifest-only rendering and page placement references
+remain follow-on migration steps.
 
 ## Validation
 

@@ -66,14 +66,16 @@ DOCK_INSPECTOR = "inspector"
 DOCK_FILMSTRIP = "filmstrip"
 DOCK_SCRIPT = "script"
 DOCK_CHARACTERS = "characters"
+DOCK_PANEL = "panel"
 DOCK_IDS = (DOCK_PROJECT, DOCK_INSPECTOR, DOCK_FILMSTRIP, DOCK_SCRIPT,
-            DOCK_CHARACTERS)
+            DOCK_CHARACTERS, DOCK_PANEL)
 DOCK_ACTIONS = {
     DOCK_PROJECT: "plug-in-imanganation-dock-project-refresh",
     DOCK_INSPECTOR: "plug-in-imanganation-dock-inspector-refresh",
     DOCK_FILMSTRIP: "plug-in-imanganation-dock-filmstrip-open-page",
     DOCK_SCRIPT: "plug-in-imanganation-dock-script-refresh",
     DOCK_CHARACTERS: "plug-in-imanganation-dock-characters-refresh",
+    DOCK_PANEL: "plug-in-imanganation-dock-panel-refresh",
 }
 DOCK_ITEMS = {
     DOCK_PROJECT: "plug-in-imanganation-dock-project-item",
@@ -1206,7 +1208,7 @@ def _refresh_project_docks():
     if selected_id in {panel["id"] for panel in manifest["panels"]}:
         references = _engine_reference_rows(root, manifest, selected_id)
         if references:
-            contents["inspector"] += "\n" + "\n".join(references)
+            contents["panel"] += "\n" + "\n".join(references)
     elif selected_id in {character_row_id(c["name"]) for c in manifest["cast"]}:
         character = next(c for c in manifest["cast"]
                          if character_row_id(c["name"]) == selected_id)
@@ -1219,7 +1221,8 @@ def _refresh_project_docks():
             (DOCK_INSPECTOR, "inspector", None),
             (DOCK_FILMSTRIP, "filmstrip", "filmstrip_selected"),
             (DOCK_SCRIPT, "script", "script_selected"),
-            (DOCK_CHARACTERS, "characters", "character_selected")):
+            (DOCK_CHARACTERS, "characters", "character_selected"),
+            (DOCK_PANEL, "panel", "panel_selected")):
         values = {"identifier": identifier, "content": contents[content_key],
                   "selected-item": contents[selection_key] if selection_key else ""}
         _dock_pdb_call("gimp-extension-panel-update", values)
@@ -1289,6 +1292,7 @@ def _add_dock_callbacks(plugin):
         (DOCK_ITEMS[DOCK_SCRIPT], _dock_item_action, DOCK_SCRIPT, True),
         (DOCK_ACTIONS[DOCK_CHARACTERS], _dock_action, "refresh", False),
         (DOCK_ITEMS[DOCK_CHARACTERS], _dock_item_action, DOCK_CHARACTERS, True),
+        (DOCK_ACTIONS[DOCK_PANEL], _dock_action, "refresh", False),
     ]
     for name, callback, data, takes_item in callbacks:
         procedure = Gimp.Procedure.new(plugin, name, Gimp.PDBProcType.TEMPORARY,
@@ -1322,6 +1326,8 @@ def _register_project_docks(plugin):
         (DOCK_CHARACTERS, "Character Bible", "tree", contents["characters"],
          contents["character_selected"], "Refresh", DOCK_ACTIONS[DOCK_CHARACTERS],
          DOCK_ITEMS[DOCK_CHARACTERS]),
+        (DOCK_PANEL, "Panel", "properties", contents["panel"],
+         contents["panel_selected"], "Refresh", DOCK_ACTIONS[DOCK_PANEL], ""),
     ]
     for identifier, title, presentation, content, selected, action_label, action, item in rows:
         _dock_pdb_call("gimp-extension-panel-register", {
@@ -1386,8 +1392,8 @@ class Imanganation(Gimp.PlugIn):
             proc.set_menu_label("Open Project _Docks...")
             proc.set_documentation(
                 "Open the Imanganation project docks",
-                "Register and keep the Project, Script, Inspector, Page Filmstrip, and "
-                "Character Bible docks connected to a project.json manifest.", name)
+                "Register and keep the Project, Script, Inspector, Panel, Page Filmstrip, "
+                "and Character Bible docks connected to a project.json manifest.", name)
             proc.add_file_argument(
                 "project-dir", "_Project folder", "Folder containing project.json",
                 Gimp.FileChooserAction.SELECT_FOLDER, False, None,

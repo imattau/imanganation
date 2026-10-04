@@ -167,6 +167,40 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
             _label(character.get("notes")) or "No project notes",
         ])
 
+    panel_rows = ["# Panel brief"]
+    if selected_id in panel_by_id:
+        panel = panel_by_id[selected_id]
+        label = panel.get("label", {})
+        placement = panel.get("placement") or {}
+        panel_rows.extend([
+            f"ID\t{panel['id']}",
+            f"Script position\tPage {label.get('page', '—')} · Panel {label.get('panel', '—')}",
+            f"Status\t{_label(panel.get('status')) or 'unplaced'}",
+            f"Page\t{placement.get('page') or 'Unassigned'}",
+            f"Location\t{_label(panel.get('location')) or 'Unspecified'}",
+            f"Shot\t{_label(panel.get('camera')) or 'Unspecified'}",
+            f"Aspect ratio\t{_label(panel.get('aspect_ratio')) or 'Unspecified'}",
+            "# Action",
+            _label(panel.get("action")) or "No action text",
+        ])
+        characters = panel.get("characters", [])
+        panel_rows.append("# Characters")
+        panel_rows.extend(
+            f"{_label(character.get('name'))}\t{_label(character.get('version')) or 'Active version'}"
+            for character in characters)
+        if not characters:
+            panel_rows.append("No characters specified")
+        panel_rows.extend(["# Lettering reference",
+                           f"Dialogue lines\t{len(panel.get('dialogue', []))}"])
+        for line in panel.get("dialogue", []):
+            speaker = _label(line.get("speaker")) or "Unassigned"
+            text = _label(line.get("text"))
+            panel_rows.append(f"{speaker}\t{text}")
+        panel_rows.append(f"Sound effects\t{', '.join(_label(sfx) for sfx in panel.get('sfx', [])) or 'None'}")
+        panel_rows.append(f"Notes\t{_label(panel.get('notes')) or 'None'}")
+    else:
+        panel_rows.append("Select a script panel to view its production brief")
+
     inspector_rows: list[str] = []
     if selected_id in panel_by_id:
         panel = panel_by_id[selected_id]
@@ -179,9 +213,6 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
             f"Status\t{_label(panel.get('status')) or 'unplaced'}",
             f"Takes\t{len(panel.get('takes', []))}",
             f"Active take\t{panel.get('active_take') or 'None'}",
-            f"Location\t{_label(panel.get('location')) or 'Unspecified'}",
-            f"Shot\t{_label(panel.get('camera')) or 'Unspecified'}",
-            f"Aspect ratio\t{_label(panel.get('aspect_ratio')) or 'Unspecified'}",
         ])
         placement = panel.get("placement") or {}
         if placement:
@@ -192,21 +223,7 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
                 f"Placed page\t{placement.get('page', 'Unknown')}",
                 f"Frame size\t{frame_text}",
             ])
-        inspector_rows.append("# Action")
-        inspector_rows.append(_label(panel.get("action")) or "No action text")
-        dialogue = panel.get("dialogue", [])
-        sfx = panel.get("sfx", [])
-        inspector_rows.extend([
-            "# Lettering reference",
-            f"Dialogue lines\t{len(dialogue)}",
-            f"Sound effects\t{', '.join(_label(value) for value in sfx) or 'None'}",
-        ])
-        characters = panel.get("characters", [])
-        if characters:
-            inspector_rows.append("# Characters · engine references")
-            inspector_rows.extend(
-                f"{_label(char.get('name'))}\t{_label(char.get('version')) or 'Active'}"
-                for char in characters)
+        inspector_rows.append(f"Dialogue lines\t{len(panel.get('dialogue', []))}")
         take_map = manifest.get("takes", {})
         for take_id in panel.get("takes", []):
             take = take_map.get(take_id, {})
@@ -268,4 +285,6 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
         "script_selected": selected_id if selected_id in panel_by_id else "",
         "characters": "\n".join(character_rows),
         "character_selected": selected_id if selected_id in character_by_id else "",
+        "panel": "\n".join(panel_rows),
+        "panel_selected": selected_id if selected_id in panel_by_id else "",
     }
