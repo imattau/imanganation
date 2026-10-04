@@ -44,6 +44,19 @@ Two forms; send exactly one.
   The plug-in copies the file into `takes/` (a new immutable take, `kind: render`,
   `engine` = these fields) and sets `active_take`.
 
+### Placements: where each character goes
+
+Both forms accept `"placements": {"Yuki": "/abs/…/tmp/placement_yuki.png", …}`: a mask
+per character (frame-shaped, any size; white or opaque = where that character goes),
+such as an artist's placement layer exported from GIMP. The engine normalises each
+mask, scales it to the render canvas, softens its edges, and uses it as that
+character's regional reference mask instead of the default reading-order band.
+Characters without a placement keep their band. A placement for someone not in the
+panel, or an empty mask, fails the job; paths follow the container path rules. Results
+record `placements` (character → mask file). In a multi-character panel every
+reference stays masked, even when only one character has a reference, so it can't
+pull the others' faces.
+
 ### Legacy: `project_dir` + `seq`
 
 ```json

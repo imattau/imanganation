@@ -42,6 +42,7 @@ class RenderResult:
     reference: str | None = None
     panel_id: str | None = None  # container panel id, for inline renders
     references: dict[str, str] = field(default_factory=dict)  # character -> version used
+    placements: dict[str, str] = field(default_factory=dict)  # character -> mask file used
 
 
 def fit_resolution(
@@ -190,6 +191,7 @@ def output_path(project: Path, seq: int) -> Path:
 def render_panel(
     project: Path, seq: int, frame_w: float, frame_h: float, *,
     seed: int | None = None, client: ComfyClient | None = None,
+    placements: dict[str, Path] | None = None,
 ) -> RenderResult:
     """Legacy form: panel ``seq`` of ``project/panels.json``, written to its panels/."""
     project = Path(project)
@@ -202,7 +204,7 @@ def render_panel(
     return _render(
         script.panels[seq - 1], project, frame_w, frame_h,
         reading_order=script.reading_order, seed=seed, client=client,
-        out=output_path(project, seq), seq=seq,
+        out=output_path(project, seq), seq=seq, placements=placements,
     )
 
 
@@ -210,7 +212,7 @@ def render_inline(
     panel: dict, project_id: str, frame_w: float, frame_h: float, *,
     reading_order: str = "rtl", seed: int | None = None,
     client: ComfyClient | None = None, identity: Path | None = None,
-    outputs: Path | None = None,
+    outputs: Path | None = None, placements: dict[str, Path] | None = None,
 ) -> RenderResult:
     """Container form: the panel spec travels in the request (docs/engine-api.md).
 
@@ -241,19 +243,63 @@ def render_inline(
     out_dir = (outputs if outputs is not None else REPO_ROOT / "outputs") / project_id
     out = out_dir / f"{panel.get('id', 'panel')}-{uuid.uuid4().hex[:12]}.png"
     result = _render(spec, root, frame_w, frame_h, reading_order=ReadingOrder(reading_order),
-                     seed=seed, client=client, out=out, seq=None)
+                     seed=seed, client=client, out=out, seq=None, placements=placements)
     result.panel_id = panel.get("id")
     result.references = {**{n: "active" for n in spec.characters}, **used}
     out.with_suffix(".json").write_text(json.dumps(asdict(result), indent=2))
     return result
 
 
+def _check_placements(spec: PanelSpec, placements: dict | None) -> dict[str, Path]:
+    """Placement names -> the panel's character names; reject strangers and empties."""
+    if not placements:
+        return {}
+    by_lower = {c.lower(): c for c in spec.characters}
+    out: dict[str, Path] = {}
+    for name, path in placements.items():
+        canonical = by_lower.get(str(name).lower())
+        if canonical is None:
+            raise RenderError(f"placement for {name!r}, who isn't in this panel "
+                              f"({', '.join(spec.characters) or 'no characters'})")
+        from manganation.render.inpaint import normalized_mask
+
+        path = Path(path)
+        if not path.is_file():
+            raise RenderError(f"placement mask for {canonical} not found: {path}")
+        if normalized_mask(path).getbbox() is None:
+            raise RenderError(f"placement mask for {canonical} is empty: {path.name}")
+        out[canonical] = path
+    return out
+
+
+def _upload_placement(client, path: Path, width: int, height: int):
+    """Normalise a placement mask to the canvas; -> (uploaded name, fractional box)."""
+    import tempfile
+
+    from PIL import Image
+
+    from manganation.render.inpaint import normalized_mask
+
+    mask = normalized_mask(path).resize((width, height), Image.LANCZOS)
+    x0, y0, x1, y1 = mask.getbbox() or (0, 0, width, height)
+    with tempfile.TemporaryDirectory() as tmp:
+        canvas = Path(tmp) / f"placement-{path.stem}.png"
+        mask.save(canvas)
+        name = client.upload_image(str(canvas))["name"]
+    return name, (x0 / width, y0 / height, (x1 - x0) / width, (y1 - y0) / height)
+
+
 def _render(
     spec: PanelSpec, identity: Path, frame_w: float, frame_h: float, *,
     reading_order: ReadingOrder, seed: int | None, client: ComfyClient | None,
-    out: Path, seq: int | None,
+    out: Path, seq: int | None, placements: dict[str, Path] | None = None,
 ) -> RenderResult:
-    """Render ``spec`` with characters from ``identity`` (a character registry folder)."""
+    """Render ``spec`` with characters from ``identity`` (a character registry folder).
+
+    ``placements`` maps characters to mask images (the artist's placement layers, any
+    size with the frame's proportions; white or opaque = this character). They replace
+    the default reading-order bands as each character's regional reference mask."""
+    placements = _check_placements(spec, placements)
     settings = load_settings()
     models = load_models()
     client = client or ComfyClient(settings.comfyui.base_url)
@@ -286,7 +332,9 @@ def _render(
             clip_vision=clip_file, weight=ipa.weight_single,
         )
         ref_used = str(ref)
-    elif len(refs) > 1:
+    elif refs and (len(refs) > 1 or len(spec.characters) > 1):
+        # Multi-character: every reference stays masked to its character's region,
+        # even when only one character has one (unmasked, it would pull both faces).
         ordered = [n for n in spec.characters if n in refs]
         boxes = regions_for(width, height, len(ordered), order=reading_order)
         tags_by_char = character_tags(identity, ordered, spec.expressions)
@@ -295,13 +343,16 @@ def _render(
         region_text = []
         for name, (x, y, w, h), region in zip(ordered, boxes, norm, strict=False):
             uploaded = client.upload_image(str(refs[name]))
-            references.append(
-                {"image": uploaded["name"], "mask": [x, y, w, h],
-                 "canvas_w": width, "canvas_h": height,
-                 "weight": ipa.weight_regional, "feather": ipa.feather}
-            )
+            entry = {"image": uploaded["name"], "mask": [x, y, w, h],
+                     "canvas_w": width, "canvas_h": height,
+                     "weight": ipa.weight_regional, "feather": ipa.feather}
+            box = (region.x, region.y, region.w, region.h)
+            if name in placements:
+                mask_name, box = _upload_placement(client, placements[name], width, height)
+                entry["mask_image"] = mask_name
+            references.append(entry)
             text = ", ".join(tags_by_char.get(name, [])) or name
-            region_text.append({"text": text, "box": (region.x, region.y, region.w, region.h)})
+            region_text.append({"text": text, "box": box})
         # Optional per-character text bands (off by default: they split two-shots into
         # side-by-side pictures; the regional references hold each face instead).
         if ipa.regional_text > 0:
@@ -309,6 +360,7 @@ def _render(
                 graph, regions=[{**r, "strength": ipa.regional_text} for r in region_text])
         graph = graphs.with_regional_ipadapter(
             graph, references=references, ipadapter=ipa_file, clip_vision=clip_file,
+            force_regional=True,
         )
         ref_used = ",".join(ordered)
 
@@ -321,6 +373,7 @@ def _render(
     result = RenderResult(
         path=str(out), seq=seq, seed=seed, width=width, height=height,
         prompt=prompt, reference=ref_used,
+        placements={n: str(p) for n, p in placements.items()},
     )
     out.with_suffix(".json").write_text(json.dumps(asdict(result), indent=2))
     return result

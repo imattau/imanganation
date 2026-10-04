@@ -254,19 +254,24 @@ def with_regional_ipadapter(
     clip_vision: str,
     combine_embeds: str = "concat",
     embeds_scaling: str = "V only",
+    force_regional: bool = False,
 ) -> dict:
     """Bind several character references to separate regions of one panel.
 
     ``references`` is a list of ``{"image": <uploaded name>, "mask": [x, y, w, h]}``
-    where the mask is a pixel box (from ``layout.regions``). Each reference becomes
-    an ``IPAdapterRegionalConditioning`` (its own mask + weight); the params are
-    concatenated via ``IPAdapterCombineParams`` and applied by ``IPAdapterFromParams``.
+    where the mask is a pixel box (from ``layout.regions``), or ``"mask_image"``: an
+    uploaded white-on-black mask at canvas size (an artist's placement layer). Each
+    reference becomes an ``IPAdapterRegionalConditioning`` (its own mask + weight); the
+    params are concatenated via ``IPAdapterCombineParams`` and applied by
+    ``IPAdapterFromParams``.
 
-    Falls back to the single-reference path for a one-entry list.
+    Falls back to the single-reference path for a one-entry list, unless
+    ``force_regional``: in a multi-character panel where only one character has a
+    reference, an unmasked IP-Adapter would pull every face towards that one identity.
     """
     if not references:
         raise ValueError("regional IP-Adapter needs at least one reference")
-    if len(references) == 1:
+    if len(references) == 1 and not force_regional:
         return with_ipadapter(
             graph,
             ref_image=references[0]["image"],
@@ -285,30 +290,37 @@ def with_regional_ipadapter(
     for ref in references:
         img_id, mask_id, cond_id = str(next_id), str(next_id + 1), str(next_id + 2)
         next_id += 3
-        x, y, w, h = ref["mask"]
         graph[img_id] = {"class_type": "LoadImage", "inputs": {"image": ref["image"]}}
-        # A solid box mask: full value, positioned by MaskComposite onto an empty canvas.
-        graph[mask_id] = {
-            "class_type": "SolidMask",
-            "inputs": {"value": 1.0, "width": w, "height": h},
-        }
-        # Place the solid mask at (x, y) on a full-canvas empty mask.
-        empty_id = f"{mask_id}_base"
-        placed_id = f"{mask_id}_placed"
-        graph[empty_id] = {
-            "class_type": "SolidMask",
-            "inputs": {"value": 0.0, "width": ref["canvas_w"], "height": ref["canvas_h"]},
-        }
-        graph[placed_id] = {
-            "class_type": "MaskComposite",
-            "inputs": {
-                "destination": [empty_id, 0],
-                "source": [mask_id, 0],
-                "x": x,
-                "y": y,
-                "operation": "add",
-            },
-        }
+        if ref.get("mask_image"):
+            # The artist's placement: already canvas-sized, white = this character.
+            placed_id = f"{mask_id}_placed"
+            graph[placed_id] = {
+                "class_type": "LoadImageMask",
+                "inputs": {"image": ref["mask_image"], "channel": "red"},
+            }
+        else:
+            x, y, w, h = ref["mask"]
+            # A solid box mask, positioned by MaskComposite onto an empty canvas.
+            graph[mask_id] = {
+                "class_type": "SolidMask",
+                "inputs": {"value": 1.0, "width": w, "height": h},
+            }
+            empty_id = f"{mask_id}_base"
+            placed_id = f"{mask_id}_placed"
+            graph[empty_id] = {
+                "class_type": "SolidMask",
+                "inputs": {"value": 0.0, "width": ref["canvas_w"], "height": ref["canvas_h"]},
+            }
+            graph[placed_id] = {
+                "class_type": "MaskComposite",
+                "inputs": {
+                    "destination": [empty_id, 0],
+                    "source": [mask_id, 0],
+                    "x": x,
+                    "y": y,
+                    "operation": "add",
+                },
+            }
         # Soften the region's own edges so neighbouring characters blend instead of
         # meeting at a hard seam. (ComfyUI's FeatherMask can't do this: it fades a mask
         # towards the *canvas* borders, which left the inner boundary a hard cut.)

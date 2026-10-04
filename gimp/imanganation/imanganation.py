@@ -462,6 +462,18 @@ def render_panel(procedure, run_mode, image, drawables, config, data):
                 "frame_width": x2 - x1, "frame_height": y2 - y1}
         if config.get_property("seed") >= 0:
             body["seed"] = config.get_property("seed")
+        # "placement: <Character>" layers say where each character goes in this frame.
+        try:
+            from placement import export_placements
+        except ImportError:
+            export_placements = None
+        if export_placements is not None:
+            names = [c["name"] if isinstance(c, dict) else c
+                     for c in spec.get("characters", [])]
+            placements = export_placements(image, (x1, y1, x2 - x1, y2 - y1), names,
+                                           root / "tmp")
+            if placements:
+                body["placements"] = placements
         result = _run_job(engine, "/jobs", body,
                           f"Rendering panel {seq:03d} (script page {spec['page']}, "
                           f"panel {spec['panel']})…")

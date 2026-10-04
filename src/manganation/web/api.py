@@ -42,6 +42,9 @@ class RenderRequest(BaseModel):
     frame_width: float = Field(gt=0)
     frame_height: float = Field(gt=0)
     seed: int | None = None
+    # character -> mask image (the artist's placement layer, frame-shaped; white or
+    # opaque = where that character goes). Replaces the default reading-order bands.
+    placements: dict[str, str] | None = None
 
     @model_validator(mode="after")
     def _one_form(self) -> RenderRequest:
@@ -329,6 +332,10 @@ def create_app(
 
     @app.post("/jobs", status_code=202)
     def submit(req: RenderRequest) -> Job:
+        extra = {}
+        if req.placements:
+            extra["placements"] = {name: _engine_file(path, f"placement for {name}")
+                                   for name, path in req.placements.items()}
         if req.panel is not None:
             from manganation.project_container import panel_to_spec
 
@@ -340,13 +347,13 @@ def create_app(
                 "render", req.model_dump(exclude_none=True),
                 lambda: render_inline(req.panel, req.project, req.frame_width,
                                       req.frame_height, reading_order=req.reading_order,
-                                      seed=req.seed),
+                                      seed=req.seed, **extra),
             )
         req.project_dir = str(resolve_project(req.project_dir, root))
         return submit_job(
             "render", req.model_dump(),
             lambda: render(Path(req.project_dir), req.seq, req.frame_width,
-                           req.frame_height, seed=req.seed),
+                           req.frame_height, seed=req.seed, **extra),
         )
 
     @app.post("/refine", status_code=202)

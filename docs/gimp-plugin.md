@@ -278,3 +278,16 @@ Open your page template and name its frame-lines layer `Template`. Click inside 
 frame with Fuzzy Select, then run *Filters → imanganation → Render Panel into Frame…*
 and pick the project folder (GIMP remembers it after the first run). Click the next
 frame and repeat.
+
+## Placement layers (where each character goes)
+
+Paint a rough blob on a layer named **`placement: Yuki`** (any case, visible or
+hidden, faint opacity is fine) wherever Yuki should stand. *Render Panel into Frame*
+crops every `placement: …` layer to the selected frame and sends the masks with the
+render (`gimp/imanganation/placement.py`, engine `placements`), so characters land
+where you painted them instead of in the default reading-order bands. One layer per
+character serves the whole page: only its paint inside the current frame is used, and
+layers for characters not in the panel, or with no paint in the frame, are ignored.
+Live (`gimp/placement_smoke_test.py`, `docs/quality/2026-10-04_placement_layers.png`):
+the same seed put Yuki on the right by default and on the left where her blob was.
+
