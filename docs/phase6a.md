@@ -2,14 +2,15 @@
 
 **Status: COMPLETE.** A finished ~1 MP panel can now be re-rendered at 2× (or more)
 so it holds up when the artist enlarges it in GIMP. Output is a new take
-(`{seq:03d}_hires.png` + sidecar), never overwriting the original render.
+(`{seq:03d}_hires.png`, then `_hires_takeNN.png`, + sidecar), never overwriting an
+existing take.
 
 ## Pipeline
 
 ```
 source panel ──▶ [polish]  low-denoise img2img at native size (one VAE tile)
               ──▶ [upscale] Real-ESRGAN anime → final target size (lanczos)
-              ──▶ panels/{seq:03d}_hires.png
+              ──▶ panels/{seq:03d}_hires[_takeNN].png
 ```
 
 1. **Polish** — a low-`denoise` img2img pass on the checkpoint. Most of the signal is
@@ -51,6 +52,25 @@ defaults:
 `max_pixels` clamps the target (aspect preserved) so a large `scale` cannot blow the
 budget. Re-refining always starts from the **render**, never a previous `_hires`, so
 scales never compound.
+
+## No compounding (scale is relative to the render)
+
+`scale` always means "× the panel's **original render**", whatever take is refined. The
+refiner follows the take's sidecar chain back (`render_origin`: refine sidecars carry
+`upscaler` + `source`, inpaint sidecars `mask` + `source`) to the plain render, and
+sizes the target from that. So:
+
+- Refining a hi-res, or an inpaint made on one, at the default 2× is refused
+  ("already … at or beyond 2× its render"). Before this guard, an explicit source
+  bypassed it: 2× of a 2× gave 3840×4352 from a 960×1088 render.
+- A larger scale still works on a derived take and keeps its edits: 3× of an inpainted
+  2× take enlarges it by the remaining 1.5×.
+- The polish prompt comes from the render's sidecar. A hi-res has no prompt, and an
+  inpaint's is only the patch prompt ("red apple"), which would steer the whole panel.
+- A chain that loops (an older take file was overwritten) or whose render is gone is
+  refused, since the original size is then unknown.
+- Takes are never overwritten (`_hires_takeNN`), which keeps these chains and the
+  GIMP layers' recorded files valid.
 
 ## Interfaces
 

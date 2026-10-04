@@ -9,7 +9,8 @@ at a larger size so it holds up when the artist enlarges it in GIMP:
    removes upscaler speckle and re-synthesises fine detail while retaining the source
    latent (so composition and identity survive). ``denoise: 0`` skips the polish.
 
-The refined image is saved as a new take (``{seq:03d}_hires.png``) with its own
+The refined image is saved as a new take (``{seq:03d}_hires.png``, then
+``_hires_takeNN``; an existing take is never overwritten) with its own
 sidecar, so it sits alongside the original rather than overwriting it.
 """
 
@@ -40,6 +41,7 @@ class RefineResult:
     upscaler: str
     denoise: float
     seed: int
+    origin: str = ""  # the plain render this take descends from (scale is relative to it)
 
 
 def upscaler_files(models: dict, name: str) -> str:
@@ -71,9 +73,52 @@ def fit_target_width(
     return tw, th
 
 
+def render_origin(src: Path, *, max_hops: int = 16) -> Path:
+    """The plain render a take descends from.
+
+    Refine and inpaint outputs are derived takes: their sidecars name their ``source``
+    (refine: ``upscaler``; inpaint: ``mask``). Follow that chain back to a take that
+    isn't derived. Raises if a derived take's ancestor is gone, since its original
+    size is then unknown and a refine could compound."""
+    path, seen = src, set()
+    for _ in range(max_hops):
+        if path.resolve() in seen:
+            raise RefineError(
+                f"{src.name}: its take history loops (an older take file was overwritten), "
+                f"so its original render size is unknown; refine a render take instead")
+        seen.add(path.resolve())
+        try:
+            side = json.loads(path.with_suffix(".json").read_text())
+        except (OSError, ValueError):
+            return path  # no sidecar: treat as a render
+        parent = side.get("source")
+        if not (("upscaler" in side or "mask" in side) and parent):
+            return path
+        parent = Path(parent)
+        if not parent.is_file():
+            raise RefineError(
+                f"{path.name} was made from {parent.name}, which no longer exists, so its "
+                f"original render size is unknown; refine an existing render instead")
+        path = parent
+    raise RefineError(f"{src.name}: take history is too deep or circular")
+
+
 def take_path(project: Path, seq: int) -> Path:
-    """Stable output name for a panel's hi-res fix (the take the plug-in prefers)."""
-    return project / "panels" / f"{seq:03d}_hires.png"
+    """Output name for a new hi-res take: ``{seq}_hires.png``, then
+    ``{seq}_hires_takeNN.png``.
+
+    Never overwrite an existing take: a placed GIMP layer records the exact file it
+    shows, and derived takes (an inpaint of a hi-res) record their ``source``. Replacing
+    the file under them silently changes what they point at, and can make the take
+    history loop. The plug-in places the newest file, so new names are safe."""
+    panels = project / "panels"
+    first = panels / f"{seq:03d}_hires.png"
+    if not first.exists():
+        return first
+    n = 2
+    while (panels / f"{seq:03d}_hires_take{n:02d}.png").exists():
+        n += 1
+    return panels / f"{seq:03d}_hires_take{n:02d}.png"
 
 
 # VAE tiling on 16 GB starts around 1.5 MP; keep the polish below this so the whole
@@ -121,16 +166,28 @@ def refine_panel(
     with Image.open(src) as im:
         width, height = im.size
 
-    tw, th = fit_target_width(width, height, scale, max_pixels=r.max_pixels)
-    if (tw, th) == (width, height):
-        raise RefineError(f"target size {tw}x{th} equals source; nothing to do")
+    # Scale is relative to the *original render*, never to an already-enlarged take
+    # (a hi-res, or an inpaint made on one): otherwise refining it again compounds,
+    # e.g. 2x of a 2x gave 3840x4352 from a 960x1088 render. Derived edits are kept:
+    # the chosen take is what gets enlarged, just only up to render x scale.
+    origin = render_origin(src)
+    with Image.open(origin) as im:
+        base_w, base_h = im.size
+    tw, th = fit_target_width(base_w, base_h, scale, max_pixels=r.max_pixels)
+    if tw <= width and th <= height:
+        raise RefineError(
+            f"{src.name} is already {width}x{height}, at or beyond {scale:g}x its render "
+            f"({origin.name}, {base_w}x{base_h}); nothing to do. Use a larger scale to "
+            f"go further")
 
     client = client or ComfyClient(settings.comfyui.base_url)
     if not client.is_up():
         raise RefineError(f"ComfyUI is not reachable at {settings.comfyui.base_url}")
 
     # Reuse the panel's own prompt so the polish stays on-model (sidecar, if present).
-    prompt, negative = _panel_prompts(src)
+    # The panel prompt lives with the render; a derived take's sidecar has none (refine)
+    # or only the artist's short patch prompt (inpaint), which must not steer the polish.
+    prompt, negative = _panel_prompts(origin)
     seed = seed if seed is not None else 0
 
     uploaded = client.upload_image(str(src))
@@ -155,7 +212,7 @@ def refine_panel(
     out.write_bytes(blobs[0])
     result = RefineResult(
         path=str(out), seq=seq, source=str(src), width=tw, height=th,
-        upscaler=r.upscaler, denoise=denoise, seed=seed,
+        upscaler=r.upscaler, denoise=denoise, seed=seed, origin=str(origin),
     )
     out.with_suffix(".json").write_text(json.dumps(asdict(result), indent=2))
     return result

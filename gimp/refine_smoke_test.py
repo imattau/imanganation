@@ -37,7 +37,8 @@ def meta(layer):
     return json.loads(bytes(layer.get_parasite("imanganation-panelspec").get_data()))
 
 
-(PROJECT / "panels" / "001_hires.png").unlink(missing_ok=True)
+for old in (PROJECT / "panels").glob("001_hires*"):
+    old.unlink()
 page = Gimp.Image.new(1200, 1700, Gimp.ImageBaseType.RGB)
 bg = Gimp.Layer.new(page, "page", 1200, 1700, Gimp.ImageType.RGB_IMAGE, 100,
                     Gimp.LayerMode.NORMAL)
@@ -65,6 +66,10 @@ else:
           "| engine size:", m["refined"]["width"], "x", m["refined"]["height"],
           "| source:", Path(m["refined"]["source"]).name)
     print("SELECTION KEPT", Gimp.Selection.bounds(page)[1:])
+
+    # Refining the hi-res again at the default 2x must be refused, not compounded.
+    r2 = call("plug-in-imanganation-refine-panel", page, drawables=[hires])
+    print("RE-REFINE REFUSED", r2.index(0) != Gimp.PDBStatusType.SUCCESS, "|", r2.index(1))
 
 # Newest file wins: the fresh hi-res now beats the older render.
 page.select_rectangle(Gimp.ChannelOps.REPLACE, 650, 100, 450, 560)

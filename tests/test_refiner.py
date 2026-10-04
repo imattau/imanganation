@@ -131,8 +131,8 @@ def test_refine_panel_upscales_and_writes_hires_take(tmp_path):
     comfy = FakeComfy()
     r = refine_panel(project, 1, scale=2.0, denoise=0.25, seed=3, client=comfy)
 
-    assert Path(r.path) == take_path(project, 1)
     assert Path(r.path).name == "001_hires.png"
+    assert take_path(project, 1).name == "001_hires_take02.png"  # next one: new name
     assert (r.width, r.height) != (100, 80)
     g = comfy.graphs[0]
     assert g["22"]["inputs"]["width"] == r.width  # final scale to the target size
@@ -158,6 +158,71 @@ def test_refine_panel_starts_from_render_not_previous_hires(tmp_path):
     # a newer render take still wins over _hires
     (project / "panels/003_take02.png").write_bytes(b"render take 2")
     assert _newest_panel(project, 3) == project / "panels/003_take02.png"
+
+
+def _derived(project, name, size, **sidecar):
+    from PIL import Image
+
+    Image.new("RGB", size, "white").save(project / "panels" / name)
+    (project / "panels" / name).with_suffix(".json").write_text(json.dumps(sidecar))
+    return project / "panels" / name
+
+
+def test_refine_does_not_compound_on_an_enlarged_take(tmp_path):
+    """2x of a 2x used to give 4x the render; scale is now relative to the render."""
+    project = _project(tmp_path)  # 001.png is 100x80, the render
+    render = project / "panels/001.png"
+    hires = _derived(project, "001_hires.png", (192, 192), upscaler="realesrgan",
+                     source=str(render))
+    inpaint = _derived(project, "001_inpaint.png", (192, 192), mask="m.png",
+                       source=str(hires), prompt="red apple")
+    for take in (hires, inpaint):
+        with pytest.raises(RefineError, match="already 192x192, at or beyond 2x its render"):
+            refine_panel(project, 1, source=take, scale=2.0, client=FakeComfy())
+
+
+def test_refine_of_an_inpainted_hires_enlarges_relative_to_the_render(tmp_path):
+    """A larger scale still works on a derived take (keeping its edits), and the polish
+    uses the panel prompt, not the inpaint's short patch prompt."""
+    project = _project(tmp_path)
+    render = project / "panels/001.png"
+    hires = _derived(project, "001_hires.png", (192, 192), upscaler="realesrgan",
+                     source=str(render))
+    inpaint = _derived(project, "001_inpaint.png", (192, 192), mask="m.png",
+                       source=str(hires), prompt="red apple")
+    comfy = FakeComfy()
+    r = refine_panel(project, 1, source=inpaint, scale=4.0, seed=1, client=comfy)
+    assert (r.width, r.height) == (384, 320)  # 4x the 100x80 render, on the 64 grid
+    assert r.origin == str(render) and r.source == str(inpaint)
+    assert comfy.graphs[0]["2"]["inputs"]["text"] == "manga panel, 1boy"  # render's prompt
+
+
+def test_refine_never_overwrites_an_existing_hires(tmp_path):
+    """Placed layers and derived takes reference files: a re-refine gets a new name."""
+    project = _project(tmp_path)
+    first = refine_panel(project, 1, scale=2.0, client=FakeComfy())
+    before = Path(first.path).read_bytes()
+    second = refine_panel(project, 1, scale=3.0, client=FakeComfy())
+    assert Path(second.path).name == "001_hires_take02.png"
+    assert Path(first.path).read_bytes() == before
+
+
+def test_refine_reports_a_looping_take_history(tmp_path):
+    project = _project(tmp_path)
+    a = project / "panels/001_hires.png"
+    b = project / "panels/001_inpaint.png"
+    _derived(project, a.name, (192, 192), upscaler="realesrgan", source=str(b))
+    _derived(project, b.name, (192, 192), mask="m.png", source=str(a))
+    with pytest.raises(RefineError, match="history loops"):
+        refine_panel(project, 1, source=b, client=FakeComfy())
+
+
+def test_refine_refuses_when_a_derived_takes_render_is_gone(tmp_path):
+    project = _project(tmp_path)
+    orphan = _derived(project, "001_hires.png", (192, 192), upscaler="realesrgan",
+                      source=str(project / "panels/missing.png"))
+    with pytest.raises(RefineError, match="no longer exists"):
+        refine_panel(project, 1, source=orphan, client=FakeComfy())
 
 
 # --- job API ------------------------------------------------------------------

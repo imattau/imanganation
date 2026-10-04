@@ -59,7 +59,9 @@ def render(
 def refine(
     project: str = typer.Argument(..., help="Project name under projects/."),
     seq: int = typer.Argument(..., help="Panel number in script order (1-based)."),
-    scale: float = typer.Option(None, help="Target multiplier of the source (default: settings)."),
+    scale: float = typer.Option(
+        None, help="Target size as a multiple of the panel's original render, never of "
+        "an already-enlarged take (default: settings)."),
     denoise: float = typer.Option(
         None, help="img2img polish strength 0..1 (0 = pure upscale; default: settings)."
     ),

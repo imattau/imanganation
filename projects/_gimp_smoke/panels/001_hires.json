@@ -1,10 +1,11 @@
 {
   "path": "/home/lostcause/workspace/imanganation/projects/_gimp_smoke/panels/001_hires.png",
   "seq": 1,
-  "source": "/home/lostcause/workspace/imanganation/projects/_gimp_smoke/panels/001_inpaint.png",
-  "width": 3840,
-  "height": 4352,
+  "source": "/home/lostcause/workspace/imanganation/projects/_gimp_smoke/panels/001_take03.png",
+  "width": 1920,
+  "height": 2176,
   "upscaler": "realesrgan",
   "denoise": 0.25,
-  "seed": 0
+  "seed": 0,
+  "origin": "/home/lostcause/workspace/imanganation/projects/_gimp_smoke/panels/001_take03.png"
 }
