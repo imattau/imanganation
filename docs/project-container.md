@@ -205,6 +205,8 @@ first existing page), creates a white XCF, records it atomically, and opens it. 
 a page in Project or Page Filmstrip opens its XCF and raises the already-open page display
 when the plug-in created it earlier in the session. Activating a placed panel opens its
 page and selects the layer carrying that panel's active-take reference, when available.
+Inspector's Refresh action also syncs the dock selection from a selected take layer in the
+current canvas image back to that panel's stable project identity.
 For container projects it also copies newly rendered, refined, and inpainted images into
 unique files under `takes/`, adds a new take id, and advances `active_take`; a legacy
 image used from `panels/` is first imported as an immutable take. Opened page images and

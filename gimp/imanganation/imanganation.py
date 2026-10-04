@@ -1166,6 +1166,30 @@ def _canvas_take_rows(manifest):
         return ["# Canvas selection", f"Status\tUnavailable ({exc})"]
 
 
+def _selected_canvas_panel_id(manifest):
+    """Return the panel whose take is selected in the current project image."""
+    try:
+        image = Gimp.context_get_image()
+        if image is None:
+            return None
+        panels = {panel["id"]: panel for panel in manifest["panels"]}
+        for layer in image.get_selected_layers():
+            parasite = layer.get_parasite(TAKE_PARASITE)
+            if parasite is None:
+                continue
+            reference = json.loads(bytes(parasite.get_data()))
+            if reference.get("project") != manifest["project"]["id"]:
+                continue
+            panel_id = reference.get("panel")
+            take = manifest["takes"].get(reference.get("take"))
+            panel = panels.get(panel_id)
+            if panel is not None and take is not None and take.get("panel") == panel_id:
+                return panel_id
+    except Exception:
+        pass
+    return None
+
+
 def _page_thumbnail(root, manifest, page):
     relative = page.get("file")
     if not relative:
@@ -1215,12 +1239,14 @@ def _project_page_thumbnails(root, manifest):
             if (preview := _page_thumbnail(root, manifest, page))}
 
 
-def _refresh_project_docks():
+def _refresh_project_docks(sync_canvas=False):
     if not _DOCK_CONTEXT or build_docks is None:
         return
     root = _DOCK_CONTEXT["root"]
     manifest = load_project(root)
     selected_id = _DOCK_CONTEXT.get("selected_id")
+    if sync_canvas:
+        selected_id = _selected_canvas_panel_id(manifest) or selected_id
     contents = build_docks(manifest, selected_id, root,
                            _project_page_thumbnails(root, manifest))
     _DOCK_CONTEXT["selected_id"] = contents["selected_id"]
@@ -1482,6 +1508,8 @@ def _dock_action(procedure, config, data):
         elif data == "match-panel":
             _match_selected_panel()
             _refresh_project_docks()
+        elif data == "refresh-canvas":
+            _refresh_project_docks(sync_canvas=True)
         else:
             _refresh_project_docks()
         return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
@@ -1522,7 +1550,7 @@ def _dock_item_action(procedure, config, data):
 def _add_dock_callbacks(plugin):
     callbacks = [
         (DOCK_ACTIONS[DOCK_PROJECT], _dock_action, "add-page", False),
-        (DOCK_ACTIONS[DOCK_INSPECTOR], _dock_action, "refresh", False),
+        (DOCK_ACTIONS[DOCK_INSPECTOR], _dock_action, "refresh-canvas", False),
         (DOCK_ACTIONS[DOCK_FILMSTRIP], _dock_action, "open-page", False),
         (DOCK_ITEMS[DOCK_PROJECT], _dock_item_action, DOCK_PROJECT, True),
         (DOCK_ITEMS[DOCK_FILMSTRIP], _dock_item_action, DOCK_FILMSTRIP, True),
