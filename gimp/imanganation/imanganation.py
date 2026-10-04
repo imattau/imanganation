@@ -44,6 +44,7 @@ PROC_PLACE = "plug-in-imanganation-place-panel"
 PROC_REFINE = "plug-in-imanganation-refine-panel"
 PROC_REGEN = "plug-in-imanganation-regenerate-panel"
 PROC_SETREF = "plug-in-imanganation-set-character-reference"
+PROC_INPAINT = "plug-in-imanganation-inpaint-selection"
 REF_MAX = 1024  # reference export cap; the CLIP encoder only sees 224-448 px anyway
 PARASITE = "imanganation-panelspec"
 CURSOR_FILE = "gimp_cursor.json"  # per project: which panel comes next
@@ -348,13 +349,20 @@ def _frame_box(image, layer):
     return (x1, y1, x2 - x1, y2 - y1) if non_empty else own
 
 
-def _swap_in(image, old, path, stored, name):
-    """Put a new take of ``old``'s panel beside it: same group, cover-fitted to the
-    panel's frame, same frame mask. The old take is kept, hidden; selection untouched.
+def _swap_in(image, old, path, stored, name, fit="frame"):
+    """Put a new take of ``old``'s panel beside it, in the same group with the same
+    frame mask. The old take is kept, hidden; the artist's selection is untouched.
 
-    Fit to the frame, not the old layer: the old take already overhangs the frame, so
-    covering *it* would crop more than necessary when the new take's shape differs."""
-    fx, fy, fw, fh = _frame_box(image, old)
+    ``fit="frame"`` (a new composition, e.g. Regenerate): cover-fit to the panel's
+    frame. Not to the old layer, which already overhangs the frame, so covering *it*
+    would crop more than needed when the new take's shape differs.
+    ``fit="layer"`` (the same picture, e.g. Inpaint / Refine): take the old layer's
+    exact geometry so every pixel lines up, even if the artist moved or scaled it."""
+    if fit == "layer":
+        _, fx, fy = old.get_offsets()
+        fw, fh = old.get_width(), old.get_height()
+    else:
+        fx, fy, fw, fh = _frame_box(image, old)
     image.undo_group_start()
     saved = Gimp.Selection.save(image)  # the artist's selection, restored below
     try:
@@ -362,8 +370,11 @@ def _swap_in(image, old, path, stored, name):
                                    Gio.File.new_for_path(path))
         new.set_name(name)
         image.insert_layer(new, old.get_parent(), image.get_item_position(old))
-        s = max(fw / new.get_width(), fh / new.get_height())
-        nw, nh = round(new.get_width() * s), round(new.get_height() * s)
+        if fit == "layer":
+            nw, nh = fw, fh
+        else:
+            s = max(fw / new.get_width(), fh / new.get_height())
+            nw, nh = round(new.get_width() * s), round(new.get_height() * s)
         new.scale(nw, nh, False)
         new.set_offsets(fx + (fw - nw) // 2, fy + (fh - nh) // 2)
         mask = old.get_mask()
@@ -385,7 +396,10 @@ def _swap_in(image, old, path, stored, name):
 
 
 def _base_name(layer):
-    return layer.get_name().rsplit(" render", 1)[0].rsplit(" hi-res", 1)[0].rsplit(" take", 1)[0]
+    name = layer.get_name()
+    for suffix in (" render", " hi-res", " inpaint", " take"):
+        name = name.rsplit(suffix, 1)[0]
+    return name
 
 
 def refine_panel(procedure, run_mode, image, drawables, config, data):
@@ -411,7 +425,8 @@ def refine_panel(procedure, run_mode, image, drawables, config, data):
     stored = dict(meta, file=result["path"],
                   refined={k: result.get(k) for k in ("source", "width", "height",
                                                       "upscaler", "denoise", "seed")})
-    hires = _swap_in(image, layer, result["path"], stored, f"{_base_name(layer)} hi-res")
+    hires = _swap_in(image, layer, result["path"], stored, f"{_base_name(layer)} hi-res",
+                     fit="layer")
     Gimp.message(f"Refined panel {seq:03d}: {result['width']}×{result['height']} "
                  f"(previous take kept, hidden).")
     return _success(procedure, hires)
@@ -477,6 +492,109 @@ def regenerate_panel(procedure, run_mode, image, drawables, config, data):
     new = _swap_in(image, layer, result["path"], stored, f"{_base_name(layer)} {take}")
     Gimp.message(f"Regenerated panel {seq:03d} as {Path(result['path']).name} "
                  f"(seed {seed}; previous take kept, hidden).")
+    return _success(procedure, new)
+
+
+def _export_inpaint_mask(image, layer, source, path):
+    """The current selection as a mask in ``source``'s own pixel space.
+
+    The take is shown scaled (a 960x1024 render placed at 525x560), and the engine
+    needs the mask at the source's size. So the selection (feathering included) is
+    filled white into a transparent layer covering ``layer``'s footprint, then scaled
+    to the source's real size and saved as a transparent PNG (engine: alpha channel)."""
+    src = Gimp.file_load(Gimp.RunMode.NONINTERACTIVE, Gio.File.new_for_path(str(source)))
+    sw, sh = src.get_width(), src.get_height()
+    src.delete()
+
+    _, lx, ly = layer.get_offsets()
+    lw, lh = layer.get_width(), layer.get_height()
+    image.undo_group_start()
+    temp = Gimp.Layer.new(image, "imanganation mask (temp)", lw, lh,
+                          Gimp.ImageType.RGBA_IMAGE, 100, Gimp.LayerMode.NORMAL)
+    image.insert_layer(temp, None, 0)
+    temp.set_offsets(lx, ly)
+    temp.fill(Gimp.FillType.TRANSPARENT)
+    temp.edit_fill(Gimp.FillType.WHITE)  # respects the selection and its feathering
+    out = Gimp.Image.new(lw, lh, Gimp.ImageBaseType.RGB)
+    try:
+        copy = Gimp.Layer.new_from_drawable(temp, out)
+        out.insert_layer(copy, None, 0)
+        copy.set_offsets(0, 0)
+        out.scale(sw, sh)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        Gimp.file_save(Gimp.RunMode.NONINTERACTIVE, out, Gio.File.new_for_path(str(path)), None)
+    finally:
+        out.delete()
+        image.remove_layer(temp)
+        image.undo_group_end()
+
+
+def _panel_at(image, x, y):
+    """The topmost visible placed take covering page point (x, y), if any."""
+    def walk(layers):
+        for layer in layers:  # top of the stack first
+            if not layer.get_visible():
+                continue
+            if layer.is_group():
+                found = walk(layer.get_children())
+                if found:
+                    return found
+            elif layer.get_parasite(PARASITE):
+                _, lx, ly = layer.get_offsets()
+                if lx <= x < lx + layer.get_width() and ly <= y < ly + layer.get_height():
+                    return layer
+        return None
+
+    return walk(image.get_layers())
+
+
+def inpaint_selection(procedure, run_mode, image, drawables, config, data):
+    _, non_empty, x1, y1, x2, y2 = Gimp.Selection.bounds(image)
+    if not non_empty:
+        return _error(procedure, "Select the area to repaint first.")
+    # After placing, the template is the selected layer (for Fuzzy Select), so an
+    # artist who just draws a selection means "the panel under it".
+    if _panel_layer(drawables) is None:
+        under = _panel_at(image, (x1 + x2) // 2, (y1 + y2) // 2)
+        drawables = [under] if under is not None else drawables
+    try:
+        layer, meta, seq, source = _selected_panel(drawables)
+    except ValueError as exc:
+        return _error(procedure, str(exc))
+    _, lx, ly = layer.get_offsets()
+    if x2 <= lx or y2 <= ly or x1 >= lx + layer.get_width() or y1 >= ly + layer.get_height():
+        return _error(procedure, "The selection doesn't overlap the selected panel.")
+    if not source.is_file():
+        return _error(procedure, f"This take's file is missing: {source}")
+
+    if run_mode == Gimp.RunMode.INTERACTIVE and not _dialog(procedure, config, PROC_INPAINT):
+        return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
+    prompt = (config.get_property("prompt") or "").strip()
+    if not prompt:
+        return _error(procedure, "Describe what to paint in the selection.")
+
+    root = source.parent.parent
+    mask = root / "tmp" / f"inpaint_{seq:03d}_{time.strftime('%Y%m%d-%H%M%S')}.png"
+    try:
+        _export_inpaint_mask(image, layer, source, mask)
+        body = {"project_dir": str(root), "seq": seq, "mask": str(mask), "prompt": prompt,
+                "source": str(source)}
+        if config.get_property("denoise") > 0:
+            body["denoise"] = config.get_property("denoise")
+        if config.get_property("grow") >= 0:
+            body["grow_mask_by"] = config.get_property("grow")
+        result = _run_job(config.get_property("engine-url").rstrip("/"), "/inpaint", body,
+                          f"Inpainting panel {seq:03d}: {prompt[:40]}…")
+    except EngineError as exc:
+        return _error(procedure, str(exc))
+
+    stored = dict(meta, file=result["path"],
+                  inpainted={k: result.get(k) for k in ("prompt", "source", "mask", "denoise",
+                                                        "grow_mask_by", "seed")})
+    new = _swap_in(image, layer, result["path"], stored, f"{_base_name(layer)} inpaint",
+                   fit="layer")
+    Gimp.message(f"Inpainted panel {seq:03d} ({Path(result['path']).name}); outside the "
+                 f"selection the take is unchanged. Previous take kept, hidden.")
     return _success(procedure, new)
 
 
@@ -636,12 +754,13 @@ class Imanganation(Gimp.PlugIn):
         return False, None, None
 
     def do_query_procedures(self):
-        return [PROC_RENDER, PROC_NEXT, PROC_REGEN, PROC_REFINE, PROC_SETREF, PROC_PLACE]
+        return [PROC_RENDER, PROC_NEXT, PROC_REGEN, PROC_INPAINT, PROC_REFINE, PROC_SETREF,
+                PROC_PLACE]
 
     def do_create_procedure(self, name):
         run = {PROC_RENDER: render_panel, PROC_NEXT: place_next_panel,
                PROC_REFINE: refine_panel, PROC_REGEN: regenerate_panel,
-               PROC_SETREF: set_character_reference,
+               PROC_SETREF: set_character_reference, PROC_INPAINT: inpaint_selection,
                PROC_PLACE: place_panel}[name]
         proc = Gimp.ImageProcedure.new(self, name, Gimp.PDBProcType.PLUGIN, run, None)
         proc.set_image_types("*")
@@ -653,6 +772,28 @@ class Imanganation(Gimp.PlugIn):
         proc.set_attribution("imanganation", "imanganation", "2026")
         proc.add_layer_return_value(
             "layer", "Layer", "The placed panel layer", False, GObject.ParamFlags.READWRITE)
+
+        if name == PROC_INPAINT:
+            proc.set_menu_label("_Inpaint Selection...")
+            proc.set_documentation(
+                "Repaint the selected area of a panel",
+                "Repaint only the selected area of the selected panel's take from a short "
+                "prompt; everything outside the selection stays exactly as it was. The "
+                "result is swapped in as a new take, the previous one kept hidden.",
+                name)
+            proc.add_string_argument(
+                "prompt", "_Prompt", "What to paint in the selection, e.g. \"open hand\"",
+                "", GObject.ParamFlags.READWRITE)
+            proc.add_double_argument(
+                "denoise", "_Strength", "How much to repaint (0 = engine default 0.85)",
+                0.0, 1.0, 0.0, GObject.ParamFlags.READWRITE)
+            proc.add_int_argument(
+                "grow", "_Blend (px)", "Grow the mask to blend the seam; -1 = engine "
+                "default", -1, 256, -1, GObject.ParamFlags.READWRITE)
+            proc.add_string_argument(
+                "engine-url", "_Engine URL", "imanganation engine (manganation serve)",
+                ENGINE_URL, GObject.ParamFlags.READWRITE)
+            return proc
 
         if name == PROC_SETREF:
             proc.set_menu_label("Set _Character Reference from Layer...")

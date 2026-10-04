@@ -41,7 +41,7 @@ GIMP also gives three things for free that a custom web UI would have to build:
 ## Built so far
 
 `gimp/imanganation/imanganation.py` is installed by symlink into
-`~/.config/GIMP/3.2/plug-ins/imanganation`. It adds six commands under *Filters →
+`~/.config/GIMP/3.2/plug-ins/imanganation`. It adds seven commands under *Filters →
 imanganation*:
 
 - **Render Panel into Frame…** (the main flow): needs a selection, which is the target
@@ -58,6 +58,13 @@ imanganation*:
   seed. *Same seed* reuses the seed that composed the take (traced back through a
   hi-res refine to the original render), keeping the composition while applying
   your edits. The script cursor is not moved.
+- **Inpaint Selection…**: draw a selection over a placed panel (any shape, feathering
+  respected) and describe what to paint. The selected layer doesn't matter: if it isn't
+  a panel, the panel under the selection is used. The selection is exported as a mask
+  in the **take's own pixel space** (takes are shown scaled), sent with the exact take
+  to `POST /inpaint`, and the result goes in at the take's exact geometry (so it lines
+  up even if you moved or scaled it), with the previous take hidden. Outside the
+  selection the take is pixel-identical.
 - **Set Character Reference from Layer…**: select the layer that shows a character
   (optionally drag a selection around them) and type their name or alias. The region
   is grown to a square around its centre on white, with layer masks applied, capped at
@@ -109,6 +116,7 @@ ComfyUI and the engine running) run headless against GIMP 3.2.6 (flatpak):
 | Next Panel walks `panels.json` in order into hand-drawn frames; cursor advances | ✅ |
 | Dialogue/SFX arrive as **hidden** text layers in the panel group (lettering reference) | ✅ |
 | Unrendered panel gives a clear "not rendered yet: expected panels/003*.png" and doesn't advance | ✅ |
+| **Live** (`gimp/inpaint_smoke_test.py`): feathered ellipse over a moved/shrunk 1920×2176 take, page layer selected → panel found under the selection, result at the exact geometry, old take hidden, temp mask layer removed; **0 source pixels changed outside the mask** (+40 px) | ✅ |
 | **Live** (`gimp/setref_smoke_test.py`): reference from a selection (420 px square crop) and from a whole panel group (800 px square, hidden takes/text excluded) → `gimp-01`, `gimp-02` become active, `base` kept; lower-case name resolves; unknown name refused, nothing created | ✅ |
 | **Live** (`gimp/regenerate_smoke_test.py`): regenerate a placed hi-res take → *same seed* recovers the original render's seed, *new seed* gives a fresh take; both cover the frame tightly with its mask, the previous take hidden, the selection and cursor untouched | ✅ |
 | **Live** (`gimp/refine_smoke_test.py`): refine a placed panel → 1920×2048 hi-res swapped in at the same footprint and mask, old take hidden, selection kept; next placement picks the newer `_hires` | ✅ |
@@ -180,10 +188,9 @@ None of these create or arrange pages.
 1. **Render Panel into Frame** ✅ (built).
 2. **Place Next Panel** ✅ (built).
 3. **Regenerate Panel** ✅ (built).
-4. **Inpaint Selection**: selection → mask, active layer → init image, short prompt →
-   engine inpaint → result layer clipped to the selection. **Engine ready**:
-   `POST /inpaint` (`docs/inpaint.md`); the GIMP side still needs the selection→mask
-   export + result layer wiring.
+4. **Inpaint Selection** ✅ (built; engine `docs/inpaint.md`). Patch quality on large
+   takes is weak (SDXL painting a small region of a ~4 MP latent); crop-and-stitch is
+   the planned engine fix.
 5. **Set Character Reference from Layer** ✅ (built). Engine: `GET /characters`,
    `POST /characters/reference`.
 6. **Engine Status…**: health, queue and VRAM.

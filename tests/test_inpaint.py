@@ -12,7 +12,7 @@ from manganation.render import graphs
 from manganation.render.inpaint import (
     InpaintError,
     inpaint_panel,
-    mask_channel_for,
+    normalized_mask,
     output_path,
 )
 from manganation.script.schema import PanelSpec, Script
@@ -64,23 +64,28 @@ def test_inpaint_graph_mask_channel_override():
 # --- mask channel detection ---------------------------------------------------
 
 
-def test_mask_channel_alpha_for_transparent_png(tmp_path):
+def test_normalized_mask_alpha_selection_means_repaint(tmp_path):
+    """A transparent export's *opaque* (selected) pixels are the ones to repaint.
+    ComfyUI would read alpha inverted, so the engine normalises first."""
     from PIL import Image
 
     p = tmp_path / "m.png"
-    Image.new("RGBA", (64, 64), (0, 0, 0, 0)).save(p)
-    assert mask_channel_for(p) == "alpha"
+    im = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+    im.paste((255, 255, 255, 255), (16, 16, 48, 48))
+    im.save(p)
+    m = normalized_mask(p)
+    assert m.mode == "L" and m.getpixel((32, 32)) == 255 and m.getpixel((2, 2)) == 0
 
 
-def test_mask_channel_red_for_opaque_mask(tmp_path):
+def test_normalized_mask_opaque_white_means_repaint(tmp_path):
     from PIL import Image
 
     p = tmp_path / "m.png"
-    Image.new("RGB", (64, 64), (255, 255, 255)).save(p)
-    assert mask_channel_for(p) == "red"
-
-
-# --- output naming ------------------------------------------------------------
+    im = Image.new("RGB", (64, 64), "black")
+    im.paste((255, 255, 255), (0, 0, 32, 64))
+    im.save(p)
+    m = normalized_mask(p)
+    assert m.getpixel((8, 8)) == 255 and m.getpixel((60, 8)) == 0
 
 
 def test_output_path_uses_inpaint_suffix(tmp_path):
@@ -133,7 +138,8 @@ def test_inpaint_panel_paints_region_and_writes_take(tmp_path):
     assert r.mask.endswith("mask.png")
     g = comfy.graphs[0]
     assert g["8"]["inputs"]["image"] == "001.png"       # init = newest panel
-    assert g["9"]["inputs"]["image"] == "mask.png"
+    assert g["9"]["inputs"]["image"].endswith("_inpaint_mask.png")  # the normalised copy
+    assert g["9"]["inputs"]["channel"] == "red"
     assert g["2"]["inputs"]["text"].endswith(", a red apple")  # style prefix + prompt
     assert g["2"]["inputs"]["text"] == r.positive and r.prompt == "a red apple"
     assert g["5"]["inputs"]["seed"] == 9

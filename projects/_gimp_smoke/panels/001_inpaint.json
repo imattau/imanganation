@@ -1,0 +1,13 @@
+{
+  "path": "/home/lostcause/workspace/imanganation/projects/_gimp_smoke/panels/001_inpaint.png",
+  "seq": 1,
+  "source": "/home/lostcause/workspace/imanganation/projects/_gimp_smoke/panels/001_hires.png",
+  "mask": "/home/lostcause/workspace/imanganation/projects/_gimp_smoke/tmp/inpaint_001_20261004-112334.png",
+  "prompt": "red apple",
+  "width": 1920,
+  "height": 2176,
+  "denoise": 0.85,
+  "grow_mask_by": 8,
+  "seed": 4174961042,
+  "positive": "manga panel, anime illustration, red apple"
+}

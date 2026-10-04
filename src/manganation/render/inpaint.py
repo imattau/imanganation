@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import random
+import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -44,12 +45,17 @@ class InpaintResult:
     positive: str = ""  # the full prompt sent (style prefix + the artist's prompt)
 
 
-def mask_channel_for(path: Path) -> str:
-    """Pick the mask channel: a transparent PNG uses ``alpha``; an opaque one is
-    treated as a white-on-black mask via the red channel."""
+def normalized_mask(path: Path) -> Image.Image:
+    """The mask as an opaque greyscale image, **white = repaint**.
+
+    Accepts a transparent PNG (opaque/selected = repaint, e.g. the GIMP plug-in's
+    selection export) or an opaque black/white one. It's normalised here because
+    ComfyUI's ``LoadImageMask`` reads the alpha channel *inverted* (``1 - alpha``:
+    transparent = masked), which repainted everything except the selection."""
     with Image.open(path) as im:
-        has_alpha = im.mode in ("RGBA", "LA") or "transparency" in im.info
-    return "alpha" if has_alpha else "red"
+        if im.mode in ("RGBA", "LA", "PA") or "transparency" in im.info:
+            return im.convert("RGBA").getchannel("A")
+        return im.convert("L")
 
 
 def _newest_panel(project: Path, seq: int) -> Path | None:
@@ -127,14 +133,17 @@ def inpaint_panel(
     positive = _with_style(prompt)
     seed = seed if seed is not None else random.randrange(2**32)
     source_up = client.upload_image(str(src))
-    mask_up = client.upload_image(str(mask_path))
+    with tempfile.TemporaryDirectory() as tmp:
+        norm = Path(tmp) / f"{project.name}_{seq:03d}_inpaint_mask.png"
+        normalized_mask(mask_path).save(norm)
+        mask_up = client.upload_image(str(norm))
     graph = graphs.inpaint(
         ckpt=models["checkpoints"]["primary"]["id"],
         image=source_up["name"], mask=mask_up["name"],
         prompt=positive, negative=neg, seed=seed,
         prefix=f"imanganation_{seq:03d}_inpaint",
         denoise=denoise, grow_mask_by=grow_mask_by,
-        mask_channel=mask_channel_for(mask_path),
+        mask_channel="red",  # normalised: opaque greyscale, white = repaint
         sampling=graphs.Sampling(d.steps, d.cfg),
     )
     blobs = client.run(graph)

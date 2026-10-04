@@ -1,7 +1,8 @@
 # Panel Inpaint (GIMP "Inpaint Selection")
 
 **Status: engine path COMPLETE.** Repaint just the masked region of an existing panel
-from a short prompt; everything outside the mask is preserved exactly. This is the
+from a short prompt; everything outside the mask is preserved exactly (the repaint is
+composited back over the original through a soft copy of the grown mask). This is the
 engine half the GIMP plug-in's *Inpaint Selection* calls.
 
 ## Pipeline
@@ -19,13 +20,15 @@ mask image ──▶ LoadImageMask ──▶ GrowMask ────────�
 
 ## Mask convention
 
-The GIMP plug-in exports the selection as a mask image, same pixel size as the panel:
+Either form works, **white/opaque = repaint**:
 
-- **Transparent PNG** (selection opaque, rest transparent) → `channel: alpha`.
-- **Opaque black/white PNG** (white = repaint) → `channel: red`.
+- **Transparent PNG**: selection opaque, rest transparent (what the GIMP plug-in exports).
+- **Opaque black/white PNG**: white = repaint.
 
-The channel is auto-detected from the file (`mask_channel_for`): any alpha channel →
-`alpha`, otherwise `red`.
+The engine normalises both to an opaque greyscale mask (`normalized_mask`) and loads it
+by its red channel. Don't hand ComfyUI the alpha channel directly: `LoadImageMask` reads
+alpha as `1 - alpha` (transparent = masked), which repaints everything *except* the
+selection. That bug is why the normalisation exists (found live, 2026-10-04).
 
 Output is a new take: `panels/{seq:03d}_inpaint.png` (then `_inpaint_takeNN.png`) with
 its own sidecar, so the original render and the artist's iterations all survive.
@@ -57,9 +60,10 @@ the project (the API and wrapper enforce containment).
 - **`tests/test_inpaint.py`**: graph shape (mask wired into the latent, grow-mask
   dilation, channel override), alpha/red detection, take naming, size-mismatch and
   out-of-project rejection, missing-render handling, `/inpaint` API + containment.
-- **Live**: panel 3 (Akira + Yuki two-shot) with a mask over the lower-left region.
-  At denoise 0.3/0.6/0.85 the characters stay pixel-identical and only the masked
-  region changes — confirming the mask constrains generation as intended.
+- **Live**: an opaque mask on a 960×1024 panel. Outside the mask (+20 px) 0 pixels
+  change after the composite fix; before it, 7% moved by >8 levels (max 179).
+- **Live, via GIMP** (`gimp/inpaint_smoke_test.py`): a feathered selection over a
+  placed 1920×2176 hi-res take. This caught the inverted-alpha bug above.
 
 ## Notes / next
 

@@ -132,9 +132,9 @@ def inpaint(
     copy of the grown mask: outside it the original pixels come through untouched,
     and the seam is soft rather than a hard edge.
 
-    ``mask_channel`` selects which channel of the uploaded mask image is the mask:
-    ``alpha`` (a transparent selection export), or a colour channel for an opaque
-    black/white mask.
+    ``mask_channel`` selects which channel of the uploaded mask image is the mask. Use a
+    colour channel of an opaque white-on-black mask (what ``render.inpaint`` uploads):
+    ComfyUI's ``alpha`` reads ``1 - alpha``, i.e. transparent = masked.
     """
     return {
         "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": ckpt}},
