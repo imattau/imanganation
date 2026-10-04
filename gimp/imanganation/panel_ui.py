@@ -79,13 +79,18 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
                 previews: dict[str, str] | None = None,
                 open_page_action: str = "",
                 generate_layout_action: str = "",
-                design_action: str = "") -> dict[str, str]:
+                design_action: str = "", new_character_action: str = "",
+                design_character_menu: str = "") -> dict[str, str]:
     """Build generic host content and stable selections from a project manifest.
 
     The Context (inspector) rows are editable fields; ``open_page_action``, a dock
     procedure, adds an "Open page" button there for placed panels and pages.
     ``generate_layout_action`` adds a page-specific layout action when a matching
-    built-in arrangement is available."""
+    built-in arrangement is available, and ``design_action`` a "Design character"
+    button for characters (their notes are the description). In the Project tree,
+    ``new_character_action`` puts "New character…" on the Characters heading's
+    right-click menu, and ``design_character_menu`` puts "Design character" on each
+    character's (both one-string dock procedures)."""
     panels = manifest.get("panels", [])
     pages = manifest.get("pages", [])
     page_by_id = {page["id"]: page for page in pages}
@@ -145,13 +150,17 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
                 f"{panel['id']}\t{_panel_label(panel)} · {count} take{'s' if count != 1 else ''}")
     locations = manifest.get("locations", [])
     props = manifest.get("props", [])
-    if cast or locations or props:
+    if cast or locations or props or new_character_action:
         project_rows.append("# Assets")
-        if cast:
-            project_rows.append("\t# Characters")
+        if cast or new_character_action:
+            heading_menu = (f"\t!{new_character_action}:New character…"
+                            if new_character_action else "")
+            row_menu = (f"\t!{design_character_menu}:Design character"
+                        if design_character_menu else "")
+            project_rows.append(f"\t# Characters{heading_menu}")
             project_rows.extend(
                 f"\t\t{character_row_id(character['name'])}\t"
-                f"{_label(character.get('name'))}"
+                f"{_label(character.get('name'))}{row_menu}"
                 for character in cast)
         for section, assets in (("Locations", locations), ("Props", props)):
             if not assets:

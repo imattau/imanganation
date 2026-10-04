@@ -182,3 +182,16 @@ def test_page_context_locks_layout_when_a_panel_is_placed():
 
     assert "Layout status\tLayout locked · 2 panels are already placed" in inspector
     assert "!proc-layout\tChoose layout…" not in inspector
+
+
+def test_characters_heading_and_rows_carry_right_click_menus():
+    manifest = copy.deepcopy(EXAMPLE)
+    tree = build_docks(manifest, new_character_action="new-proc",
+                       design_character_menu="design-proc")["project"]
+    assert "\t# Characters\t!new-proc:New character…" in tree
+    who = character_row_id("Yuki")
+    assert f"\t\t{who}\tYuki\t!design-proc:Design character" in tree
+    manifest["cast"] = []  # the heading stays, so the first character can be added
+    assert "\t# Characters\t!new-proc:New character…" in build_docks(
+        manifest, new_character_action="new-proc")["project"]
+    assert "!" not in build_docks(copy.deepcopy(EXAMPLE))["project"]  # no actions, no menus

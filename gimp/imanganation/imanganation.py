@@ -110,6 +110,9 @@ DOCK_OPEN_PROJECT = "plug-in-imanganation-dock-open-project"
 DOCK_OPEN_PAGE = "plug-in-imanganation-dock-open-page"  # Context's "Open page" button
 DOCK_NEW_PROJECT = "plug-in-imanganation-dock-new-project"
 DOCK_DESIGN_CHARACTER = "plug-in-imanganation-dock-design-character"
+# Project tree right-click menus (one-string procedures: the row id)
+DOCK_NEW_CHARACTER = "plug-in-imanganation-dock-new-character"
+DOCK_DESIGN_CHARACTER_ITEM = "plug-in-imanganation-dock-design-character-item"
 DOCK_GENERATE_LAYOUT = "plug-in-imanganation-dock-generate-page-layout"
 # Windows > Imanganation: reopen a closed dock (the host keeps closed docks closed).
 DOCK_SHOW = {dock: f"plug-in-imanganation-show-dock-{dock}" for dock in DOCK_IDS}
@@ -1825,7 +1828,9 @@ def _refresh_project_docks(sync_canvas=False):
         selected_id = _selected_canvas_panel_id(manifest) or selected_id
     contents = build_docks(
         manifest, selected_id, root, _project_page_thumbnails(root, manifest),
-        DOCK_OPEN_PAGE, DOCK_GENERATE_LAYOUT, design_action=DOCK_DESIGN_CHARACTER)
+        DOCK_OPEN_PAGE, DOCK_GENERATE_LAYOUT, design_action=DOCK_DESIGN_CHARACTER,
+        new_character_action=DOCK_NEW_CHARACTER,
+        design_character_menu=DOCK_DESIGN_CHARACTER_ITEM)
     _DOCK_CONTEXT["selected_id"] = contents["selected_id"]
     canvas_rows = _canvas_take_rows(manifest)
     if canvas_rows:
@@ -2459,6 +2464,86 @@ def _design_selected_character():
     _refresh_project_docks()
 
 
+def _choose_new_character():
+    """New Character dialog -> (name, aliases, description, design now) or None."""
+    dialog = Gtk.Dialog(title="New Character", flags=Gtk.DialogFlags.MODAL)
+    dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+                       "Create", Gtk.ResponseType.OK)
+    dialog.set_default_response(Gtk.ResponseType.OK)
+    grid = Gtk.Grid(column_spacing=12, row_spacing=8, margin=12)
+    name = Gtk.Entry(activates_default=True, hexpand=True)
+    aliases = Gtk.Entry(activates_default=True, placeholder_text="Optional, comma-separated")
+    description = Gtk.TextView(wrap_mode=Gtk.WrapMode.WORD_CHAR, accepts_tab=False,
+                               left_margin=4, right_margin=4, top_margin=4, bottom_margin=4)
+    scrolled = Gtk.ScrolledWindow(hexpand=True, vexpand=True)
+    scrolled.set_size_request(380, 120)
+    scrolled.set_shadow_type(Gtk.ShadowType.IN)
+    scrolled.add(description)
+    hint = Gtk.Label(label="Age, build, hair, eyes, outfit, marks, demeanour. Your words "
+                           "win; the engine only fills what you leave open.",
+                     xalign=0.0, wrap=True, max_width_chars=48)
+    hint.get_style_context().add_class("dim-label")
+    design = Gtk.CheckButton(label="Design the character now (uses the engine)", active=True)
+    for row, (label, widget) in enumerate((("Name", name), ("Aliases", aliases),
+                                           ("Description", scrolled))):
+        caption = Gtk.Label(label=label, xalign=0.0, valign=Gtk.Align.START)
+        grid.attach(caption, 0, row, 1, 1)
+        grid.attach(widget, 1, row, 1, 1)
+    grid.attach(hint, 1, 3, 1, 1)
+    grid.attach(design, 1, 4, 1, 1)
+    dialog.get_content_area().add(grid)
+    dialog.show_all()
+    try:
+        while dialog.run() == Gtk.ResponseType.OK:
+            buffer = description.get_buffer()
+            text = buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), False)
+            chosen = (" ".join(name.get_text().split()),
+                      [a.strip() for a in aliases.get_text().split(",") if a.strip()],
+                      " ".join(text.split()), design.get_active())
+            if chosen[0]:
+                return chosen
+            Gimp.message("Give the character a name.")
+        return None
+    finally:
+        dialog.destroy()
+
+
+def _dock_character_menu(procedure, config, data):
+    """Project tree right-click: New character… (Characters heading) or Design
+    character (a character row, whose id is the item)."""
+    try:
+        root = _DOCK_CONTEXT["root"]
+        if data == "design":
+            _DOCK_CONTEXT["selected_id"] = config.get_property("item")
+            _design_selected_character()
+            return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+        chosen = _choose_new_character()
+        if chosen is None:
+            return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
+        name, aliases, description, design = chosen
+        manifest = load_project(root)
+        taken = {n.casefold() for c in manifest["cast"]
+                 for n in (c["name"], *c.get("aliases", []))}
+        if name.casefold() in taken:
+            raise ValueError(f"{name} is already in the cast")
+        character = {"name": name, "aliases": aliases}
+        if description:
+            character["notes"] = description
+        manifest["cast"].append(character)
+        save_project(root, manifest)
+        _DOCK_CONTEXT["selected_id"] = character_row_id(name)
+        if design and description:
+            try:
+                _queue_character_design(root, manifest, character)
+            except EngineError as exc:
+                Gimp.message(f"{name} was added but not designed: {_engine_status(exc)}. "
+                             "Use Design character when the engine runs.")
+        _refresh_project_docks()
+    except Exception as exc:
+        return _error(procedure, str(exc))
+    return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+
+
 def _new_project_run(procedure, config, data):
     """Filters > imanganation > New Project from Script: the extension shows the dialog."""
     try:
@@ -2522,6 +2607,8 @@ def _add_dock_callbacks(plugin):
         (DOCK_OPEN_PAGE, _dock_action, "open-page", False),
         (DOCK_NEW_PROJECT, _dock_action, "new-project", False),
         (DOCK_DESIGN_CHARACTER, _dock_action, "design-character", False),
+        (DOCK_NEW_CHARACTER, _dock_character_menu, "new", True),
+        (DOCK_DESIGN_CHARACTER_ITEM, _dock_character_menu, "design", True),
         (DOCK_GENERATE_LAYOUT, _dock_action, "generate-layout", False),
         # Page strip: clicking a page opens it; the button adds one (as in Project)
         (DOCK_ACTIONS[DOCK_FILMSTRIP], _dock_action, "project-action", False),
@@ -2576,7 +2663,9 @@ def _register_project_docks(plugin):
         contents = build_docks(
             manifest, _DOCK_CONTEXT.get("selected_id"), root,
             _project_page_thumbnails(root, manifest), DOCK_OPEN_PAGE,
-            DOCK_GENERATE_LAYOUT, design_action=DOCK_DESIGN_CHARACTER)
+            DOCK_GENERATE_LAYOUT, design_action=DOCK_DESIGN_CHARACTER,
+        new_character_action=DOCK_NEW_CHARACTER,
+        design_character_menu=DOCK_DESIGN_CHARACTER_ITEM)
         rows = [
             (DOCK_PROJECT, "Project", "tree", contents["project"],
              contents["project_selected"], "Add page", DOCK_ACTIONS[DOCK_PROJECT],

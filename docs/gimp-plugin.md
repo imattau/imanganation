@@ -78,7 +78,9 @@ script is parsed in the plug-in itself (the engine's own tokenizer,
 LLM (`POST /scripts/parse`). With *Design the cast now*, every described character is
 queued for a design sheet (`POST /characters`), and Context refreshes as each one
 lands. A character's **Design character** button designs it from its notes, or makes a
-new design version if it has one. The engine has ComfyUI unload its models before an LLM
+new design version if it has one. In the Project tree, right-click **Characters** for
+**New character…** (name, aliases and a description, designed straight away if you
+like), or a character for **Design character**. The engine has ComfyUI unload its models before an LLM
 step and unloads the LLM before a render, so both fit on 16 GB.
 On first launch, the Project dock offers **Open project…**; the
 chosen project folder is remembered in GIMP's user settings and its docks are restored on
