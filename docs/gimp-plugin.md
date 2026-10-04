@@ -16,7 +16,7 @@ places panels and letters the page.
 artist's own template or a generated layout (frame lines on a layer named "Template…")
    │
    ├─ click inside a frame (Fuzzy Select)
-   ├─ Filters → imanganation → Render Panel into Frame
+   ├─ Imanganation → Render Panel into Frame
    │      plug-in ──POST /jobs {seq, frame w×h}──▶ engine ──▶ ComfyUI
    │      renders the next script panel at the frame's proportions (~15 s)
    │      ◀── panels/003.png ── placed, clipped to the frame, beneath the frame lines
@@ -103,12 +103,12 @@ installed, else a bold sans; the size follows the page (1/64 of its height).
 On first launch, the Project dock offers **Open project…**; the
 chosen project folder is remembered in GIMP's user settings and its docks are restored on
 later launches. The **Open / Switch Project…** command remains available under
-*Filters → imanganation*. A dock you close stays closed on later launches; reopen it from
+*Imanganation*. A dock you close stays closed on later launches; reopen it from
 *Windows → Imanganation*. Row callbacks carry stable IDs.
 For container projects, generated and imported images are
 copied into immutable `takes/` files and linked through take IDs; XCF parasites and
 page placement metadata are still being migrated. It adds ten commands under
-*Filters → imanganation*:
+*Imanganation*:
 
 - **Open / Switch Project…**: choose a folder containing `project.json` to populate the
   workspace docks. Select project rows to
@@ -273,7 +273,7 @@ GIMP (flatpak)                         host
 | Lettering / SFX | done by hand. Script dialogue/SFX sit as hidden text layers in each group, for reference |
 | Character reference | engine registry. "Use layer as reference" exports a layer into it |
 
-## Candidate procedures (menu *Filters → imanganation*)
+## Candidate procedures (menu *Imanganation*)
 
 Each one is a PDB procedure, so you can also script it from Python-Fu or batch mode.
 
@@ -346,7 +346,7 @@ flatpak run org.gimp.GIMP
 ```
 
 Open your page template and name its frame-lines layer `Template`. Click inside a
-frame with Fuzzy Select, then run *Filters → imanganation → Render Panel into Frame…*
+frame with Fuzzy Select, then run *Imanganation → Render Panel into Frame…*
 and pick the project folder (GIMP remembers it after the first run). Click the next
 frame and repeat.
 

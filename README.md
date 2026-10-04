@@ -28,7 +28,7 @@ copy in [`docs/script-template.txt`](./docs/script-template.txt).
 in GIMP. See [`docs/color-policy.md`](./docs/color-policy.md).
 
 **Phase 5 — core flow working.** In GIMP: click a frame in your page template, run
-*Filters → imanganation → Render Panel into Frame*, and the next script panel is
+*Imanganation → Render Panel into Frame*, and the next script panel is
 rendered to that frame's shape and dropped in. See [`docs/gimp-plugin.md`](./docs/gimp-plugin.md).
 
 **Phase 6a — COMPLETE.** Finished panels enlarge cleanly: a low-denoise img2img polish
@@ -76,4 +76,4 @@ uv run manganation serve          # engine API on 127.0.0.1:8790 (needs ComfyUI)
 ```
 
 Then in GIMP: name your page template's frame-lines layer `Template`, click inside a
-frame with Fuzzy Select, and run *Filters → imanganation → Render Panel into Frame…*.
+frame with Fuzzy Select, and run *Imanganation → Render Panel into Frame…*.

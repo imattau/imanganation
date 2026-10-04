@@ -79,7 +79,7 @@ sizes the target from that. So:
 | Python | `render.refiner.refine_panel(project, seq, scale=, denoise=, seed=)` |
 | CLI | `manganation refine <project> <seq> [--scale 2.0] [--denoise 0.25]` |
 | API | `POST /refine` → job (`kind: "refine"`), poll `GET /jobs/{id}`. Optional `source` (must be inside the project) refines an exact take |
-| GIMP | *Filters → imanganation → Refine Panel (Hi-res)…* on a placed panel. Swaps the result in at the same size and mask (`docs/gimp-plugin.md`) |
+| GIMP | *Imanganation → Refine Panel (Hi-res)…* on a placed panel. Swaps the result in at the same size and mask (`docs/gimp-plugin.md`) |
 
 ## Verified
 

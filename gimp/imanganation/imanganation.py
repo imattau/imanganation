@@ -2726,7 +2726,7 @@ def _dock_page_menu(procedure, config, data):
 
 
 def _new_project_run(procedure, config, data):
-    """Filters > imanganation > New Project from Script: the extension shows the dialog."""
+    """Imanganation > New Project from Script: the extension shows the dialog."""
     try:
         _dock_pdb_call(DOCK_NEW_PROJECT, {})
     except Exception:
@@ -3221,7 +3221,7 @@ class Imanganation(Gimp.PlugIn):
             proc.add_enum_argument("run-mode", "Run mode", "How to run the procedure",
                                    Gimp.RunMode, Gimp.RunMode.INTERACTIVE,
                                    GObject.ParamFlags.READWRITE)
-            proc.add_menu_path("<Image>/Filters/imanganation")
+            proc.add_menu_path("<Image>/Imanganation")
             proc.set_documentation(
                 "New Imanganation project from a script",
                 "Build a project (panels, pages, cast, locations) from a script and "
@@ -3235,7 +3235,7 @@ class Imanganation(Gimp.PlugIn):
             proc.add_enum_argument("run-mode", "Run mode", "How to run the procedure",
                                    Gimp.RunMode, Gimp.RunMode.INTERACTIVE,
                                    GObject.ParamFlags.READWRITE)
-            proc.add_menu_path("<Image>/Filters/imanganation")
+            proc.add_menu_path("<Image>/Imanganation")
             proc.set_documentation(
                 "Open the Imanganation project docks",
                 "Open or switch the project shown in the startup Imanganation workspace.", name)
@@ -3260,7 +3260,7 @@ class Imanganation(Gimp.PlugIn):
         # GIMP 3.3 requires a menu label before a menu path is added. Each
         # procedure below replaces this fallback with its user-facing label.
         proc.set_menu_label("Imanganation")
-        proc.add_menu_path("<Image>/Filters/imanganation")
+        proc.add_menu_path("<Image>/Imanganation")
         proc.set_attribution("imanganation", "imanganation", "2026")
         if name == PROC_STATUS:
             proc.set_menu_label("Engine _Status...")
