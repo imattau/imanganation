@@ -68,13 +68,22 @@ class LLMClient(Protocol):
     ) -> Any: ...
 
 
-def _context_for(name: str, script_text: str, existing: AppearanceSpec | None) -> str:
+def _context_for(name: str, script_text: str, existing: AppearanceSpec | None,
+                 description: str = "") -> str:
     known = ""
     if existing is not None:
         tags = existing.prompt_tags(mannerisms=True)
         if tags:
             known = "\nAlready known traits (keep these): " + ", ".join(tags)
+    if description.strip():
+        # The author's own design (the script's CHARACTERS block or the New Character
+        # dialog) wins: keep its every trait, only fill fields it leaves open.
+        known += ("\nThe author's description of this character (authoritative: keep "
+                  "every trait it gives, in its own words where possible, and only fill "
+                  f"fields it leaves open, consistently with it):\n{description.strip()}")
     excerpt = script_text.strip()
+    if not excerpt:
+        return f"Character: {name}{known}"
     if len(excerpt) > 6000:
         excerpt = excerpt[:6000] + "\n…[truncated]"
     return f"Character: {name}{known}\n\nStory script:\n---\n{excerpt}\n---"
@@ -87,13 +96,15 @@ def derive_appearance(
     existing: AppearanceSpec | None = None,
     settings: Settings | None = None,
     client: LLMClient | None = None,
+    description: str = "",
 ) -> AppearanceSpec:
-    """Return an :class:`AppearanceSpec` for ``name`` derived from the script."""
+    """Return an :class:`AppearanceSpec` for ``name`` derived from the script and, if
+    given, the author's ``description`` (which wins over the script)."""
     settings = settings or load_settings()
     active: LLMClient = client or OllamaClient(settings.llm.base_url, settings.llm.model)
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": _context_for(name, script_text, existing)},
+        {"role": "user", "content": _context_for(name, script_text, existing, description)},
     ]
     data = active.chat_json(messages, schema=APPEARANCE_SCHEMA)
     if not isinstance(data, dict):

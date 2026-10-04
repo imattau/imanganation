@@ -128,6 +128,22 @@ none preselected for a two-shot.
 `POST /characters/reference` takes `project` instead of `project_dir`. Both accept
 `project_dir` too (legacy). An unmapped project id has an empty cast.
 
+`POST /characters` creates a character and designs it, as a job (`kind: "character"`,
+polled at `GET /jobs/{id}`, queued with renders):
+
+```json
+{"project": "prj_…", "name": "Rin", "description": "tall delinquent girl, bleached bob,
+ school blazer worn open, scar on chin", "aliases": ["Rin-san"], "seed": null,
+ "replace": false}
+```
+
+The LLM turns the description into traits (the description is authoritative; only
+fields it leaves open are filled), is unloaded, then ComfyUI renders the design sheet,
+locked as the `base` reference. The result has `name`, `created`, `appearance`,
+`version_id`, `image`, `seed`, `prompt`. A character that already has a design is a
+`409` unless `replace` (which re-derives traits from a new description, or keeps the
+traits when it is empty). No description and no traits is a `422`.
+
 ## Paths in container forms
 
 `source`, `mask` and `image_path` must be existing files under the projects root

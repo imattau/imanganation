@@ -152,10 +152,34 @@ class InpaintRequest(BaseModel):
         return self
 
 
+class CharacterRequest(BaseModel):
+    """Create a character from the author's description and design it: traits from
+    the description (LLM), then a locked design sheet (ComfyUI). One job, queued with
+    the renders so the GPU is never shared."""
+
+    project_dir: str | None = None
+    project: str | None = Field(default=None, pattern=r"^prj_[a-z0-9]{6,}$")
+    name: str = Field(min_length=1, max_length=60)
+    description: str = Field(default="", max_length=4000)
+    aliases: list[str] = Field(default_factory=list)
+    seed: int | None = None
+    # Re-derive traits from the description and replace an existing base design
+    replace: bool = False
+
+    @model_validator(mode="after")
+    def _one_form(self):
+        if (self.project is None) == (self.project_dir is None):
+            raise ValueError("send either project (container id) or project_dir")
+        return self
+
+
+JobKind = Literal["render", "refine", "inpaint", "character"]
+
+
 class Job(BaseModel):
     id: str
     status: Literal["queued", "running", "done", "error"] = "queued"
-    kind: Literal["render", "refine", "inpaint"] = "render"
+    kind: JobKind = "render"
     request: dict
     result: dict | None = None
     error: str | None = None
@@ -232,13 +256,14 @@ def create_app(
     refine_inline=refiner_render.refine_inline,
     inpaint_inline=inpaint_render.inpaint_inline,
     outputs: Path | None = None,
+    design_character=None,
 ) -> FastAPI:
     app = FastAPI(title="imanganation engine")
     jobs: dict[str, Job] = {}
     lock = threading.Lock()
     worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="render")
 
-    def submit_job(kind: Literal["render", "refine", "inpaint"], request: dict, work) -> Job:
+    def submit_job(kind: JobKind, request: dict, work) -> Job:
         job = Job(id=uuid.uuid4().hex[:12], kind=kind, request=request)
         with lock:
             jobs[job.id] = job
@@ -481,6 +506,23 @@ def create_app(
         reg.add_user_reference(character.name, str(image), version_id)
         return {"name": character.name, "version": version_id, "previous": previous,
                 "reference": str(reg.reference_path(character.name))}
+
+    @app.post("/characters", status_code=202)
+    def submit_character(req: CharacterRequest) -> Job:
+        from manganation.characters.cast import design_character as default_design
+
+        reg = _registry(req.project_dir, req.project)
+        existing = reg.get(req.name)
+        if existing is not None and existing.version("base") is not None and not req.replace:
+            raise HTTPException(409, f"{existing.name} already has a design; send replace "
+                                     "to redesign it")
+        if not req.description.strip() and (
+                existing is None or not existing.appearance.appearance_tags()):
+            raise HTTPException(422, f"describe {req.name} first")
+        design = design_character or default_design
+        return submit_job("character", req.model_dump(), lambda: design(
+            reg, req.name, req.description, aliases=req.aliases, seed=req.seed,
+            replace=req.replace))
 
     @app.get("/jobs/{job_id}")
     def status(job_id: str) -> Job:

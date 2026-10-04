@@ -37,12 +37,29 @@ CUT TO: the stairwell          -> annotates the NEXT panel's location
 - **Names normalised:** `AKIRA:` → `Akira` (stable key for the character registry).
 - **Camera auto-detected** from action prose (wide shot, close-up, dutch angle…).
 - Dialogue is captured but **never rendered** (text-free panels).
+- **Cast block (optional):** before the first page, `CHARACTERS` (or `CAST`) and one
+  unindented `NAME (aka Alias, Other): description` per character; indented lines
+  continue a description. Each description is the author's design and wins over the
+  LLM when traits are derived (`character suggest`, `POST /characters`).
+
+  ```
+  CHARACTERS
+  AKIRA: 17, boy, messy black hair with blue tips, amber eyes,
+    school uniform with red tie. Quiet loner, slouches.
+  YUKI (aka Yuki-chan): 16, girl, silver bob with pink tips, sailor uniform.
+  ```
+- **Characters in a panel:** its speakers, plus any known character (declared, by name or
+  alias, or speaking anywhere in the script) named in its action text as a whole word,
+  as written or in capitals ("Yuki drags Akira by the wrist" has both).
+- The tokenizer is `script/formats/canonical.py`, standard library only, so the GIMP
+  plug-in imports the same file (`gimp/imanganation/script_canonical.py` links to it).
 
 **Prose (LLM path).** Free-form story text is normalised by the local model,
 constrained by a **JSON schema** (Ollama structured outputs), then pydantic-validated.
 If validation fails once, a repair turn is appended and retried.
 
-Routing is automatic: canonical input never touches the LLM.
+Routing is automatic: canonical input never touches the LLM. A cast block is
+parsed the same way on both paths; the LLM only sees the story.
 
 ## Interface
 

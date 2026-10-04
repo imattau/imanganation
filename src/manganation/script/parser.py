@@ -16,9 +16,14 @@ from typing import Any, Protocol
 from pydantic import ValidationError
 
 from manganation.config import Settings, load_settings
-from manganation.script.formats.mangaplay import looks_canonical, parse_canonical
+from manganation.script.formats.mangaplay import (
+    add_mentioned_characters,
+    looks_canonical,
+    parse_canonical,
+    split_cast,
+)
 from manganation.script.llm import LLMError, OllamaClient
-from manganation.script.schema import ColorMode, PanelSpec, ReadingOrder, Script
+from manganation.script.schema import CastEntry, ColorMode, PanelSpec, ReadingOrder, Script
 
 
 class LLMClient(Protocol):
@@ -170,8 +175,11 @@ def parse(
             default_color_mode=default_color_mode,
         )
 
+    # A CHARACTERS block is parsed deterministically either way; the LLM only sees
+    # the story, and its panels then pick up the declared names too.
+    cast, story = split_cast(script_text)
     active_client: LLMClient = client or OllamaClient(settings.llm.base_url, settings.llm.model)
-    messages = _build_messages(script_text, reading_order)
+    messages = _build_messages(story, reading_order)
 
     last_error: Exception | None = None
     convo = list(messages)
@@ -186,7 +194,8 @@ def parse(
             )
             if settings.llm.unload_before_render:
                 active_client.unload()
-            return script
+            script.cast = [CastEntry(**c) for c in cast]
+            return add_mentioned_characters(script)
         except (ParseError, LLMError, ValidationError) as exc:
             last_error = exc
             if attempt == 0:

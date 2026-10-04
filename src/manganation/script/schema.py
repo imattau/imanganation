@@ -78,12 +78,22 @@ class PanelSpec(BaseModel):
         return seen
 
 
+class CastEntry(BaseModel):
+    """A character declared in the script's ``CHARACTERS`` block: the author's own
+    design description, which wins over anything the LLM would invent."""
+
+    name: str = Field(min_length=1)
+    aliases: list[str] = Field(default_factory=list)
+    description: str = ""
+
+
 class Script(BaseModel):
     """A full parsed script: ordered panels plus project-level metadata."""
 
     title: str = ""
     reading_order: ReadingOrder = ReadingOrder.RTL
     default_color_mode: ColorMode = ColorMode.COLOR
+    cast: list[CastEntry] = Field(default_factory=list)
     panels: list[PanelSpec] = Field(default_factory=list)
 
     def panels_for_page(self, page: int) -> list[PanelSpec]:

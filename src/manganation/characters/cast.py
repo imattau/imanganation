@@ -31,8 +31,8 @@ class CastPlan:
 
 
 def collect_names(script: Script) -> list[str]:
-    """Every character name mentioned, in first-appearance order."""
-    names: list[str] = []
+    """Every character: the declared cast first, then the rest in first-appearance order."""
+    names: list[str] = [entry.name for entry in script.cast]
     for panel in script.panels:
         for name in panel.characters:
             if name and name not in names:
@@ -60,16 +60,25 @@ def assemble_cast(
     registry = registry or CharacterRegistry(project)
     plan = CastPlan(names=collect_names(script))
 
+    declared = {entry.name: entry for entry in script.cast}
     for name in plan.names:
         existed = registry.get(name) is not None
         character = registry.ensure(name)
         if not existed:
             plan.created.append(name)
+        entry = declared.get(name)
+        description = entry.description if entry else ""
+        if entry:
+            character.aliases = [*character.aliases,
+                                 *[a for a in entry.aliases if a not in character.aliases]]
+            character.notes = character.notes or description
 
+        # Traits already there (derived before, or edited) are kept
         needs_appearance = not character.appearance.appearance_tags()
-        if derive and needs_appearance and script_text:
+        if derive and needs_appearance and (script_text or description):
             character.appearance = derive_appearance(
-                name, script_text, existing=character.appearance, settings=settings
+                name, script_text, existing=character.appearance, settings=settings,
+                description=description,
             )
 
     registry.save()
@@ -93,3 +102,66 @@ def assemble_cast(
         registry.save()
 
     return plan
+
+
+@dataclass
+class CharacterDesign:
+    """What :func:`design_character` did: the traits it settled on and the sheet."""
+
+    name: str
+    created: bool
+    appearance: dict
+    version_id: str
+    image: str
+    seed: int
+    prompt: str
+
+
+def design_character(
+    registry: CharacterRegistry,
+    name: str,
+    description: str = "",
+    *,
+    aliases: list[str] | None = None,
+    seed: int | None = None,
+    replace: bool = False,
+    settings: Settings | None = None,
+    llm=None,
+    comfy=None,
+) -> CharacterDesign:
+    """Create (or update) one character from the author's description, derive its
+    traits with the LLM, release the LLM's VRAM, then render and lock its design sheet.
+
+    Used by the engine's ``POST /characters``: the GIMP plug-in's New Character… and
+    New Project from Script… both end here. ``replace`` re-derives traits from the
+    description and replaces an existing base design.
+    """
+    from manganation.script.llm import OllamaClient
+
+    settings = settings or load_settings()
+    created = registry.get(name) is None
+    character = registry.ensure(name)
+    character.aliases = [*character.aliases,
+                         *[a for a in (aliases or []) if a not in character.aliases]]
+    if description.strip():
+        character.notes = description.strip()
+    if replace or not character.appearance.appearance_tags():
+        if not description.strip() and not character.appearance.appearance_tags():
+            raise ValueError(f"describe {character.name} first: no traits or description")
+        if description.strip():
+            client = llm or OllamaClient(settings.llm.base_url, settings.llm.model)
+            character.appearance = derive_appearance(
+                character.name, "", existing=None if replace else character.appearance,
+                settings=settings, client=client, description=description,
+            )
+            if settings.llm.unload_before_render:
+                client.unload()  # never share the GPU with SDXL
+    registry.save()
+    result = generate_design(character, registry, seed=seed, settings=settings,
+                             client=comfy, replace=replace or character.version("base")
+                             is not None)
+    return CharacterDesign(
+        name=character.name, created=created,
+        appearance=character.appearance.model_dump(), version_id=result.version_id,
+        image=str(result.image), seed=result.seed, prompt=result.prompt,
+    )

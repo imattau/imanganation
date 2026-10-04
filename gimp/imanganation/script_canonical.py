@@ -1,0 +1,1 @@
+../../src/manganation/script/formats/canonical.py
