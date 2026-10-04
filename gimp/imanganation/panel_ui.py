@@ -111,7 +111,8 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
         placement = panel.get("placement") or {}
         if placement:
             frame = placement.get("frame") or []
-            frame_text = " × ".join(str(value) for value in frame[2:4]) if len(frame) >= 4 else "Unknown"
+            frame_text = (" × ".join(str(value) for value in frame[2:4])
+                          if len(frame) >= 4 else "Unknown")
             inspector_rows.extend([
                 f"Placed page\t{placement.get('page', 'Unknown')}",
                 f"Frame size\t{frame_text}",
@@ -142,7 +143,8 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
             if parent:
                 details.append(f"from {parent}")
             if root is not None and take.get("file"):
-                state = "file ready" if (Path(root) / take["file"]).is_file() else "file missing"
+                state = ("file ready" if (Path(root) / take["file"]).is_file()
+                         else "file missing")
                 details.append(state)
             inspector_rows.append(f"{take_id}{marker}\t{' · '.join(details)}")
     elif selected_id in page_by_id:

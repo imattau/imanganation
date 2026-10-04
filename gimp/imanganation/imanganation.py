@@ -1145,7 +1145,7 @@ def _add_dock_callbacks(plugin):
     callbacks = [
         (DOCK_ACTIONS[DOCK_PROJECT], _dock_action, "refresh", False),
         (DOCK_ACTIONS[DOCK_INSPECTOR], _dock_action, "refresh", False),
-        (DOCK_ACTIONS[DOCK_FILMSTRIP], _dock_action, "next-page", False),
+        (DOCK_ACTIONS[DOCK_FILMSTRIP], _dock_action, "open-page", False),
         (DOCK_ITEMS[DOCK_PROJECT], _dock_item_action, DOCK_PROJECT, True),
         (DOCK_ITEMS[DOCK_FILMSTRIP], _dock_item_action, DOCK_FILMSTRIP, True),
     ]
@@ -1163,7 +1163,7 @@ def _add_dock_callbacks(plugin):
 
 def _register_project_docks(plugin):
     contents = build_docks(load_project(_DOCK_CONTEXT["root"]),
-                           _DOCK_CONTEXT.get("selected_id"))
+                           _DOCK_CONTEXT.get("selected_id"), _DOCK_CONTEXT["root"])
     rows = [
         (DOCK_PROJECT, "Project", "tree", contents["project"],
          contents["project_selected"], "Refresh", DOCK_ACTIONS[DOCK_PROJECT],
