@@ -105,6 +105,74 @@ def img2img(
     }
 
 
+def inpaint(
+    *,
+    ckpt: str,
+    image: str,
+    mask: str,
+    prompt: str,
+    negative: str,
+    seed: int,
+    prefix: str,
+    denoise: float = 0.85,
+    grow_mask_by: int = 8,
+    mask_channel: str = "alpha",
+    sampling: Sampling = Sampling(),
+) -> dict:
+    """Repaint only the masked region of an existing image.
+
+    The init image is encoded to a latent, then ``SetLatentNoiseMask`` marks the region
+    to regenerate; the sampler runs at high ``denoise`` so the masked area is
+    re-synthesised from noise while everything outside the mask is preserved. The mask
+    is dilated (``grow_mask_by``) so the new pixels blend into their surroundings.
+
+    ``mask_channel`` selects which channel of the uploaded mask image is the mask:
+    ``alpha`` (a transparent selection export), or a colour channel for an opaque
+    black/white mask.
+    """
+    return {
+        "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": ckpt}},
+        "2": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["1", 1]}},
+        "3": {"class_type": "CLIPTextEncode", "inputs": {"text": negative, "clip": ["1", 1]}},
+        "8": {"class_type": "LoadImage", "inputs": {"image": image}},
+        "9": {
+            "class_type": "LoadImageMask",
+            "inputs": {"image": mask, "channel": mask_channel},
+        },
+        "10": {
+            "class_type": "GrowMask",
+            "inputs": {
+                "mask": ["9", 0], "expand": grow_mask_by, "tapered_corners": True,
+            },
+        },
+        "4": {"class_type": "VAEEncode", "inputs": {"pixels": ["8", 0], "vae": ["1", 2]}},
+        "11": {
+            "class_type": "SetLatentNoiseMask",
+            "inputs": {"samples": ["4", 0], "mask": ["10", 0]},
+        },
+        "5": {
+            "class_type": "KSampler",
+            "inputs": {
+                "seed": seed,
+                "steps": sampling.steps,
+                "cfg": sampling.cfg,
+                "sampler_name": sampling.sampler,
+                "scheduler": sampling.scheduler,
+                "denoise": denoise,
+                "model": ["1", 0],
+                "positive": ["2", 0],
+                "negative": ["3", 0],
+                "latent_image": ["11", 0],
+            },
+        },
+        "6": {"class_type": "VAEDecode", "inputs": {"samples": ["5", 0], "vae": ["1", 2]}},
+        "7": {
+            "class_type": "SaveImage",
+            "inputs": {"filename_prefix": prefix, "images": ["6", 0]},
+        },
+    }
+
+
 def with_ipadapter(
     graph: dict,
     *,

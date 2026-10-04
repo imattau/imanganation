@@ -35,7 +35,10 @@ at native size followed by a Real-ESRGAN anime upscale, saved as a `_hires` take
 the design sheet (img2img). The spike also found and fixed multi-figure design sheets
 that were silently corrupting references. See [`docs/phase6b.md`](./docs/phase6b.md).
 
-Next: Phase 5 follow-ups (regenerate, inpaint, character reference from layer).
+**Inpaint — engine COMPLETE.** Repaint only a masked region of a panel (the engine half
+of the GIMP *Inpaint Selection*). See [`docs/inpaint.md`](./docs/inpaint.md).
+
+Next: Phase 5 follow-ups (Inpaint Selection UI, regenerate, character reference from layer).
 
 ## Layout
 

@@ -77,6 +77,31 @@ def refine(
 
 
 @app.command()
+def inpaint(
+    project: str = typer.Argument(..., help="Project name under projects/."),
+    seq: int = typer.Argument(..., help="Panel number in script order (1-based)."),
+    mask: Path = typer.Argument(..., exists=True, dir_okay=False,
+                                help="Mask image (alpha or black/white), same size as the panel."),
+    prompt: str = typer.Option(..., "--prompt", "-p", help="What to paint in the region."),
+    source: Path = typer.Option(None, "--source", "-s", dir_okay=False,
+                                help="Init image (default: newest panel take)."),
+    denoise: float = typer.Option(None, help="Repaint strength 0..1 (default: settings)."),
+    grow: int = typer.Option(None, "--grow", help="Mask dilation in px (default: settings)."),
+    seed: int = typer.Option(None, help="Fixed seed for the repaint."),
+) -> None:
+    """Repaint the masked region of a panel (docs/inpaint.md)."""
+    from manganation.project import project_dir
+    from manganation.render.inpaint import inpaint_panel
+
+    r = inpaint_panel(
+        project_dir(project), seq, mask=mask.resolve(), prompt=prompt,
+        source=source.resolve() if source is not None else None,
+        denoise=denoise, grow_mask_by=grow, seed=seed,
+    )
+    rprint(f"[green]inpainted[/green] {r.path}  {r.width}x{r.height}  denoise={r.denoise}")
+
+
+@app.command()
 def doctor() -> None:
     """Check local prerequisites (GPU, ComfyUI, Ollama)."""
     import httpx

@@ -181,8 +181,9 @@ None of these create or arrange pages.
 2. **Place Next Panel** ✅ (built).
 3. **Regenerate Panel** ✅ (built).
 4. **Inpaint Selection**: selection → mask, active layer → init image, short prompt →
-   engine img2img/inpaint → result layer clipped to the selection. Needs a new
-   ComfyUI inpaint workflow.
+   engine inpaint → result layer clipped to the selection. **Engine ready**:
+   `POST /inpaint` (`docs/inpaint.md`); the GIMP side still needs the selection→mask
+   export + result layer wiring.
 5. **Set Character Reference from Layer** ✅ (built). Engine: `GET /characters`,
    `POST /characters/reference`.
 6. **Engine Status…**: health, queue and VRAM.

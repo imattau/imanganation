@@ -121,7 +121,7 @@ color_mode (inherit|color|bw — recorded, inert; engine renders colour), aspect
 | **2. Character memory** | img-memory registry, reference-less design generation, versioning — **DONE** |
 | **3. Renderer backend** | frame-sized panel renderer, prompt builder, single-char + IP-Adapter, colour output, job API — **mostly done** (`render/panel.py`, `web/api.py`); `workflows/` JSON templates not used yet |
 | **4. Multi-char + story loop** | regional IP-Adapter/Attention Couple, per-panel seed/continuity, regenerate-one — **DONE** (see `docs/phase4.md`) |
-| **5. GIMP plug-in** | click a frame in the artist's template → render the next panel into it; spec parasite; lettering reference layers — **core flow DONE** (see `docs/gimp-plugin.md`); Regenerate Panel, Refine Panel (hi-res, Phase 6a) and Set Character Reference built; next: Inpaint Selection, Engine Status |
+| **5. GIMP plug-in** | click a frame in the artist's template → render the next panel into it; spec parasite; lettering reference layers — **core flow DONE** (see `docs/gimp-plugin.md`); Regenerate Panel, Refine Panel (hi-res, Phase 6a), Inpaint Selection engine (`docs/inpaint.md`) and Set Character Reference built; next: Inpaint Selection UI, Engine Status |
 | **6. Optional** | per-character LoRA training, batch chapters, GIMP-side B&W/tone actions, DiffSensei backend spike |
 | **6a. Panel refinement** | two-pass hi-res fix (low-denoise polish + Real-ESRGAN anime upscale) → `_hires` take — **DONE** (see `docs/phase6a.md`) |
 | **6b. Dataset synthesis** | varied per-character training set from the design sheet (img2img) — **SPIKE DONE**; found+fixed multi-figure design sheets (see `docs/phase6b.md`). LoRA trainer still to build. |

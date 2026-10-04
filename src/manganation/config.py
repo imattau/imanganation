@@ -97,6 +97,21 @@ class DatasetDefaults(BaseModel):
     cfg: float = 6.0
 
 
+class InpaintDefaults(BaseModel):
+    """Masked repaint of a region of an existing panel (docs/inpaint.md).
+
+    Used by the GIMP plug-in's *Inpaint Selection*: a selection becomes a mask, the
+    active layer becomes the init image, and only the masked region is re-synthesised
+    from a short prompt. ``denoise`` must be high (the mask region is regenerated from
+    noise); ``grow_mask_by`` dilates the mask to blend the seam.
+    """
+
+    denoise: float = 0.85  # high: the masked region is re-synthesised, not nudged
+    grow_mask_by: int = 8  # dilate the mask so the patch blends into its surroundings
+    steps: int = 28
+    cfg: float = 6.0
+
+
 class Defaults(BaseModel):
     color_mode: str = "color"  # recorded only; engine renders colour (docs/color-policy.md)
     reading_order: str = "rtl"
@@ -104,6 +119,7 @@ class Defaults(BaseModel):
     ipadapter: IPAdapterDefaults = IPAdapterDefaults()
     refiner: RefinerDefaults = RefinerDefaults()
     dataset: DatasetDefaults = DatasetDefaults()
+    inpaint: InpaintDefaults = InpaintDefaults()
 
 
 class Settings(BaseModel):

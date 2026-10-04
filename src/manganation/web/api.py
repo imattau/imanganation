@@ -20,6 +20,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from manganation.project import projects_root
+from manganation.render import inpaint as inpaint_render
 from manganation.render import panel as panel_render
 from manganation.render import refiner as refiner_render
 from manganation.render.comfy_client import ComfyClient
@@ -50,10 +51,21 @@ class ReferenceRequest(BaseModel):
     version_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{1,40}$")
 
 
+class InpaintRequest(BaseModel):
+    project_dir: str
+    seq: int = Field(ge=1)
+    mask: str = Field(description="Mask image inside the project (alpha or black/white)")
+    prompt: str = Field(min_length=1, description="What to paint in the region")
+    source: str | None = Field(default=None, description="Init image (default: newest take)")
+    denoise: float | None = Field(default=None, gt=0, le=1)
+    grow_mask_by: int | None = Field(default=None, ge=0, le=256)
+    seed: int | None = None
+
+
 class Job(BaseModel):
     id: str
     status: Literal["queued", "running", "done", "error"] = "queued"
-    kind: Literal["render", "refine"] = "render"
+    kind: Literal["render", "refine", "inpaint"] = "render"
     request: dict
     result: dict | None = None
     error: str | None = None
@@ -74,13 +86,14 @@ def create_app(
     render=panel_render.render_panel,
     root: Path | None = None,
     refine=refiner_render.refine_panel,
+    inpaint=inpaint_render.inpaint_panel,
 ) -> FastAPI:
     app = FastAPI(title="imanganation engine")
     jobs: dict[str, Job] = {}
     lock = threading.Lock()
     worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="render")
 
-    def submit_job(kind: Literal["render", "refine"], request: dict, work) -> Job:
+    def submit_job(kind: Literal["render", "refine", "inpaint"], request: dict, work) -> Job:
         job = Job(id=uuid.uuid4().hex[:12], kind=kind, request=request)
         with lock:
             jobs[job.id] = job
@@ -130,6 +143,30 @@ def create_app(
             "refine", req.model_dump(),
             lambda: refine(Path(req.project_dir), req.seq, source=source, scale=req.scale,
                            denoise=req.denoise, seed=req.seed),
+        )
+
+    def _inside(project: Path, raw: str, what: str, *, required: bool) -> Path | None:
+        path = Path(raw)
+        path = (path if path.is_absolute() else project / path).resolve()
+        if project not in path.parents:
+            raise HTTPException(400, f"{what} must be inside the project ({project})")
+        if not path.is_file():
+            if required:
+                raise HTTPException(404, f"{what} not found: {path}")
+            return None
+        return path
+
+    @app.post("/inpaint", status_code=202)
+    def submit_inpaint(req: InpaintRequest) -> Job:
+        project = resolve_project(req.project_dir, root)
+        req.project_dir = str(project)
+        mask = _inside(project, req.mask, "mask", required=True)
+        source = _inside(project, req.source, "source", required=False) if req.source else None
+        return submit_job(
+            "inpaint", req.model_dump(),
+            lambda: inpaint(Path(req.project_dir), req.seq, mask=mask, prompt=req.prompt,
+                            source=source, denoise=req.denoise,
+                            grow_mask_by=req.grow_mask_by, seed=req.seed),
         )
 
     @app.get("/characters")

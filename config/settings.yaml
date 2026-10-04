@@ -60,3 +60,9 @@ defaults:
     denoise: 0.6     # img2img strength: identity (low) vs variation (high)
     steps: 28
     cfg: 6.0
+  # Masked repaint of a panel region (GIMP "Inpaint Selection"); see docs/inpaint.md.
+  inpaint:
+    denoise: 0.85     # high: the masked region is re-synthesised from noise
+    grow_mask_by: 8   # dilate the mask so the patch blends into its surroundings
+    steps: 28
+    cfg: 6.0
