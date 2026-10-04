@@ -70,6 +70,50 @@ class Job(BaseModel):
     result: dict | None = None
     error: str | None = None
     created: float = Field(default_factory=time.time)
+    started: float | None = None
+    finished: float | None = None
+
+
+def required_models(settings, models: dict, models_root: Path) -> list[dict]:
+    """The model files the current settings need, and whether each is on disk.
+
+    A missing file otherwise only shows up as a cryptic ComfyUI error mid-render."""
+    from manganation.render.panel import RenderError, ipadapter_files
+
+    out: list[dict] = []
+
+    def add(role: str, subdir: str, file: str | None, note: str = "") -> None:
+        present = bool(file) and (models_root / subdir / file).is_file()
+        out.append({"role": role, "file": file, "present": present, "note": note})
+
+    ckpt = models.get("checkpoints", {}).get("primary", {})
+    add("checkpoint", ckpt.get("subdir", "checkpoints"), ckpt.get("id"))
+    adapter = settings.defaults.ipadapter.adapter
+    try:
+        ipa, enc = ipadapter_files(models, adapter)
+        add(f"ip-adapter ({adapter})", models["ipadapter"][adapter].get("subdir", "ipadapter"), ipa)
+        add("clip vision", "ipadapter", enc)
+    except (RenderError, KeyError) as exc:
+        add(f"ip-adapter ({adapter})", "ipadapter", None, str(exc))
+    up = settings.defaults.refiner.upscaler
+    entry = models.get("upscalers", {}).get(up)
+    add(f"upscaler ({up})", (entry or {}).get("subdir", "upscale_models"),
+        (entry or {}).get("id"), "" if entry else "not in models.yaml")
+    return out
+
+
+def _comfy_stats(base_url: str) -> dict:
+    import httpx
+
+    stats = httpx.get(f"{base_url}/system_stats", timeout=2.0).json()
+    return {
+        "up": True,
+        "version": stats.get("system", {}).get("comfyui_version"),
+        "gpus": [{"name": d.get("name", "").split(" : ")[0],
+                  "vram_total_gb": round(d.get("vram_total", 0) / 1024**3, 1),
+                  "vram_free_gb": round(d.get("vram_free", 0) / 1024**3, 1)}
+                 for d in stats.get("devices", [])],
+    }
 
 
 def resolve_project(project_dir: str, root: Path | None = None) -> Path:
@@ -87,6 +131,8 @@ def create_app(
     root: Path | None = None,
     refine=refiner_render.refine_panel,
     inpaint=inpaint_render.inpaint_panel,
+    comfy_stats=None,
+    models_check=None,
 ) -> FastAPI:
     app = FastAPI(title="imanganation engine")
     jobs: dict[str, Job] = {}
@@ -103,7 +149,7 @@ def create_app(
     def run(job_id: str, work) -> None:
         with lock:
             job = jobs[job_id]
-            job.status = "running"
+            job.status, job.started = "running", time.time()
         try:
             result = work()
             with lock:
@@ -111,6 +157,9 @@ def create_app(
         except Exception as exc:  # surface any failure to the polling client
             with lock:
                 job.error, job.status = str(exc), "error"
+        finally:
+            with lock:
+                job.finished = time.time()
 
     @app.get("/health")
     def health() -> dict:
@@ -118,6 +167,50 @@ def create_app(
 
         return {"engine": "ok",
                 "comfyui": ComfyClient(load_settings().comfyui.base_url).is_up()}
+
+    @app.get("/status")
+    def status_report() -> dict:
+        """Everything an artist needs when something seems stuck or broken: is ComfyUI
+        up (GPU, VRAM), what's running/queued, recent failures, missing model files."""
+        from manganation.config import REPO_ROOT, load_models, load_settings
+
+        settings = load_settings()
+        try:
+            comfy = (comfy_stats or _comfy_stats)(settings.comfyui.base_url)
+        except Exception as exc:  # unreachable, or not ComfyUI
+            comfy = {"up": False, "error": str(exc), "gpus": []}
+        comfy["url"] = settings.comfyui.base_url
+        models = (models_check or (lambda: required_models(
+            settings, load_models(), REPO_ROOT / settings.paths.models_dir)))()
+
+        now = time.time()
+
+        def summary(j: Job) -> dict:
+            out = {"id": j.id, "kind": j.kind, "status": j.status,
+                   "seq": j.request.get("seq"),
+                   "project": Path(j.request.get("project_dir", "")).name}
+            if j.status == "running" and j.started:
+                out["elapsed_s"] = round(now - j.started, 1)
+            if j.finished and j.started:
+                out["took_s"] = round(j.finished - j.started, 1)
+            if j.error:
+                out["error"] = j.error
+            return out
+
+        with lock:
+            snapshot = [j.model_copy() for j in jobs.values()]
+        finished = sorted((j for j in snapshot if j.finished), key=lambda j: -j.finished)
+        return {
+            "engine": "ok",
+            "comfyui": comfy,
+            "running": [summary(j) for j in snapshot if j.status == "running"],
+            "queued": [summary(j) for j in sorted(snapshot, key=lambda j: j.created)
+                       if j.status == "queued"],
+            "recent": [summary(j) for j in finished[:5]],
+            "counts": {k: sum(1 for j in snapshot if j.status == k)
+                       for k in ("queued", "running", "done", "error")},
+            "models": models,
+        }
 
     @app.post("/jobs", status_code=202)
     def submit(req: RenderRequest) -> Job:

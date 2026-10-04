@@ -45,6 +45,7 @@ PROC_REFINE = "plug-in-imanganation-refine-panel"
 PROC_REGEN = "plug-in-imanganation-regenerate-panel"
 PROC_SETREF = "plug-in-imanganation-set-character-reference"
 PROC_INPAINT = "plug-in-imanganation-inpaint-selection"
+PROC_STATUS = "plug-in-imanganation-engine-status"
 REF_MAX = 1024  # reference export cap; the CLIP encoder only sees 224-448 px anyway
 PARASITE = "imanganation-panelspec"
 CURSOR_FILE = "gimp_cursor.json"  # per project: which panel comes next
@@ -698,6 +699,80 @@ def set_character_reference(procedure, run_mode, image, drawables, config, data)
     return _success(procedure, layers[0])
 
 
+def _project_progress(root):
+    """'3/5 rendered · next: panel 004 (script page 2, panel 2)' for a project."""
+    try:
+        panels = json.loads((root / "panels.json").read_text())["panels"]
+    except (OSError, ValueError, KeyError):
+        return f"Project {root.name}: no readable panels.json"
+    rendered = {int(p.name[:3]) for p in (root / "panels").glob("[0-9][0-9][0-9]*.png")
+                if p.name[:3].isdigit()}
+    done = sum(1 for seq in range(1, len(panels) + 1) if seq in rendered)
+    try:
+        nxt = json.loads((root / CURSOR_FILE).read_text())["next"]
+    except (OSError, ValueError, KeyError):
+        nxt = 1
+    line = f"Project {root.name}: {done}/{len(panels)} panels rendered"
+    if 1 <= nxt <= len(panels):
+        spec = panels[nxt - 1]
+        line += f" · next: panel {nxt:03d} (script page {spec['page']}, panel {spec['panel']})"
+    else:
+        line += " · all panels placed"
+    return line
+
+
+def _status_report(st, engine):
+    def job(j):
+        what = f"{j['kind']} panel {j['seq']:03d}" if j.get("seq") else j["kind"]
+        where = f" ({j['project']})" if j.get("project") else ""
+        return what + where
+
+    c = st.get("comfyui", {})
+    lines = [f"imanganation engine ({engine}): running"]
+    if c.get("up"):
+        gpus = "; ".join(f"{g['name'].replace('cuda:0 ', '')} {g['vram_free_gb']}/"
+                         f"{g['vram_total_gb']} GB free" for g in c.get("gpus", []))
+        lines.append(f"ComfyUI {c.get('version', '')} ({c.get('url')}): up · {gpus}")
+    else:
+        lines.append(f"ComfyUI ({c.get('url')}): DOWN: {c.get('error', '')}. "
+                     "Start it with ./scripts/comfy.sh start")
+    n = st.get("counts", {})
+    lines.append(f"Jobs: {n.get('running', 0)} running, {n.get('queued', 0)} queued, "
+                 f"{n.get('done', 0)} done, {n.get('error', 0)} failed")
+    for j in st.get("running", []):
+        lines.append(f"  ▶ {job(j)}: {j.get('elapsed_s', 0)} s so far")
+    if st.get("queued"):
+        lines.append("  … queued: " + ", ".join(job(j) for j in st["queued"]))
+    for j in st.get("recent", []):
+        mark = "✗" if j["status"] == "error" else "✓"
+        tail = f": {j['error']}" if j.get("error") else f" in {j.get('took_s', '?')} s"
+        lines.append(f"  {mark} {job(j)}{tail}")
+    missing = [m for m in st.get("models", []) if not m.get("present")]
+    if missing:
+        lines.append("Models MISSING: " + "; ".join(
+            f"{m['role']} ({m.get('file') or m.get('note') or '?'})" for m in missing))
+    else:
+        lines.append(f"Models: all {len(st.get('models', []))} present")
+    return lines
+
+
+def engine_status(procedure, run_mode, image, drawables, config, data):
+    engine = config.get_property("engine-url").rstrip("/")
+    try:
+        lines = _status_report(_http("GET", f"{engine}/status"), engine)
+    except EngineError as exc:
+        lines = [f"imanganation engine: NOT RUNNING. {exc}"]
+    root = _image_project(image) if image is not None else None
+    if root is not None:
+        lines.append(_project_progress(root))
+    report = "\n".join(lines)
+    Gimp.message(report)
+    retvals = procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+    retvals.remove(1)
+    retvals.insert(1, GObject.Value(GObject.TYPE_STRING, report))
+    return retvals
+
+
 def place_next_panel(procedure, run_mode, image, drawables, config, data):
     if run_mode == Gimp.RunMode.INTERACTIVE and not _dialog(procedure, config, PROC_NEXT):
         return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
@@ -755,13 +830,13 @@ class Imanganation(Gimp.PlugIn):
 
     def do_query_procedures(self):
         return [PROC_RENDER, PROC_NEXT, PROC_REGEN, PROC_INPAINT, PROC_REFINE, PROC_SETREF,
-                PROC_PLACE]
+                PROC_PLACE, PROC_STATUS]
 
     def do_create_procedure(self, name):
         run = {PROC_RENDER: render_panel, PROC_NEXT: place_next_panel,
                PROC_REFINE: refine_panel, PROC_REGEN: regenerate_panel,
                PROC_SETREF: set_character_reference, PROC_INPAINT: inpaint_selection,
-               PROC_PLACE: place_panel}[name]
+               PROC_PLACE: place_panel, PROC_STATUS: engine_status}[name]
         proc = Gimp.ImageProcedure.new(self, name, Gimp.PDBProcType.PLUGIN, run, None)
         proc.set_image_types("*")
         proc.set_sensitivity_mask(
@@ -770,6 +845,21 @@ class Imanganation(Gimp.PlugIn):
             | Gimp.ProcedureSensitivityMask.NO_DRAWABLES)
         proc.add_menu_path("<Image>/Filters/imanganation")
         proc.set_attribution("imanganation", "imanganation", "2026")
+        if name == PROC_STATUS:
+            proc.set_menu_label("Engine _Status...")
+            proc.set_documentation(
+                "Show the imanganation engine's status",
+                "Engine and ComfyUI health (GPU, VRAM), running/queued/recent jobs with "
+                "errors, missing model files, and this image's project progress.",
+                name)
+            proc.add_string_argument(
+                "engine-url", "_Engine URL", "imanganation engine (manganation serve)",
+                ENGINE_URL, GObject.ParamFlags.READWRITE)
+            proc.add_string_return_value(
+                "report", "Report", "The status report text", "",
+                GObject.ParamFlags.READWRITE)
+            return proc
+
         proc.add_layer_return_value(
             "layer", "Layer", "The placed panel layer", False, GObject.ParamFlags.READWRITE)
 

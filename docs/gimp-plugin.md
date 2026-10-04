@@ -41,7 +41,7 @@ GIMP also gives three things for free that a custom web UI would have to build:
 ## Built so far
 
 `gimp/imanganation/imanganation.py` is installed by symlink into
-`~/.config/GIMP/3.2/plug-ins/imanganation`. It adds seven commands under *Filters →
+`~/.config/GIMP/3.2/plug-ins/imanganation`. It adds eight commands under *Filters →
 imanganation*:
 
 - **Render Panel into Frame…** (the main flow): needs a selection, which is the target
@@ -86,6 +86,12 @@ imanganation*:
   cursor). The script's page numbers only show up in a note like "the script starts a
   new page here". They never restrict which image a panel goes into.
 - **Place Panel…**: places any PNG manually.
+- **Engine Status…**: one click, no dialog. Shows engine and ComfyUI health (GPU, free
+  VRAM), running jobs with elapsed time, queued jobs, recent jobs with their errors,
+  missing model files for the current settings, and the image's project progress
+  (`3/5 panels rendered · next: panel 004`). If the engine is down it says so, with
+  the command to start it, and still shows the project progress. Engine:
+  `GET /status`. The report is also returned as a string for scripting.
 
 **Which take gets placed:** the newest file matching `panels/{seq:03d}*.png` by
 modification time. A fresh retake beats an older hi-res, and a hi-res made from the
@@ -116,6 +122,7 @@ ComfyUI and the engine running) run headless against GIMP 3.2.6 (flatpak):
 | Next Panel walks `panels.json` in order into hand-drawn frames; cursor advances | ✅ |
 | Dialogue/SFX arrive as **hidden** text layers in the panel group (lettering reference) | ✅ |
 | Unrendered panel gives a clear "not rendered yet: expected panels/003*.png" and doesn't advance | ✅ |
+| **Live** (`gimp/status_smoke_test.py`): with a failed job, a running render and a queued one on the engine → report shows GPU/VRAM, `▶` running with elapsed time, queued, `✗` failure with its reason, models all present, project progress; with the engine stopped → "NOT RUNNING" + how to start it, project progress still shown | ✅ |
 | **Live** (`gimp/inpaint_smoke_test.py`): feathered ellipse over a moved/shrunk 1920×2176 take, page layer selected → panel found under the selection, result at the exact geometry, old take hidden, temp mask layer removed; **0 source pixels changed outside the mask** (+40 px) | ✅ |
 | **Live** (`gimp/setref_smoke_test.py`): reference from a selection (420 px square crop) and from a whole panel group (800 px square, hidden takes/text excluded) → `gimp-01`, `gimp-02` become active, `base` kept; lower-case name resolves; unknown name refused, nothing created | ✅ |
 | **Live** (`gimp/regenerate_smoke_test.py`): regenerate a placed hi-res take → *same seed* recovers the original render's seed, *new seed* gives a fresh take; both cover the frame tightly with its mask, the previous take hidden, the selection and cursor untouched | ✅ |
@@ -192,7 +199,7 @@ None of these create or arrange pages.
    patches are painted at SDXL's ~1 MP scale).
 5. **Set Character Reference from Layer** ✅ (built). Engine: `GET /characters`,
    `POST /characters/reference`.
-6. **Engine Status…**: health, queue and VRAM.
+6. **Engine Status…** ✅ (built; engine `GET /status`).
 7. **Refine Panel (Hi-res)** ✅ (built on Phase 6a's `/refine`).
 
 ## Risks and trade-offs
