@@ -187,6 +187,8 @@ A one-shot importer can do this. The rooftop example file was hand-converted thi
 ### Current plug-in transition
 
 The Python plug-in now reads the container cursor by panel id and writes it atomically.
+The persistent Python **Open Project Docks…** command renders Project, Inspector, and
+Page Filmstrip from the manifest; panel and page rows send stable IDs back over the PDB.
 For container projects it also copies newly rendered, refined, and inpainted images into
 unique files under `takes/`, adds a new take id, and advances `active_take`; a legacy
 image used from `panels/` is first imported as an immutable take. The currently shipped

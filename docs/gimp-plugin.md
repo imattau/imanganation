@@ -40,14 +40,21 @@ GIMP also gives three things for free that a custom web UI would have to build:
 
 ## Built so far
 
-`gimp/imanganation/imanganation.py` and its stdlib-only sibling
-`gimp/imanganation/project_store.py` are installed together in
+`gimp/imanganation/imanganation.py` and its stdlib-only siblings
+`gimp/imanganation/project_store.py` and `gimp/imanganation/panel_ui.py` are installed together in
 `~/.config/GIMP/3.2/plug-ins/imanganation`. The store reads and atomically updates
 `project.json` while preserving unknown keys. It validates format/version, stable IDs,
-and project-relative paths. For container projects, generated and imported images are
+and project-relative paths. The persistent **Open Project Docks…** command registers
+Project, Inspector, and Page Filmstrip panels; row callbacks carry panel/page IDs.
+For container projects, generated and imported images are
 copied into immutable `takes/` files and linked through take IDs; XCF parasites and
-page placement metadata are still being migrated. It adds eight commands under
+page placement metadata are still being migrated. It adds nine commands under
 *Filters → imanganation*:
+
+- **Open Project Docks…**: choose a folder containing `project.json` to open the
+  persistent Project, Inspector, and Page Filmstrip docks. Select project rows to
+  inspect panels or pages; the filmstrip's **Next page** action cycles the selection.
+  GIMP restores dock placement and visibility through its normal session state.
 
 - **Render Panel into Frame…** (the main flow): needs a selection, which is the target
   frame. It sends the next panel's `seq` and the frame's size to the engine, which

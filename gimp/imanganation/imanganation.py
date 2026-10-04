@@ -31,6 +31,7 @@ import sys
 import time
 from datetime import datetime
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -42,9 +43,11 @@ from gi.repository import Gio, GLib, GObject  # noqa: E402
 
 try:
     from project_store import ProjectFileError, load_project, record_take, save_project
+    from panel_ui import build_docks
 except ImportError:  # Keep older single-file plug-in installs usable for legacy projects.
     ProjectFileError = ValueError
     load_project = record_take = save_project = None
+    build_docks = None
 
 PROC_RENDER = "plug-in-imanganation-render-panel"
 PROC_NEXT = "plug-in-imanganation-place-next-panel"
@@ -54,11 +57,28 @@ PROC_REGEN = "plug-in-imanganation-regenerate-panel"
 PROC_SETREF = "plug-in-imanganation-set-character-reference"
 PROC_INPAINT = "plug-in-imanganation-inpaint-selection"
 PROC_STATUS = "plug-in-imanganation-engine-status"
+PROC_PROJECT_DOCKS = "plug-in-imanganation-project-docks"
+DOCK_PROJECT = "project"
+DOCK_INSPECTOR = "inspector"
+DOCK_FILMSTRIP = "filmstrip"
+DOCK_IDS = (DOCK_PROJECT, DOCK_INSPECTOR, DOCK_FILMSTRIP)
+DOCK_ACTIONS = {
+    DOCK_PROJECT: "plug-in-imanganation-dock-project-refresh",
+    DOCK_INSPECTOR: "plug-in-imanganation-dock-inspector-refresh",
+    DOCK_FILMSTRIP: "plug-in-imanganation-dock-filmstrip-next",
+}
+DOCK_ITEMS = {
+    DOCK_PROJECT: "plug-in-imanganation-dock-project-item",
+    DOCK_FILMSTRIP: "plug-in-imanganation-dock-filmstrip-item",
+}
 REF_MAX = 1024  # reference export cap; the CLIP encoder only sees 224-448 px anyway
 PARASITE = "imanganation-panelspec"
 CURSOR_FILE = "gimp_cursor.json"  # per project: which panel comes next
 ENGINE_URL = "http://127.0.0.1:8790"
 RENDER_TIMEOUT = 600  # seconds
+
+_DOCK_PLUGIN = None
+_DOCK_CONTEXT = {}
 
 
 class EngineError(Exception):
@@ -271,6 +291,7 @@ def _advance(root, panels, seq, explicit, spec, manifest=None):
                 timespec="seconds")
             try:
                 save_project(root, manifest)
+                _notify_project_docks(root)
             except ProjectFileError as exc:
                 Gimp.message(f"Panel placed, but project cursor could not be saved: {exc}")
         else:
@@ -332,6 +353,7 @@ def _record_take(root, manifest, seq, source, kind, width, height, engine=None,
             kind=kind, width=width, height=height, engine=engine, parent=parent)
     except (ProjectFileError, OSError, IndexError) as exc:
         raise ValueError(f"Could not record project take: {exc}") from exc
+    _notify_project_docks(root)
     return path, take
 
 
@@ -986,15 +1008,208 @@ def _add_project_args(proc):
         "instead of the next one; 0 = next", 0, 9999, 0, GObject.ParamFlags.READWRITE)
 
 
+def _dock_pdb_call(name, values):
+    procedure = Gimp.get_pdb().lookup_procedure(name)
+    if procedure is None:
+        raise RuntimeError(f"GIMP procedure is unavailable: {name}")
+    config = procedure.create_config()
+    for key, value in values.items():
+        config.set_property(key, value)
+    result = procedure.run(config)
+    if result.index(0).get_enum() != Gimp.PDBStatusType.SUCCESS:
+        raise RuntimeError(f"GIMP procedure failed: {name}")
+
+
+def _engine_reference_rows(root, manifest, selected_id):
+    panel = next((p for p in manifest["panels"] if p["id"] == selected_id), None)
+    if panel is None or not panel.get("characters"):
+        return []
+    query = urllib.parse.urlencode({"project_dir": str(root)})
+    try:
+        engine_characters = _http("GET", f"{ENGINE_URL}/characters?{query}", timeout=3)
+    except EngineError as exc:
+        return ["# Engine references", f"Status\tUnavailable ({exc})"]
+    by_name = {c.get("name", "").casefold(): c for c in engine_characters}
+    rows = ["# Engine references"]
+    for character in panel["characters"]:
+        name = character.get("name", "")
+        info = by_name.get(name.casefold())
+        if info is None:
+            rows.append(f"{name}\tNot found in engine")
+            continue
+        requested = character.get("version") or info.get("default_version") or "active"
+        versions = ", ".join(info.get("versions", [])) or "None"
+        reference = "Available" if info.get("reference") else "Not set"
+        rows.append(f"{name}\t{requested} · versions: {versions} · reference: {reference}")
+    return rows
+
+
+def _refresh_project_docks():
+    if not _DOCK_CONTEXT or build_docks is None:
+        return
+    root = _DOCK_CONTEXT["root"]
+    manifest = load_project(root)
+    selected_id = _DOCK_CONTEXT.get("selected_id")
+    contents = build_docks(manifest, selected_id)
+    _DOCK_CONTEXT["selected_id"] = contents["selected_id"]
+    if selected_id in {panel["id"] for panel in manifest["panels"]}:
+        references = _engine_reference_rows(root, manifest, selected_id)
+        if references:
+            contents["inspector"] += "\n" + "\n".join(references)
+
+    for identifier, content_key, selection_key in (
+            (DOCK_PROJECT, "project", "project_selected"),
+            (DOCK_INSPECTOR, "inspector", None),
+            (DOCK_FILMSTRIP, "filmstrip", "filmstrip_selected")):
+        values = {"identifier": identifier, "content": contents[content_key],
+                  "selected-item": contents[selection_key] if selection_key else ""}
+        _dock_pdb_call("gimp-extension-panel-update", values)
+
+
+def _notify_project_docks(root):
+    if _DOCK_CONTEXT and Path(root).resolve() == Path(_DOCK_CONTEXT["root"]).resolve():
+        try:
+            _refresh_project_docks()
+        except Exception as exc:
+            Gimp.message(f"Could not refresh project docks: {exc}")
+
+
+def _dock_action(procedure, config, data):
+    try:
+        if data == "next-page":
+            manifest = load_project(_DOCK_CONTEXT["root"])
+            pages = manifest["pages"]
+            if pages:
+                selected = _DOCK_CONTEXT.get("selected_id")
+                current = next((i for i, page in enumerate(pages)
+                                if page["id"] == selected), -1)
+                _DOCK_CONTEXT["selected_id"] = pages[(current + 1) % len(pages)]["id"]
+        _refresh_project_docks()
+        return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+    except Exception as exc:
+        return _error(procedure, str(exc))
+
+
+def _dock_item_action(procedure, config, data):
+    try:
+        item = config.get_property("item")
+        manifest = load_project(_DOCK_CONTEXT["root"])
+        valid = {p["id"] for p in manifest["panels"]}
+        valid.update(page["id"] for page in manifest["pages"])
+        if item not in valid:
+            raise ValueError(f"Unknown project item id: {item}")
+        _DOCK_CONTEXT["selected_id"] = item
+        _refresh_project_docks()
+        return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+    except Exception as exc:
+        return _error(procedure, str(exc))
+
+
+def _add_dock_callbacks(plugin):
+    callbacks = [
+        (DOCK_ACTIONS[DOCK_PROJECT], _dock_action, "refresh", False),
+        (DOCK_ACTIONS[DOCK_INSPECTOR], _dock_action, "refresh", False),
+        (DOCK_ACTIONS[DOCK_FILMSTRIP], _dock_action, "next-page", False),
+        (DOCK_ITEMS[DOCK_PROJECT], _dock_item_action, DOCK_PROJECT, True),
+        (DOCK_ITEMS[DOCK_FILMSTRIP], _dock_item_action, DOCK_FILMSTRIP, True),
+    ]
+    for name, callback, data, takes_item in callbacks:
+        procedure = Gimp.Procedure.new(plugin, name, Gimp.PDBProcType.TEMPORARY,
+                                       callback, data, None)
+        if takes_item:
+            procedure.add_string_argument("item", "Item id", "Stable project row id",
+                                          "", GObject.ParamFlags.READWRITE)
+        procedure.set_documentation("Handle an Imanganation dock action",
+                                    "Called by the host-rendered Imanganation docks.", name)
+        procedure.set_attribution("imanganation", "imanganation", "2026")
+        plugin.add_temp_procedure(procedure)
+
+
+def _register_project_docks(plugin):
+    contents = build_docks(load_project(_DOCK_CONTEXT["root"]),
+                           _DOCK_CONTEXT.get("selected_id"))
+    rows = [
+        (DOCK_PROJECT, "Project", "tree", contents["project"],
+         contents["project_selected"], "Refresh", DOCK_ACTIONS[DOCK_PROJECT],
+         DOCK_ITEMS[DOCK_PROJECT]),
+        (DOCK_INSPECTOR, "Inspector", "properties", contents["inspector"],
+         "", "Refresh", DOCK_ACTIONS[DOCK_INSPECTOR], ""),
+        (DOCK_FILMSTRIP, "Page Filmstrip", "tiles", contents["filmstrip"],
+         contents["filmstrip_selected"], "Next page", DOCK_ACTIONS[DOCK_FILMSTRIP],
+         DOCK_ITEMS[DOCK_FILMSTRIP]),
+    ]
+    for identifier, title, presentation, content, selected, action_label, action, item in rows:
+        _dock_pdb_call("gimp-extension-panel-register", {
+            "identifier": identifier,
+            "title": title,
+            "content": content,
+            "presentation": presentation,
+            "selected-item": selected,
+            "action-label": action_label,
+            "action-procedure": action,
+            "item-action-procedure": item,
+        })
+    _refresh_project_docks()
+
+
+def _project_docks_run(procedure, run_mode, image, drawables, config, data):
+    folder = config.get_property("project-dir")
+    if folder is None:
+        return _error(procedure, "Choose a project folder containing project.json")
+    if load_project is None or build_docks is None:
+        return _error(procedure, "The plug-in install is missing project_store.py or panel_ui.py")
+    root = Path(folder.get_path())
+    try:
+        manifest = load_project(root)
+        selected = manifest.get("cursor", {}).get("next_panel")
+        if not selected:
+            selected = next((panel["id"] for panel in manifest["panels"]), None)
+        if not selected and manifest["pages"]:
+            selected = manifest["pages"][0]["id"]
+        _DOCK_CONTEXT.update(root=root, selected_id=selected)
+        _add_dock_callbacks(_DOCK_PLUGIN)
+        _register_project_docks(_DOCK_PLUGIN)
+    except Exception as exc:
+        return _error(procedure, str(exc))
+
+    procedure.persistent_ready()
+    _DOCK_PLUGIN.persistent_enable()
+    GLib.MainLoop().run()
+    return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+
+
 class Imanganation(Gimp.PlugIn):
     def do_set_i18n(self, procname):
         return False, None, None
 
     def do_query_procedures(self):
         return [PROC_RENDER, PROC_NEXT, PROC_REGEN, PROC_INPAINT, PROC_REFINE, PROC_SETREF,
-                PROC_PLACE, PROC_STATUS]
+                PROC_PLACE, PROC_STATUS, PROC_PROJECT_DOCKS]
 
     def do_create_procedure(self, name):
+        global _DOCK_PLUGIN
+        _DOCK_PLUGIN = self
+        if name == PROC_PROJECT_DOCKS:
+            proc = Gimp.ImageProcedure.new(
+                self, name, Gimp.PDBProcType.PERSISTENT, _project_docks_run, None)
+            proc.set_image_types("*")
+            proc.set_sensitivity_mask(
+                Gimp.ProcedureSensitivityMask.DRAWABLE
+                | Gimp.ProcedureSensitivityMask.DRAWABLES
+                | Gimp.ProcedureSensitivityMask.NO_DRAWABLES)
+            proc.add_menu_path("<Image>/Filters/imanganation")
+            proc.set_menu_label("Open Project _Docks...")
+            proc.set_documentation(
+                "Open the Imanganation project docks",
+                "Register and keep the Project, Inspector, and Page Filmstrip docks "
+                "connected to a project.json manifest.", name)
+            proc.add_file_argument(
+                "project-dir", "_Project folder", "Folder containing project.json",
+                Gimp.FileChooserAction.SELECT_FOLDER, False, None,
+                GObject.ParamFlags.READWRITE)
+            proc.set_attribution("imanganation", "imanganation", "2026")
+            return proc
+
         run = {PROC_RENDER: render_panel, PROC_NEXT: place_next_panel,
                PROC_REFINE: refine_panel, PROC_REGEN: regenerate_panel,
                PROC_SETREF: set_character_reference, PROC_INPAINT: inpaint_selection,
