@@ -6,7 +6,7 @@ import copy
 import json
 from pathlib import Path
 
-from gimp.imanganation.panel_ui import build_docks, character_row_id
+from gimp.imanganation.panel_ui import build_docks, character_row_id, rgb_png
 
 
 EXAMPLE = json.loads((Path(__file__).resolve().parents[1] /
@@ -88,3 +88,16 @@ def test_script_rows_use_panel_ids_and_keep_repeated_script_labels_distinct():
     assert docks["script_selected"] == panel["id"]
     assert "Page 2 · Panel 1" in docks["script"]
     assert sum("Page 2 · Panel 1" in row for row in docks["script"].splitlines()) == 2
+
+
+def test_rgb_thumbnail_png_encoding_and_filmstrip_reference():
+    manifest = copy.deepcopy(EXAMPLE)
+    page = manifest["pages"][0]
+    preview_path = "/tmp/imanganation-thumbnails/page.png"
+
+    docks = build_docks(manifest, page["id"], previews={page["id"]: preview_path})
+    png = rgb_png(1, 1, b"\xff\x00\x00")
+
+    assert docks["filmstrip"].splitlines()[0].endswith("\t" + preview_path)
+    assert png is not None and png.startswith(b"\x89PNG\r\n\x1a\n")
+    assert rgb_png(2, 1, b"\xff\x00\x00") is None

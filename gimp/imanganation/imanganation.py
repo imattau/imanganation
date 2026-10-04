@@ -24,6 +24,7 @@ render.
 """
 
 import json
+import os
 import random
 import re
 import secrets
@@ -43,12 +44,13 @@ from gi.repository import Gio, GLib, GObject  # noqa: E402
 
 try:
     from project_store import ProjectFileError, load_project, record_take, save_project
-    from panel_ui import build_docks, character_row_id
+    from panel_ui import build_docks, character_row_id, rgb_png
 except ImportError:  # Keep older single-file plug-in installs usable for legacy projects.
     ProjectFileError = ValueError
     load_project = record_take = save_project = None
     build_docks = None
     character_row_id = None
+    rgb_png = None
 
 PROC_RENDER = "plug-in-imanganation-render-panel"
 PROC_NEXT = "plug-in-imanganation-place-next-panel"
@@ -83,6 +85,7 @@ RENDER_TIMEOUT = 600  # seconds
 
 _DOCK_PLUGIN = None
 _DOCK_CONTEXT = {}
+_PAGE_THUMBNAILS = {}
 
 
 class EngineError(Exception):
@@ -1068,13 +1071,63 @@ def _engine_character_rows(root, character_name):
     ]
 
 
+def _page_thumbnail(root, manifest, page):
+    relative = page.get("file")
+    if not relative:
+        return None
+    source = root / relative
+    try:
+        stat = source.stat()
+    except OSError:
+        return None
+    key = (str(source), stat.st_size, stat.st_mtime_ns)
+    cached = _PAGE_THUMBNAILS.get(page["id"])
+    if cached and cached[0] == key and Path(cached[1]).is_file():
+        return cached[1]
+
+    try:
+        procedure = Gimp.get_pdb().lookup_procedure("gimp-file-load-thumbnail")
+        if procedure is None:
+            return None
+        config = procedure.create_config()
+        config.set_property("file", Gio.File.new_for_path(str(source)))
+        result = procedure.run(config)
+        if result.index(0).get_enum() != Gimp.PDBStatusType.SUCCESS:
+            return None
+        width = result.index(1).get_int()
+        height = result.index(2).get_int()
+        thumbnail = result.index(3).get_boxed()
+        pixels = (thumbnail.get_data() if hasattr(thumbnail, "get_data")
+                  else bytes(thumbnail))
+        png = rgb_png(width, height, bytes(pixels))
+        if png is None:
+            return None
+
+        folder = Path(Gimp.cache_directory()) / "imanganation" / "page-thumbnails"
+        folder.mkdir(parents=True, exist_ok=True)
+        destination = folder / f"{manifest['project']['id']}-{page['id']}.png"
+        temporary = destination.with_suffix(".png.tmp")
+        temporary.write_bytes(png)
+        os.replace(temporary, destination)
+        _PAGE_THUMBNAILS[page["id"]] = (key, str(destination))
+        return str(destination)
+    except Exception:
+        return None
+
+
+def _project_page_thumbnails(root, manifest):
+    return {page["id"]: preview for page in manifest["pages"]
+            if (preview := _page_thumbnail(root, manifest, page))}
+
+
 def _refresh_project_docks():
     if not _DOCK_CONTEXT or build_docks is None:
         return
     root = _DOCK_CONTEXT["root"]
     manifest = load_project(root)
     selected_id = _DOCK_CONTEXT.get("selected_id")
-    contents = build_docks(manifest, selected_id, root)
+    contents = build_docks(manifest, selected_id, root,
+                           _project_page_thumbnails(root, manifest))
     _DOCK_CONTEXT["selected_id"] = contents["selected_id"]
     if selected_id in {panel["id"] for panel in manifest["panels"]}:
         references = _engine_reference_rows(root, manifest, selected_id)
@@ -1168,8 +1221,10 @@ def _add_dock_callbacks(plugin):
 
 
 def _register_project_docks(plugin):
-    contents = build_docks(load_project(_DOCK_CONTEXT["root"]),
-                           _DOCK_CONTEXT.get("selected_id"), _DOCK_CONTEXT["root"])
+    manifest = load_project(_DOCK_CONTEXT["root"])
+    contents = build_docks(
+        manifest, _DOCK_CONTEXT.get("selected_id"), _DOCK_CONTEXT["root"],
+        _project_page_thumbnails(_DOCK_CONTEXT["root"], manifest))
     rows = [
         (DOCK_PROJECT, "Project", "tree", contents["project"],
          contents["project_selected"], "Refresh", DOCK_ACTIONS[DOCK_PROJECT],

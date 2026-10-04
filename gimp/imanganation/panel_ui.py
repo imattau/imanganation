@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import struct
+import zlib
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -40,8 +42,27 @@ def character_row_id(name: str) -> str:
     return "character:" + quote(name, safe="")
 
 
+def rgb_png(width: int, height: int, pixels: bytes) -> bytes | None:
+    """Encode packed RGB8 pixels as a small standards-compliant PNG."""
+    if width < 1 or height < 1 or len(pixels) != width * height * 3:
+        return None
+    stride = width * 3
+    scanlines = b"".join(b"\0" + pixels[row * stride:(row + 1) * stride]
+                         for row in range(height))
+
+    def chunk(kind: bytes, payload: bytes) -> bytes:
+        content = kind + payload
+        return (struct.pack(">I", len(payload)) + content
+                + struct.pack(">I", zlib.crc32(content)))
+
+    header = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header)
+            + chunk(b"IDAT", zlib.compress(scanlines, 6)) + chunk(b"IEND", b""))
+
+
 def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
-                root: str | Path | None = None) -> dict[str, str]:
+                root: str | Path | None = None,
+                previews: dict[str, str] | None = None) -> dict[str, str]:
     """Build generic host content and stable selections from a project manifest."""
     panels = manifest.get("panels", [])
     pages = manifest.get("pages", [])
@@ -101,10 +122,16 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
             return "◐ Draft"
         return "● In progress"
 
-    filmstrip_rows = [
-        f"{page['id']}\t{_label(page.get('label')) or 'Page'} · "
-        f"{page_counts[page['id']]} panels · {page_progress(page)}"
-        for page in pages]
+    previews = previews or {}
+    filmstrip_rows = []
+    for page in pages:
+        row = (f"{page['id']}\t{_label(page.get('label')) or 'Page'} · "
+               f"{page_counts[page['id']]} panels · {page_progress(page)}")
+        preview = previews.get(page["id"])
+        if (preview and "\t" not in preview and "\n" not in preview
+                and len(row.encode("utf-8")) + len(preview.encode("utf-8")) + 1 <= 4096):
+            row += f"\t{preview}"
+        filmstrip_rows.append(row)
     script_rows = [f"{panel['id']}\t{_script_panel_label(panel)}" for panel in panels]
 
     inspector_rows: list[str] = []
