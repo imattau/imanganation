@@ -277,10 +277,15 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
         ])
         if panels_on_page:
             inspector_rows.append("# On this page")
-            inspector_rows.extend(
-                f"Panel {p.get('label', {}).get('panel', '?')}\t"
-                f"{p['id']} · {len(p.get('takes', []))} takes"
-                for p in panels_on_page)
+            for panel in panels_on_page:
+                panel_number = panel.get("label", {}).get("panel", "?")
+                active = panel.get("active_take")
+                take_summary = f"{len(panel.get('takes', []))} takes"
+                if active:
+                    take_summary += f" · active {active}"
+                inspector_rows.append(
+                    f"Panel {panel_number}\t{_label(panel.get('status')) or 'unplaced'} · "
+                    f"{take_summary} · {panel['id']}")
     elif selected_id in character_by_id:
         character = character_by_id[selected_id]
         inspector_rows.extend([
