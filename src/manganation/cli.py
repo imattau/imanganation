@@ -16,6 +16,8 @@ script_app = typer.Typer(help="Script parsing commands.")
 app.add_typer(script_app, name="script")
 character_app = typer.Typer(help="Character registry / design commands.")
 app.add_typer(character_app, name="character")
+project_app = typer.Typer(help="Project container commands (docs/project-container.md).")
+app.add_typer(project_app, name="project")
 
 
 @app.command()
@@ -358,3 +360,30 @@ def character_add_ref(
 
 if __name__ == "__main__":
     app()
+
+
+@project_app.command("import")
+def project_import(
+    project: str = typer.Argument(..., help="Legacy project name under projects/."),
+    out: Path = typer.Option(
+        None, "--out", "-o", help="Container folder to create (default: projects/<name>.imanga)."
+    ),
+) -> None:
+    """Convert a legacy projects/<name>/ folder into a GIMP-owned project container."""
+    from manganation.project import project_dir
+    from manganation.project_import import import_project
+
+    src = project_dir(project)
+    dest = out or src.with_name(f"{src.name}.imanga")
+    doc = import_project(src, dest)
+    kinds: dict[str, int] = {}
+    for t in doc["takes"].values():
+        kinds[t["kind"]] = kinds.get(t["kind"], 0) + 1
+    rprint(f"[green]imported[/green] {src} -> [bold]{dest}[/bold]  ({doc['project']['id']})")
+    rprint(f"  {len(doc['panels'])} panels, {len(doc['takes'])} takes "
+           f"({', '.join(f'{n} {k}' for k, n in sorted(kinds.items()))}), "
+           f"{len(doc['cast'])} cast")
+    for t in doc["takes"].values():
+        if "import_note" in t.get("engine", {}):
+            rprint(f"  [yellow]note[/yellow] {t['engine'].get('legacy_file')}: "
+                   f"{t['engine']['import_note']}")

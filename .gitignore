@@ -40,3 +40,7 @@ projects/*/characters*/**/*.png
 
 # Scratch exports (e.g. GIMP reference crops before registration)
 projects/*/tmp/
+
+# Project containers: generated takes and masks (the manifest, script and pages are tracked)
+projects/*.imanga/takes/
+projects/*.imanga/masks/

@@ -1,0 +1,318 @@
+{
+  "format": "imanganation.project",
+  "version": 1,
+  "project": {
+    "id": "prj_cd3562f1216d",
+    "title": "rooftop_canonical",
+    "reading_order": "rtl",
+    "default_color_mode": "bw",
+    "created": "2026-10-04T02:17:46.722972+00:00",
+    "modified": "2026-10-04T02:17:46.722972+00:00",
+    "imported_from": "rooftop"
+  },
+  "panels": [
+    {
+      "id": "pnl_d3e0995e608d",
+      "label": {
+        "page": 1,
+        "panel": 1
+      },
+      "scene_heading": "School rooftop — late afternoon",
+      "location": "",
+      "characters": [
+        {
+          "name": "Akira",
+          "version": null
+        }
+      ],
+      "action": "Wide shot. Akira sits alone against the chain-link fence, lunchbox on his knees.",
+      "camera": "wide shot",
+      "expressions": {},
+      "dialogue": [
+        {
+          "speaker": "Akira",
+          "text": "Finally, some peace and quiet.",
+          "kind": "speech"
+        }
+      ],
+      "sfx": [],
+      "notes": "",
+      "flashback": false,
+      "aspect_ratio": "1:1",
+      "seed": null,
+      "status": "unplaced",
+      "placement": null,
+      "takes": [
+        "tk_49640aa21af8",
+        "tk_8a744ceb94bc"
+      ],
+      "active_take": "tk_8a744ceb94bc"
+    },
+    {
+      "id": "pnl_d4aeea541da8",
+      "label": {
+        "page": 1,
+        "panel": 2
+      },
+      "scene_heading": "School rooftop — late afternoon",
+      "location": "",
+      "characters": [
+        {
+          "name": "Yuki",
+          "version": null
+        }
+      ],
+      "action": "Close-up. Akira's head snaps up, eyes wide.",
+      "camera": "close-up",
+      "expressions": {},
+      "dialogue": [
+        {
+          "speaker": "Yuki",
+          "text": "There you are!",
+          "kind": "speech"
+        }
+      ],
+      "sfx": [
+        "BANG"
+      ],
+      "notes": "",
+      "flashback": false,
+      "aspect_ratio": "1:1",
+      "seed": null,
+      "status": "unplaced",
+      "placement": null,
+      "takes": [
+        "tk_77117031d8df"
+      ],
+      "active_take": "tk_77117031d8df"
+    },
+    {
+      "id": "pnl_622a14042ddb",
+      "label": {
+        "page": 2,
+        "panel": 1
+      },
+      "scene_heading": "School rooftop — cont.",
+      "location": "",
+      "characters": [
+        {
+          "name": "Yuki",
+          "version": null
+        },
+        {
+          "name": "Akira",
+          "version": null
+        }
+      ],
+      "action": "Two-shot. Yuki stands over him, hands on her hips, grinning.",
+      "camera": "two-shot",
+      "expressions": {},
+      "dialogue": [
+        {
+          "speaker": "Yuki",
+          "text": "You're impossible to find, you know that?",
+          "kind": "speech"
+        },
+        {
+          "speaker": "Akira",
+          "text": "Not again...",
+          "kind": "thought"
+        }
+      ],
+      "sfx": [],
+      "notes": "",
+      "flashback": false,
+      "aspect_ratio": "1:1",
+      "seed": null,
+      "status": "unplaced",
+      "placement": null,
+      "takes": [
+        "tk_b9eadd76af20",
+        "tk_fdb51b90a7a6"
+      ],
+      "active_take": "tk_fdb51b90a7a6"
+    },
+    {
+      "id": "pnl_60ddf7e6c584",
+      "label": {
+        "page": 2,
+        "panel": 2
+      },
+      "scene_heading": "School rooftop — cont.",
+      "location": "",
+      "characters": [
+        {
+          "name": "Akira",
+          "version": null
+        }
+      ],
+      "action": "Reaction shot. Akira sighs, shoulders slumping.",
+      "camera": "reaction shot",
+      "expressions": {},
+      "dialogue": [
+        {
+          "speaker": "Akira",
+          "text": "What do you want, Yuki?",
+          "kind": "speech"
+        }
+      ],
+      "sfx": [],
+      "notes": "keep his uniform consistent with the character sheet",
+      "flashback": false,
+      "aspect_ratio": "1:1",
+      "seed": null,
+      "status": "unplaced",
+      "placement": null,
+      "takes": [],
+      "active_take": null
+    },
+    {
+      "id": "pnl_824568b3d439",
+      "label": {
+        "page": 2,
+        "panel": 1
+      },
+      "scene_heading": "School rooftop — cont.",
+      "location": "the stairwell",
+      "characters": [
+        {
+          "name": "Yuki",
+          "version": null
+        }
+      ],
+      "action": "Medium shot. Yuki drags Akira by the wrist down the stairs.",
+      "camera": "medium shot",
+      "expressions": {},
+      "dialogue": [
+        {
+          "speaker": "Yuki",
+          "text": "Come on, you're going to miss it!",
+          "kind": "speech"
+        }
+      ],
+      "sfx": [
+        "CLATTER"
+      ],
+      "notes": "",
+      "flashback": false,
+      "aspect_ratio": "1:1",
+      "seed": null,
+      "status": "unplaced",
+      "placement": null,
+      "takes": [],
+      "active_take": null
+    }
+  ],
+  "pages": [],
+  "takes": {
+    "tk_49640aa21af8": {
+      "panel": "pnl_d3e0995e608d",
+      "file": "takes/pnl_d3e0995e608d-tk_49640aa21af8.png",
+      "width": 1024,
+      "height": 1024,
+      "kind": "render",
+      "parent": null,
+      "origin": "tk_49640aa21af8",
+      "created": "2026-10-03T21:42:29.905441+00:00",
+      "engine": {
+        "seed": 1500752611,
+        "prompt": "manga panel, monochrome, greyscale, screentone, 1boy, messy charcoal brown with blue tips, medium length swept to left side covering right eye, amber eyes, white dress shirt tucked into navy pleated trousers, grey blazer and red necktie, silver wristwatch, black canvas backpack strap visible on shoulder, loose collar button undone, small scar above left eyebrow, quiet demeanor, relaxed slouch, wide shot, Wide shot. Akira sits alone against the chain-link fence, lunchbox on his knees., School rooftop — late afternoon",
+        "reference_file": "base.png",
+        "legacy_file": "001.png"
+      }
+    },
+    "tk_8a744ceb94bc": {
+      "panel": "pnl_d3e0995e608d",
+      "file": "takes/pnl_d3e0995e608d-tk_8a744ceb94bc.png",
+      "width": 1024,
+      "height": 1024,
+      "kind": "render",
+      "parent": null,
+      "origin": "tk_8a744ceb94bc",
+      "created": "2026-10-03T21:55:59.398447+00:00",
+      "engine": {
+        "seed": 166594819,
+        "prompt": "manga panel, anime illustration, 1boy, messy charcoal brown with blue tips, medium length swept to left side covering right eye, amber eyes, white dress shirt tucked into navy pleated trousers, grey blazer and red necktie, silver wristwatch, black canvas backpack strap visible on shoulder, loose collar button undone, small scar above left eyebrow, quiet demeanor, relaxed slouch, wide shot, Wide shot. Akira sits alone against the chain-link fence, lunchbox on his knees., School rooftop — late afternoon",
+        "reference_file": "base.png",
+        "legacy_file": "001_take02.png"
+      }
+    },
+    "tk_77117031d8df": {
+      "panel": "pnl_d4aeea541da8",
+      "file": "takes/pnl_d4aeea541da8-tk_77117031d8df.png",
+      "width": 960,
+      "height": 1152,
+      "kind": "render",
+      "parent": null,
+      "origin": "tk_77117031d8df",
+      "created": "2026-10-03T23:41:25.250387+00:00",
+      "engine": {
+        "seed": 2426851986,
+        "prompt": "manga panel, anime illustration, solo, 1girl, messy white bob with pink tips, loose pigtails tied with red ribbons, amber eyes, navy blue sailor collar school uniform with red necktie and pleated skirt, white wristwatch, silver hair barrettes, wide toothed grin, snowflake pin on blazer lapel, energetic stance, slightly messy strands flying, close-up, Close-up. Akira's head snaps up, eyes wide., School rooftop — late afternoon",
+        "reference_file": "base.png",
+        "legacy_file": "002.png"
+      }
+    },
+    "tk_b9eadd76af20": {
+      "panel": "pnl_622a14042ddb",
+      "file": "takes/pnl_622a14042ddb-tk_b9eadd76af20.png",
+      "width": 1024,
+      "height": 1024,
+      "kind": "render",
+      "parent": null,
+      "origin": "tk_b9eadd76af20",
+      "created": "2026-10-03T22:13:26.545683+00:00",
+      "engine": {
+        "seed": 2358832951,
+        "prompt": "manga panel, anime illustration, 1girl, messy white bob with pink tips, loose pigtails tied with red ribbons, amber eyes, navy blue sailor collar school uniform with red necktie and pleated skirt, white wristwatch, silver hair barrettes, wide toothed grin, snowflake pin on blazer lapel, energetic stance, slightly messy strands flying, 1boy, messy charcoal brown with blue tips, medium length swept to left side covering right eye, amber eyes, white dress shirt tucked into navy pleated trousers, grey blazer and red necktie, silver wristwatch, black canvas backpack strap visible on shoulder, loose collar button undone, small scar above left eyebrow, quiet demeanor, relaxed slouch, two-shot, Two-shot. Yuki stands over him, hands on her hips, grinning., School rooftop — cont.",
+        "reference_file": "Yuki,Akira",
+        "legacy_file": "003.png"
+      }
+    },
+    "tk_fdb51b90a7a6": {
+      "panel": "pnl_622a14042ddb",
+      "file": "takes/pnl_622a14042ddb-tk_fdb51b90a7a6.png",
+      "width": 2048,
+      "height": 2048,
+      "kind": "refine",
+      "parent": "tk_b9eadd76af20",
+      "origin": "tk_b9eadd76af20",
+      "created": "2026-10-03T23:11:22.218833+00:00",
+      "engine": {
+        "upscaler": "realesrgan",
+        "denoise": 0.25,
+        "seed": 0,
+        "legacy_file": "003_hires.png"
+      }
+    }
+  },
+  "cast": [
+    {
+      "name": "Akira",
+      "aliases": [],
+      "notes": ""
+    },
+    {
+      "name": "Yuki",
+      "aliases": [],
+      "notes": ""
+    }
+  ],
+  "locations": [
+    {
+      "name": "the stairwell"
+    }
+  ],
+  "props": [],
+  "cursor": {
+    "next_panel": "pnl_d3e0995e608d"
+  },
+  "script": {
+    "file": "script/script.md",
+    "format": "canonical",
+    "parser": {
+      "kind": "imported"
+    },
+    "sha256": "49bf849e08097730602052e0cc5dd75a5063f887f79d3a4b949642bb94aff31f"
+  }
+}
