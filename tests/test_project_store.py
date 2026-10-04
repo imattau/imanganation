@@ -175,3 +175,37 @@ def test_project_from_a_script_is_a_valid_container(tmp_path):
     save_project(tmp_path, document)
     jsonschema.validate(load_project(tmp_path), SCHEMA)
     assert integrity_errors(load_project(tmp_path), root=tmp_path) == []
+
+
+def test_pages_reorder_and_delete_keep_the_project_valid(tmp_path):
+    from gimp.imanganation.project_store import delete_page, reorder_pages
+
+    document = copy.deepcopy(EXAMPLE)
+    first = document["pages"][0]
+    document["pages"] = [first] + [
+        {"id": f"pg_extra{n}x", "label": f"Page {n}", "file": f"pages/page-00{n}.xcf"}
+        for n in (2, 3)]
+    document["pages"].append({"id": "pg_custom1", "label": "Cover", "file": "pages/c.xcf"})
+    order = lambda: [(p["id"], p["label"]) for p in document["pages"]]  # noqa: E731
+
+    reorder_pages(document, "pg_extra3x", first["id"])  # dropped on an earlier page
+    assert order() == [("pg_extra3x", "Page 1"), (first["id"], "Page 2"),
+                       ("pg_extra2x", "Page 3"), ("pg_custom1", "Cover")]
+    reorder_pages(document, "pg_extra3x", "pg_custom1")  # on a later one: after it
+    assert [p["id"] for p in document["pages"]] == [
+        first["id"], "pg_extra2x", "pg_custom1", "pg_extra3x"]
+
+    placed = [p["id"] for p in document["panels"]
+              if (p.get("placement") or {}).get("page") == first["id"]]
+    assert placed
+    file, unplaced = delete_page(document, first["id"])
+    assert file == first["file"] and unplaced == placed
+    assert all(p["status"] == "unplaced" and p["placement"] is None
+               for p in document["panels"] if p["id"] in placed)
+    assert all(p["takes"] for p in document["panels"] if p["id"] in placed)  # takes kept
+    assert order() == [("pg_extra2x", "Page 1"), ("pg_custom1", "Cover"),
+                       ("pg_extra3x", "Page 2")]
+    save_project(tmp_path, document)
+    jsonschema.validate(load_project(tmp_path), SCHEMA)
+    with pytest.raises(ProjectFileError, match="no longer"):
+        delete_page(document, first["id"])

@@ -195,3 +195,15 @@ def test_characters_heading_and_rows_carry_right_click_menus():
     assert "\t# Characters\t!new-proc:New character…" in build_docks(
         manifest, new_character_action="new-proc")["project"]
     assert "!" not in build_docks(copy.deepcopy(EXAMPLE))["project"]  # no actions, no menus
+
+
+def test_pages_carry_a_delete_menu_and_the_strip_can_be_reordered():
+    manifest = copy.deepcopy(EXAMPLE)
+    docks = build_docks(manifest, delete_page_action="del", reorder_pages_action="move")
+    strip = docks["filmstrip"].splitlines()
+    assert strip[0] == "!!reorder\tmove"  # a directive, not a tile
+    assert strip[1].startswith("pg_a1b2c3\t") and strip[1].endswith("\t!del:Delete page…")
+    assert "pg_a1b2c3\tPage 1" in docks["project"]
+    assert "\t!del:Delete page…" in docks["project"]
+    plain = build_docks(manifest)
+    assert "!!reorder" not in plain["filmstrip"] and "Delete page" not in plain["project"]

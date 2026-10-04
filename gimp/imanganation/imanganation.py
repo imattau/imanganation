@@ -59,10 +59,12 @@ try:
     from project_store import (
         ProjectFileError,
         apply_field_edit,
+        delete_page,
         load_project,
         new_id,
         project_from_script,
         record_take,
+        reorder_pages,
         save_project,
     )
     from script_canonical import looks_canonical as script_looks_canonical
@@ -113,6 +115,9 @@ DOCK_DESIGN_CHARACTER = "plug-in-imanganation-dock-design-character"
 # Project tree right-click menus (one-string procedures: the row id)
 DOCK_NEW_CHARACTER = "plug-in-imanganation-dock-new-character"
 DOCK_DESIGN_CHARACTER_ITEM = "plug-in-imanganation-dock-design-character-item"
+# Page strip / Project tree: right-click Delete page… and drag to reorder
+DOCK_DELETE_PAGE = "plug-in-imanganation-dock-delete-page"
+DOCK_REORDER_PAGES = "plug-in-imanganation-dock-reorder-pages"
 DOCK_GENERATE_LAYOUT = "plug-in-imanganation-dock-generate-page-layout"
 # Windows > Imanganation: reopen a closed dock (the host keeps closed docks closed).
 DOCK_SHOW = {dock: f"plug-in-imanganation-show-dock-{dock}" for dock in DOCK_IDS}
@@ -1830,7 +1835,8 @@ def _refresh_project_docks(sync_canvas=False):
         manifest, selected_id, root, _project_page_thumbnails(root, manifest),
         DOCK_OPEN_PAGE, DOCK_GENERATE_LAYOUT, design_action=DOCK_DESIGN_CHARACTER,
         new_character_action=DOCK_NEW_CHARACTER,
-        design_character_menu=DOCK_DESIGN_CHARACTER_ITEM)
+        design_character_menu=DOCK_DESIGN_CHARACTER_ITEM,
+        delete_page_action=DOCK_DELETE_PAGE, reorder_pages_action=DOCK_REORDER_PAGES)
     _DOCK_CONTEXT["selected_id"] = contents["selected_id"]
     canvas_rows = _canvas_take_rows(manifest)
     if canvas_rows:
@@ -2544,6 +2550,85 @@ def _dock_character_menu(procedure, config, data):
     return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
 
 
+def _confirm(title, text, action):
+    dialog = Gtk.MessageDialog(flags=Gtk.DialogFlags.MODAL,
+                               message_type=Gtk.MessageType.QUESTION, text=title)
+    dialog.format_secondary_text(text)
+    dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+                       action, Gtk.ResponseType.OK)
+    dialog.set_default_response(Gtk.ResponseType.CANCEL)
+    try:
+        return dialog.run() == Gtk.ResponseType.OK
+    finally:
+        dialog.destroy()
+
+
+def _close_page_display(project_id, page_id):
+    """Close a page's window if the workspace opened it (unsaved changes included:
+    the caller has asked)."""
+    key = (project_id, page_id)
+    display = _PAGE_DISPLAYS.pop(key, None)
+    image = _PAGE_IMAGES.pop(key, None)
+    if image is not None and image.is_valid():
+        image.clean_all()
+    if display is not None and display.is_valid():
+        display.delete()
+
+
+def _trash_page_file(root, relative):
+    """Send a deleted page's document to the system trash (recoverable), or into the
+    project's .trash/ folder where there is no trash."""
+    if not relative:
+        return
+    path = Path(root) / relative
+    if not path.is_file():
+        return
+    try:
+        Gio.File.new_for_path(str(path)).trash(None)
+    except GLib.Error:
+        folder = Path(root) / ".trash"
+        folder.mkdir(exist_ok=True)
+        os.replace(path, folder / f"{path.stem}-{secrets.token_hex(3)}{path.suffix}")
+
+
+def _dock_page_menu(procedure, config, data):
+    """Delete page… (a page's right-click menu) or a drop in the page strip."""
+    try:
+        root = _DOCK_CONTEXT["root"]
+        item = config.get_property("item")
+        manifest = load_project(root)
+        if data == "reorder":
+            dragged, _, target = item.partition("\t")
+            reorder_pages(manifest, dragged, target)
+            save_project(root, manifest)
+            _refresh_project_docks()
+            return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+        page = next((p for p in manifest["pages"] if p["id"] == item), None)
+        if page is None:
+            raise ValueError("That page is no longer in the project")
+        placed = sum((p.get("placement") or {}).get("page") == item
+                     for p in manifest["panels"])
+        detail = "Its document goes to the trash."
+        if placed:
+            detail += (f" {placed} placed panel{'s' if placed != 1 else ''} go back to "
+                       "unplaced; their takes are kept.")
+        if not _confirm(f"Delete {page.get('label') or 'this page'}?", detail, "Delete"):
+            return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
+        index = manifest["pages"].index(page)
+        relative, _ = delete_page(manifest, item)
+        save_project(root, manifest)
+        _close_page_display(manifest["project"]["id"], item)
+        _trash_page_file(root, relative)
+        if _DOCK_CONTEXT.get("selected_id") == item:
+            neighbours = manifest["pages"]
+            _DOCK_CONTEXT["selected_id"] = (
+                neighbours[min(index, len(neighbours) - 1)]["id"] if neighbours else None)
+        _refresh_project_docks()
+    except Exception as exc:
+        return _error(procedure, str(exc))
+    return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+
+
 def _new_project_run(procedure, config, data):
     """Filters > imanganation > New Project from Script: the extension shows the dialog."""
     try:
@@ -2609,6 +2694,8 @@ def _add_dock_callbacks(plugin):
         (DOCK_DESIGN_CHARACTER, _dock_action, "design-character", False),
         (DOCK_NEW_CHARACTER, _dock_character_menu, "new", True),
         (DOCK_DESIGN_CHARACTER_ITEM, _dock_character_menu, "design", True),
+        (DOCK_DELETE_PAGE, _dock_page_menu, "delete", True),
+        (DOCK_REORDER_PAGES, _dock_page_menu, "reorder", True),
         (DOCK_GENERATE_LAYOUT, _dock_action, "generate-layout", False),
         # Page strip: clicking a page opens it; the button adds one (as in Project)
         (DOCK_ACTIONS[DOCK_FILMSTRIP], _dock_action, "project-action", False),
@@ -2665,7 +2752,8 @@ def _register_project_docks(plugin):
             _project_page_thumbnails(root, manifest), DOCK_OPEN_PAGE,
             DOCK_GENERATE_LAYOUT, design_action=DOCK_DESIGN_CHARACTER,
         new_character_action=DOCK_NEW_CHARACTER,
-        design_character_menu=DOCK_DESIGN_CHARACTER_ITEM)
+        design_character_menu=DOCK_DESIGN_CHARACTER_ITEM,
+        delete_page_action=DOCK_DELETE_PAGE, reorder_pages_action=DOCK_REORDER_PAGES)
         rows = [
             (DOCK_PROJECT, "Project", "tree", contents["project"],
              contents["project_selected"], "Add page", DOCK_ACTIONS[DOCK_PROJECT],

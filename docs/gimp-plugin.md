@@ -55,7 +55,10 @@ navigator (pages, script panels, assets) sits left of a compact toolbox; on the 
 **Context** shows whatever is selected (project, page, panel or character), with a
 **Script** tab beside it, above GIMP's Layers; **Pages**, the page strip, runs along the
 bottom: one thumbnail per page (drawn from the open page when it is open, so unsaved
-work shows), click to open a page, **Add page** to add one. With a panel
+work shows), click to open a page, **Add page** to add one, drag a page onto another to
+move it there, and right-click a page (here or in Project) for **Delete page…**: after a
+confirmation its document goes to the system trash, and panels placed on it go back to
+unplaced with their takes kept. Default "Page N" labels follow the new order. With a panel
 selected (in a dock or on the canvas), Context's **Generate** renders it through *Render
 Panel into Frame*: into its saved frame, or the selection on an open project page. Panel
 and Character Bible are folded into Context and open only from *Windows → Imanganation*.

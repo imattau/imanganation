@@ -80,7 +80,8 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
                 open_page_action: str = "",
                 generate_layout_action: str = "",
                 design_action: str = "", new_character_action: str = "",
-                design_character_menu: str = "") -> dict[str, str]:
+                design_character_menu: str = "", delete_page_action: str = "",
+                reorder_pages_action: str = "") -> dict[str, str]:
     """Build generic host content and stable selections from a project manifest.
 
     The Context (inspector) rows are editable fields; ``open_page_action``, a dock
@@ -90,7 +91,9 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
     button for characters (their notes are the description). In the Project tree,
     ``new_character_action`` puts "New character…" on the Characters heading's
     right-click menu, and ``design_character_menu`` puts "Design character" on each
-    character's (both one-string dock procedures)."""
+    character's (both one-string dock procedures). ``delete_page_action`` puts
+    "Delete page…" on page rows and tiles, and ``reorder_pages_action`` lets the page
+    strip's tiles be dragged (it gets "dragged id\ttarget id")."""
     panels = manifest.get("panels", [])
     pages = manifest.get("pages", [])
     page_by_id = {page["id"]: page for page in pages}
@@ -135,7 +138,9 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
     project_rows.append("# Pages")
     for page in pages:
         page_label = _label(page.get("label")) or "Page"
-        project_rows.append(f"{page['id']}\t{page_label} · {page_progress(page)}")
+        project_rows.append(f"{page['id']}\t{page_label} · {page_progress(page)}"
+                            + (f"\t!{delete_page_action}:Delete page…"
+                               if delete_page_action else ""))
     project_rows.append("# Script panels")
     for panel in panels:
         if panel.get("status") == "orphaned":
@@ -175,7 +180,8 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
                 project_rows.append(f"\t\t# {summary}")
 
     previews = previews or {}
-    filmstrip_rows = []
+    page_menu = f"\t!{delete_page_action}:Delete page…" if delete_page_action else ""
+    filmstrip_rows = [f"!!reorder\t{reorder_pages_action}"] if reorder_pages_action else []
     for page in pages:
         row = (f"{page['id']}\t{_label(page.get('label')) or 'Page'} · "
                f"{page_counts[page['id']]} panels · {page_progress(page)}")
@@ -183,7 +189,7 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
         if (preview and "\t" not in preview and "\n" not in preview
                 and len(row.encode("utf-8")) + len(preview.encode("utf-8")) + 1 <= 4096):
             row += f"\t{preview}"
-        filmstrip_rows.append(row)
+        filmstrip_rows.append(row + page_menu)
     script_rows = ["# Reading order"]
     for panel in panels:
         if panel.get("status") == "orphaned":

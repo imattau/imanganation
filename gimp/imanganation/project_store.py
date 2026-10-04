@@ -440,3 +440,57 @@ def project_from_script(parsed: dict[str, Any], *, title: str, script_file: str,
         "props": [],
         "cursor": {"next_panel": panels[0]["id"]},
     }
+
+
+_DEFAULT_PAGE_LABEL = re.compile(r"^Page\s+(\d+)$", re.IGNORECASE)
+
+
+def _first_page_number(document: dict[str, Any]) -> int | None:
+    numbers = [int(m.group(1)) for page in document["pages"]
+               if (m := _DEFAULT_PAGE_LABEL.match(page.get("label", "")))]
+    return min(numbers) if numbers else None
+
+
+def _renumber_pages(document: dict[str, Any], first: int | None) -> None:
+    """Default "Page N" labels follow the page order again, counting from ``first``
+    (the lowest such number before the change: a script starting at page 7 keeps
+    7, 8, ...); custom labels stay."""
+    if first is None:
+        return
+    number = first
+    for page in document["pages"]:
+        if _DEFAULT_PAGE_LABEL.match(page.get("label", "")):
+            page["label"] = f"Page {number}"
+            number += 1
+
+
+def reorder_pages(document: dict[str, Any], dragged: str, target: str) -> None:
+    """Move page ``dragged`` to the position of page ``target`` (the page strip's
+    drag and drop: dropped on a later page it goes after it, on an earlier one before)."""
+    pages = document["pages"]
+    ids = [page["id"] for page in pages]
+    if dragged not in ids or target not in ids:
+        raise ProjectFileError("that page is no longer in the project")
+    first = _first_page_number(document)
+    page = pages.pop(ids.index(dragged))
+    pages.insert(ids.index(target), page)
+    _renumber_pages(document, first)
+
+
+def delete_page(document: dict[str, Any], page_id: str) -> tuple[str, list[str]]:
+    """Remove a page from the project. Panels placed on it become unplaced (their takes
+    are kept). Returns the page's file (relative; the caller disposes of it) and the
+    ids of the panels that were unplaced."""
+    page = next((p for p in document["pages"] if p["id"] == page_id), None)
+    if page is None:
+        raise ProjectFileError("that page is no longer in the project")
+    first = _first_page_number(document)
+    unplaced = []
+    for panel in document["panels"]:
+        if (panel.get("placement") or {}).get("page") == page_id:
+            panel["placement"] = None
+            panel["status"] = "unplaced"
+            unplaced.append(panel["id"])
+    document["pages"].remove(page)
+    _renumber_pages(document, first)
+    return page.get("file", ""), unplaced
