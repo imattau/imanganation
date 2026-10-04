@@ -94,6 +94,7 @@ RENDER_TIMEOUT = 600  # seconds
 _DOCK_PLUGIN = None
 _DOCK_CONTEXT = {}
 _PAGE_THUMBNAILS = {}
+_PAGE_DISPLAYS = {}
 
 
 class EngineError(Exception):
@@ -1236,6 +1237,32 @@ def _notify_project_docks(root):
             Gimp.message(f"Could not refresh project docks: {exc}")
 
 
+def _show_project_page(root, manifest, page_id):
+    page = next((candidate for candidate in manifest["pages"]
+                 if candidate["id"] == page_id), None)
+    if page is None:
+        raise ValueError("Select a page or a placed panel before opening a page")
+    relative = page.get("file")
+    page_path = Path(root) / relative if relative else None
+    if page_path is None or not page_path.is_file():
+        raise ValueError(f"Page document is missing: {relative or page_id}")
+
+    key = (manifest["project"]["id"], page_id)
+    display = _PAGE_DISPLAYS.get(key)
+    if display is not None and display.is_valid():
+        display.present()
+        return
+
+    image = Gimp.file_load(Gimp.RunMode.NONINTERACTIVE,
+                           Gio.File.new_for_path(str(page_path)))
+    project_ref = {"project": key[0], "page": page_id}
+    image.attach_parasite(Gimp.Parasite.new(
+        PROJECT_PARASITE, Gimp.PARASITE_PERSISTENT,
+        list(json.dumps(project_ref, separators=(",", ":")).encode())))
+    display = Gimp.Display.new(image)
+    _PAGE_DISPLAYS[key] = display
+
+
 def _dock_action(procedure, config, data):
     try:
         if data == "open-page":
@@ -1244,20 +1271,7 @@ def _dock_action(procedure, config, data):
             panel = next((p for p in manifest["panels"] if p["id"] == selected), None)
             page_id = selected if any(page["id"] == selected for page in manifest["pages"]) \
                 else (panel.get("placement") or {}).get("page") if panel else None
-            page = next((p for p in manifest["pages"] if p["id"] == page_id), None)
-            if page is None:
-                raise ValueError("Select a page or a placed panel before opening a page")
-            relative = page.get("file")
-            page_path = (_DOCK_CONTEXT["root"] / relative) if relative else None
-            if page_path is None or not page_path.is_file():
-                raise ValueError(f"Page document is missing: {relative or page_id}")
-            image = Gimp.file_load(Gimp.RunMode.NONINTERACTIVE,
-                                   Gio.File.new_for_path(str(page_path)))
-            project_ref = {"project": manifest["project"]["id"], "page": page_id}
-            image.attach_parasite(Gimp.Parasite.new(
-                PROJECT_PARASITE, Gimp.PARASITE_PERSISTENT,
-                list(json.dumps(project_ref, separators=(",", ":")).encode())))
-            Gimp.Display.new(image)
+            _show_project_page(_DOCK_CONTEXT["root"], manifest, page_id)
         else:
             _refresh_project_docks()
         return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
@@ -1276,6 +1290,8 @@ def _dock_item_action(procedure, config, data):
             raise ValueError(f"Unknown project item id: {item}")
         _DOCK_CONTEXT["selected_id"] = item
         _refresh_project_docks()
+        if any(page["id"] == item for page in manifest["pages"]):
+            _show_project_page(_DOCK_CONTEXT["root"], manifest, item)
         return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
     except Exception as exc:
         return _error(procedure, str(exc))
