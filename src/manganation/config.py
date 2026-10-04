@@ -108,6 +108,9 @@ class InpaintDefaults(BaseModel):
 
     denoise: float = 0.85  # high: the masked region is re-synthesised, not nudged
     grow_mask_by: int = 8  # dilate the mask so the patch blends into its surroundings
+    # Crop-and-stitch: inpaint a crop around the mask at ~1 MP, not the whole take.
+    context: float = 0.5  # context added on each side, as a fraction of the mask's size
+    min_crop: int = 256  # smallest crop side (source px), so tiny masks see surroundings
     steps: int = 28
     cfg: float = 6.0
 

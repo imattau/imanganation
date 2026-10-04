@@ -5,18 +5,25 @@ from a short prompt; everything outside the mask is preserved exactly (the repai
 composited back over the original through a soft copy of the grown mask). This is the
 engine half the GIMP plug-in's *Inpaint Selection* calls.
 
-## Pipeline
+## Pipeline (crop-and-stitch)
 
 ```
-init image ──▶ VAEEncode ──▶ SetLatentNoiseMask(mask) ──▶ KSampler(denoise) ──▶ VAEDecode
-mask image ──▶ LoadImageMask ──▶ GrowMask ─────────────────────────┘
+mask ──▶ bbox + context ──▶ crop (take + mask) ──▶ resize to ~1 MP (64-px grid)
+     ──▶ VAEEncode ──▶ SetLatentNoiseMask(GrowMask) ──▶ KSampler(denoise) ──▶ VAEDecode
+     ──▶ resize back ──▶ paste into the full-res take through a grown, blurred mask
 ```
 
-- `SetLatentNoiseMask` marks which latent positions may receive noise, so the sampler
-  only re-synthesises inside the mask; the rest of the latent is the encoded original.
-- `GrowMask` dilates the mask (default 8 px) so the new pixels blend into the surround.
-- `denoise` must be **high** (default 0.85): the masked region is regenerated from
-  noise, not nudged. Lower values only tint the region.
+- **Why crop:** SDXL paints well at ~1 MP. Painting a small selection inside a whole
+  take (a hi-res can be 4-16 MP) gave incoherent patches: "red apple" became a smear.
+  The crop is the mask's bounding box plus `context` (0.5 × the mask's larger side)
+  per side, at least `min_crop` px and no thinner than 2:1, then resized to ~1 MP.
+  Small selections are upscaled (more detail), huge takes downscaled.
+- `SetLatentNoiseMask` limits noise to the masked latent; `GrowMask` (scaled to the
+  crop's working size) dilates it so the new pixels blend in. `denoise` must be
+  **high** (default 0.85): the region is regenerated from noise, not nudged.
+- **Stitch:** the patch is resized back and pasted through the full-resolution mask,
+  grown by `grow_mask_by` and Gaussian-softened. Outside that, pixels are the
+  original's exactly, guaranteed in Python rather than relying on the graph.
 
 ## Mask convention
 
@@ -40,6 +47,8 @@ defaults:
   inpaint:
     denoise: 0.85     # high: the masked region is re-synthesised from noise
     grow_mask_by: 8   # dilate the mask so the patch blends into its surroundings
+    context: 0.5      # crop-and-stitch: context per side, as a fraction of the mask size
+    min_crop: 256     # smallest crop side in source px
     steps: 28
     cfg: 6.0
 ```
@@ -64,10 +73,21 @@ the project (the API and wrapper enforce containment).
   change after the composite fix; before it, 7% moved by >8 levels (max 179).
 - **Live, via GIMP** (`gimp/inpaint_smoke_test.py`): a feathered selection over a
   placed 1920×2176 hi-res take. This caught the inverted-alpha bug above.
+- **Live, crop-and-stitch** (`docs/quality/2026-10-04_inpaint_crop_stitch.png`): the
+  same selection on a 3840×4352 take. Crop 3296×3128 painted at 1088×1024: a clean,
+  coherent red apple where the whole-take inpaint gave a smear; 0 pixels changed
+  outside the mask (+40 px).
+
+## Known limits
+
+- When the crop is much larger than 1 MP (big selections on hi-res takes), it's
+  downscaled to paint, so the patch is softer than its surroundings. Better: inpaint
+  the base take, then Refine; or paint large crops at native size in tiles (future).
 
 ## Notes / next
 
-- Works with the standard (non-inpaint) NoobAI checkpoint via the masked-latent path;
+- Works with the standard (non-inpaint) NoobAI checkpoint via the masked-latent path
+  and crop-and-stitch;
   no separate inpaint model needed on 16 GB.
 - `source` defaults to the *newest* take, which may be a `_hires`/`_inpaint`
   iteration. Pass `--source` explicitly when the plug-in knows the exact layer.

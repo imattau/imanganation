@@ -64,5 +64,7 @@ defaults:
   inpaint:
     denoise: 0.85     # high: the masked region is re-synthesised from noise
     grow_mask_by: 8   # dilate the mask so the patch blends into its surroundings
+    context: 0.5      # crop-and-stitch: context per side, as a fraction of the mask size
+    min_crop: 256     # smallest crop side in source px
     steps: 28
     cfg: 6.0

@@ -99,20 +99,33 @@ def test_output_path_uses_inpaint_suffix(tmp_path):
 
 
 class FakeComfy:
+    """Returns a solid red "repaint" at the size of the uploaded crop."""
+
     def __init__(self):
         self.graphs = []
         self.uploads = []
+        self.sizes = []
 
     def is_up(self):
         return True
 
     def upload_image(self, path):
+        from PIL import Image
+
         self.uploads.append(path)
+        with Image.open(path) as im:  # the temp crop is gone by run() time
+            self.sizes.append(im.size)
         return {"name": Path(path).name}
 
     def run(self, graph):
+        import io
+
+        from PIL import Image
+
         self.graphs.append(graph)
-        return [b"\x89PNG fake"]
+        buf = io.BytesIO()
+        Image.new("RGB", self.sizes[0], (255, 0, 0)).save(buf, "PNG")
+        return [buf.getvalue()]
 
 
 def _project(tmp_path: Path) -> Path:
@@ -123,8 +136,10 @@ def _project(tmp_path: Path) -> Path:
     from PIL import Image
 
     Image.new("RGB", (128, 128), "white").save(tmp_path / "panels/001.png")
-    # a same-size transparent selection mask
-    Image.new("RGBA", (128, 128), (0, 0, 0, 0)).save(tmp_path / "mask.png")
+    # a same-size transparent selection mask with a selected square
+    m = Image.new("RGBA", (128, 128), (0, 0, 0, 0))
+    m.paste((255, 255, 255, 255), (48, 48, 80, 80))
+    m.save(tmp_path / "mask.png")
     return tmp_path
 
 
@@ -137,14 +152,14 @@ def test_inpaint_panel_paints_region_and_writes_take(tmp_path):
     assert Path(r.path).name == "001_inpaint.png"
     assert r.mask.endswith("mask.png")
     g = comfy.graphs[0]
-    assert g["8"]["inputs"]["image"] == "001.png"       # init = newest panel
+    assert g["8"]["inputs"]["image"].endswith("_inpaint_crop.png")  # crop of newest take
     assert g["9"]["inputs"]["image"].endswith("_inpaint_mask.png")  # the normalised copy
     assert g["9"]["inputs"]["channel"] == "red"
     assert g["2"]["inputs"]["text"].endswith(", a red apple")  # style prefix + prompt
     assert g["2"]["inputs"]["text"] == r.positive and r.prompt == "a red apple"
     assert g["5"]["inputs"]["seed"] == 9
     # both the init and the mask were uploaded
-    assert any("001.png" in p for p in comfy.uploads)
+    assert any("_crop.png" in p for p in comfy.uploads)
     assert any("mask.png" in p for p in comfy.uploads)
     sidecar = json.loads(Path(r.path).with_suffix(".json").read_text())
     assert sidecar["mask"].endswith("mask.png")
@@ -258,3 +273,77 @@ def test_api_inpaint_missing_explicit_source_404(tmp_path):
                                          "mask": "mask.png", "prompt": "x",
                                          "source": "panels/001_take09.png"})
     assert resp.status_code == 404
+
+
+# --- crop-and-stitch ----------------------------------------------------------
+
+
+def _mask(size, box):
+    from PIL import Image
+
+    m = Image.new("L", size, 0)
+    m.paste(255, box)
+    return m
+
+
+def test_crop_box_adds_context_and_stays_inside():
+    from manganation.render.inpaint import crop_box
+
+    m = _mask((2000, 2000), (1000, 1000, 1100, 1060))  # 100x60 selection
+    x0, y0, x1, y1 = crop_box(m, context=0.5, min_side=256, grow=8)
+    assert x0 <= 1000 - 50 and x1 >= 1100 + 50 and y0 <= 1000 - 50 and y1 >= 1060 + 50
+    assert x1 - x0 >= 256 and y1 - y0 >= 256
+    assert max((x1 - x0) / (y1 - y0), (y1 - y0) / (x1 - x0)) <= 2.0
+
+
+def test_crop_box_clamps_at_edges_and_rejects_empty():
+    from PIL import Image
+
+    from manganation.render.inpaint import crop_box
+
+    x0, y0, x1, y1 = crop_box(_mask((300, 900), (0, 0, 40, 40)), context=0.5, min_side=256)
+    assert (x0, y0) == (0, 0) and x1 <= 300 and y1 <= 900 and x1 - x0 >= 256
+    assert crop_box(Image.new("L", (64, 64), 0)) is None
+
+
+def test_inpaint_paints_a_1mp_crop_and_keeps_outside_pixels_exact(tmp_path):
+    """Small selection in a big take: painted at ~1 MP, stitched back; everything
+    outside the grown, softened mask is the original, pixel for pixel."""
+    from PIL import Image, ImageChops
+
+    from manganation.render.inpaint import blend_mask
+
+    project = _project(tmp_path)
+    noise = Image.effect_noise((1400, 1600), 60)  # busy texture: any resample shows
+    src = Image.merge("RGB", (noise, noise.rotate(90, expand=False), noise.transpose(0)))
+    src.save(project / "panels/001.png")
+    sel = Image.new("RGBA", (1400, 1600), (0, 0, 0, 0))
+    sel.paste((255, 255, 255, 255), (700, 800, 780, 860))
+    sel.save(project / "mask.png")
+    comfy = FakeComfy()
+    r = inpaint_panel(project, 1, mask=project / "mask.png", prompt="apple", seed=1,
+                      grow_mask_by=8, client=comfy)
+
+    w, h = r.work_size
+    assert w % 64 == 0 and h % 64 == 0 and 0.85e6 < w * h < 1.2e6  # SDXL scale
+    cw, ch = r.crop[2] - r.crop[0], r.crop[3] - r.crop[1]
+    assert w > cw  # a small selection is upscaled for the model
+    scale = ((w * h) / (cw * ch)) ** 0.5
+    assert comfy.graphs[0]["10"]["inputs"]["expand"] == max(1, round(8 * scale))
+
+    out = Image.open(r.path).convert("RGB")
+    assert out.size == (1400, 1600)  # full resolution kept
+    touched = blend_mask(_mask((1400, 1600), (700, 800, 780, 860)), 8)
+    outside = touched.point(lambda v: 255 if v == 0 else 0)
+    diff = ImageChops.difference(out, src).convert("L")
+    assert ImageChops.multiply(diff, outside).getbbox() is None  # outside: exact
+    assert out.getpixel((740, 830)) == (255, 0, 0)  # inside: the repaint
+
+
+def test_inpaint_rejects_empty_mask(tmp_path):
+    from PIL import Image
+
+    project = _project(tmp_path)
+    Image.new("RGBA", (128, 128), (0, 0, 0, 0)).save(project / "empty.png")
+    with pytest.raises(InpaintError, match="empty"):
+        inpaint_panel(project, 1, mask=project / "empty.png", prompt="x", client=FakeComfy())

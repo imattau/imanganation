@@ -188,9 +188,8 @@ None of these create or arrange pages.
 1. **Render Panel into Frame** ✅ (built).
 2. **Place Next Panel** ✅ (built).
 3. **Regenerate Panel** ✅ (built).
-4. **Inpaint Selection** ✅ (built; engine `docs/inpaint.md`). Patch quality on large
-   takes is weak (SDXL painting a small region of a ~4 MP latent); crop-and-stitch is
-   the planned engine fix.
+4. **Inpaint Selection** ✅ (built; engine `docs/inpaint.md`, with crop-and-stitch so
+   patches are painted at SDXL's ~1 MP scale).
 5. **Set Character Reference from Layer** ✅ (built). Engine: `GET /characters`,
    `POST /characters/reference`.
 6. **Engine Status…**: health, queue and VRAM.
