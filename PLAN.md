@@ -14,7 +14,7 @@ generate **one consistent panel at a time**, always in **colour**, with
 | Multi-character | Required in MVP |
 | Scripting | Standard manga production practice (page/panel-based) |
 | Character references | Optional; system generates designs when absent |
-| Page composition | **Engine renders one panel per image and never composites.** Pages are built **by hand in GIMP**: the artist's template, frame by frame |
+| Page composition | **Engine renders one panel per image and never composites.** Artists can build pages by hand or generate a selectable frame template in GIMP from a built-in layout matching the script page's panel count. |
 
 ## Stack
 

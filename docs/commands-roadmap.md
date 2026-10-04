@@ -80,8 +80,7 @@ Ordered by value for the work so far.
 | 7 | **Character Variant…** | Outfit / evolution versions (`variant`, `evolution` kinds exist in the schema), then choose which version a panel uses. | Panel → character-version mapping in `PanelSpec.refs`, renderer honours it |
 | 8 | **Show/Hide Lettering Reference** | Toggle the hidden dialogue/SFX layers across the page. | none |
 
-Not proposed: anything that lays out pages (pages stay manual), auto-lettering, and
-export (GIMP already exports PNG/PDF).
+Not proposed: automatic lettering and export (GIMP already exports PNG/PDF).
 
 ## Suggested order
 

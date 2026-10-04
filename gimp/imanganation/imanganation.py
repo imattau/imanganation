@@ -5,12 +5,12 @@ Runs inside GIMP's own Python (the flatpak ships 3.14 with GI bindings but no
 numpy/PIL/pydantic), so this file is stdlib + gi only. All generation stays in the
 imanganation engine (``manganation serve``); the plug-in is a thin HTTP client.
 
-Workflow: the artist builds every page by hand — typically from a panel layout
-template already in GIMP. They click into a frame (Fuzzy Select on the template),
+Workflow: the artist builds every page in GIMP — by hand or from an imanganation
+panel layout template. They click into a frame (Fuzzy Select on the template),
 run "Render Panel into Frame", and the engine renders the next script panel at
 that frame's proportions; the plug-in drops it in, clipped to the frame, below the
-template's frame lines. Then the next frame, and so on. The plug-in never lays out
-a page.
+template's frame lines. Then the next frame, and so on. Generated layouts provide
+editable frame borders only; panel generation and page composition remain artist-led.
 
 Panels are identified by their 1-based position in the script (``seq``), not
 page/panel, because scripts can repeat panel numbers within a page (e.g. after
@@ -32,23 +32,29 @@ import re
 import secrets
 import sys
 import time
-from datetime import datetime
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 
 import gi
 
 gi.require_version("Gimp", "3.0")
 gi.require_version("Gtk", "3.0")
-from gi.repository import Gimp  # noqa: E402
-from gi.repository import Gio, GLib, GObject, Gtk  # noqa: E402
+from gi.repository import (  # noqa: E402
+    Gegl,
+    Gimp,
+    Gio,
+    GLib,
+    GObject,
+    Gtk,
+)
 
 try:
-    from project_store import (ProjectFileError, load_project, new_id, record_take,
-                               save_project)
+    from layouts import FRAME_STYLES, layouts_for_count, page_panel_count
     from panel_ui import build_docks, build_welcome_docks, character_row_id, rgb_png
+    from project_store import ProjectFileError, load_project, new_id, record_take, save_project
 except ImportError:  # Keep older single-file plug-in installs usable for legacy projects.
     ProjectFileError = ValueError
     load_project = record_take = save_project = None
@@ -57,6 +63,7 @@ except ImportError:  # Keep older single-file plug-in installs usable for legacy
     character_row_id = None
     rgb_png = None
     build_welcome_docks = None
+    FRAME_STYLES = layouts_for_count = page_panel_count = None
 
 PROC_RENDER = "plug-in-imanganation-render-panel"
 PROC_NEXT = "plug-in-imanganation-place-next-panel"
@@ -67,6 +74,7 @@ PROC_SETREF = "plug-in-imanganation-set-character-reference"
 PROC_INPAINT = "plug-in-imanganation-inpaint-selection"
 PROC_STATUS = "plug-in-imanganation-engine-status"
 PROC_PROJECT_DOCKS = "plug-in-imanganation-project-docks"
+PROC_PAGE_LAYOUT = "plug-in-imanganation-page-layout"
 PROC_AUTOSTART = "extension-imanganation-ui"
 DOCK_PROJECT = "project"
 DOCK_INSPECTOR = "inspector"
@@ -314,6 +322,32 @@ def _render_body(root, manifest, seq):
         return {"project_dir": str(root), "seq": seq}
     return {"project": manifest["project"]["id"], "panel": manifest["panels"][seq - 1],
             "reading_order": manifest["project"].get("reading_order", "rtl")}
+
+
+def _engine_project(root, manifest=None):
+    """How the engine names the project: the container id, or a legacy folder path."""
+    if manifest is None:
+        manifest = _manifest_for(root)
+    if manifest is not None:
+        return {"project": manifest["project"]["id"]}
+    return {"project_dir": str(root)}
+
+
+def _refine_origin(root, manifest, seq, source):
+    """Container refine: the size (and render prompt) of the take this one descends
+    from, so the engine scales from the original render and never compounds."""
+    panel_id = manifest["panels"][seq - 1]["id"]
+    take_id = _registered_take_id(root, manifest, source, panel_id)
+    takes = manifest.get("takes", {})
+    take = takes.get(takes.get(take_id, {}).get("origin") or take_id) if take_id else None
+    if not take or not take.get("width") or not take.get("height"):
+        width, height = _source_dimensions(source)  # not yet a take: it is its own origin
+        return {"origin_width": width, "origin_height": height}
+    origin = {"origin_width": take["width"], "origin_height": take["height"]}
+    prompt = (take.get("engine") or {}).get("prompt")
+    if prompt:
+        origin["prompt"] = prompt
+    return origin
 
 
 def _load_project(config):
@@ -726,7 +760,16 @@ def refine_panel(procedure, run_mode, image, drawables, config, data):
     if run_mode == Gimp.RunMode.INTERACTIVE and not _dialog(procedure, config, PROC_REFINE):
         return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
 
-    body = {"project_dir": str(source.parent.parent), "seq": seq, "source": str(source)}
+    root = source.parent.parent
+    try:
+        manifest = _manifest_for(root)
+        if manifest is not None:
+            body = {**_engine_project(root, manifest), "source": str(source),
+                    **_refine_origin(root, manifest, seq, source)}
+        else:
+            body = {"project_dir": str(root), "seq": seq, "source": str(source)}
+    except (ValueError, KeyError, IndexError) as exc:
+        return _error(procedure, str(exc))
     if config.get_property("scale") > 0:
         body["scale"] = config.get_property("scale")
     if config.get_property("denoise") >= 0:
@@ -917,15 +960,17 @@ def inpaint_selection(procedure, run_mode, image, drawables, config, data):
     mask = root / "tmp" / f"inpaint_{seq:03d}_{time.strftime('%Y%m%d-%H%M%S')}_{secrets.token_hex(4)}.png"
     try:
         _export_inpaint_mask(image, layer, source, mask)
-        body = {"project_dir": str(root), "seq": seq, "mask": str(mask), "prompt": prompt,
-                "source": str(source)}
+        engine_project = _engine_project(root)
+        body = {**engine_project, "mask": str(mask), "prompt": prompt, "source": str(source)}
+        if "project_dir" in engine_project:
+            body["seq"] = seq
         if config.get_property("denoise") > 0:
             body["denoise"] = config.get_property("denoise")
         if config.get_property("grow") >= 0:
             body["grow_mask_by"] = config.get_property("grow")
         result = _run_job(config.get_property("engine-url").rstrip("/"), "/inpaint", body,
                           f"Inpainting panel {seq:03d}: {prompt[:40]}…")
-    except EngineError as exc:
+    except (EngineError, ValueError) as exc:
         return _error(procedure, str(exc))
 
     try:
@@ -954,7 +999,8 @@ def _image_project(image):
             if p:
                 meta = json.loads(bytes(p.get_data()))
                 f = meta.get("file") or (meta.get("render") or {}).get("path")
-                if f and (Path(f).parent.parent / "panels.json").exists():
+                if f and any((Path(f).parent.parent / name).exists()
+                             for name in ("project.json", "panels.json")):
                     return Path(f).parent.parent
             if layer.is_group():
                 found = walk(layer.get_children())
@@ -1024,7 +1070,9 @@ def set_character_reference(procedure, run_mode, image, drawables, config, data)
     try:
         from urllib.parse import quote
 
-        cast = _http("GET", f"{engine}/characters?project_dir={quote(str(root))}")
+        engine_project = _engine_project(root)
+        selector = "&".join(f"{key}={quote(value)}" for key, value in engine_project.items())
+        cast = _http("GET", f"{engine}/characters?{selector}")
         known = {c["name"].lower(): c["name"] for c in cast}
         for c in cast:
             known.update({a.lower(): c["name"] for a in c.get("aliases", [])})
@@ -1036,7 +1084,7 @@ def set_character_reference(procedure, run_mode, image, drawables, config, data)
         path = root / "tmp" / f"gimp_ref_{slug}_{time.strftime('%Y%m%d-%H%M%S')}.png"
         side = _export_reference(image, layers[0], path)
         result = _http("POST", f"{engine}/characters/reference",
-                       {"project_dir": str(root), "name": name, "image_path": str(path)})
+                       {**engine_project, "name": name, "image_path": str(path)})
     except (EngineError, ValueError) as exc:
         return _error(procedure, str(exc))
 
@@ -1267,6 +1315,136 @@ def _choose_page_size(width, height):
     return size
 
 
+def _choose_page_layout(layouts, frame_styles):
+    dialog = Gtk.Dialog(title="Choose panel layout", flags=Gtk.DialogFlags.MODAL)
+    dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+                       "Apply", Gtk.ResponseType.OK)
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, margin=12)
+    box.pack_start(Gtk.Label(label="Built-in layouts matching this script page:"),
+                   False, False, 0)
+    chooser = Gtk.ComboBoxText()
+    for layout in layouts:
+        chooser.append_text(layout["name"])
+    chooser.set_active(0)
+    box.pack_start(chooser, False, False, 0)
+    box.pack_start(Gtk.Label(label="Frame style:"), False, False, 0)
+    style_chooser = Gtk.ComboBoxText()
+    for style in frame_styles:
+        style_chooser.append_text(style["name"])
+    style_chooser.set_active(0)
+    box.pack_start(style_chooser, False, False, 0)
+    dialog.get_content_area().add(box)
+    dialog.show_all()
+    selected = None
+    if dialog.run() == Gtk.ResponseType.OK:
+        index = chooser.get_active()
+        style_index = style_chooser.get_active()
+        if 0 <= index < len(layouts) and 0 <= style_index < len(frame_styles):
+            selected = layouts[index], frame_styles[style_index]
+    dialog.destroy()
+    return selected
+
+
+def _draw_page_layout(image, layout, frame_style):
+    """Add transparent frame-line art to the page, preserving its current selection."""
+    width, height = image.get_width(), image.get_height()
+    line = max(2, min(32, round(min(width, height) * frame_style["weight"])))
+    selection = Gimp.Selection.save(image)
+    layer = Gimp.Layer.new(
+        image, f"Template - Imanganation Layout - {layout['name']} - {frame_style['name']}",
+                           width, height, Gimp.ImageType.RGBA_IMAGE, 100,
+                           Gimp.LayerMode.NORMAL)
+    previous_foreground = Gimp.context_get_foreground()
+    image.undo_group_start()
+    try:
+        layer.fill(Gimp.FillType.TRANSPARENT)
+        image.insert_layer(layer, None, 0)
+        Gimp.context_set_foreground(Gegl.Color.new("black"))
+        for index, (nx, ny, nw, nh) in enumerate(layout["regions"]):
+            x = round(nx * width)
+            y = round(ny * height)
+            w = round(nw * width)
+            h = round(nh * height)
+            thickness = max(1, min(line, (w - 2) // 2, (h - 2) // 2))
+            slant = round(w * frame_style["slant"])
+            direction = 1 if index % 2 == 0 else -1
+
+            def polygon(px, py, pw, ph, tilt, lean):
+                tilt *= lean
+                return [px + tilt, py, px + pw, py,
+                        px + pw - tilt, py + ph, px, py + ph]
+
+            def ring(px, py, pw, ph, border, tilt, lean):
+                image.select_polygon(Gimp.ChannelOps.REPLACE,
+                                     polygon(px, py, pw, ph, tilt, lean))
+                image.select_polygon(
+                    Gimp.ChannelOps.SUBTRACT,
+                    polygon(px + border, py + border,
+                            pw - 2 * border, ph - 2 * border, tilt, lean))
+                layer.edit_fill(Gimp.FillType.FOREGROUND)
+
+            ring(x, y, w, h, thickness, slant, direction)
+            if frame_style["double"]:
+                inset = max(thickness * 2, round(min(w, h) * 0.018))
+                inner_weight = max(1, thickness // 2)
+                if w > inset * 2 + inner_weight * 2 and h > inset * 2 + inner_weight * 2:
+                    ring(x + inset, y + inset, w - 2 * inset, h - 2 * inset,
+                         inner_weight, slant, direction)
+    except Exception:
+        if layer.get_image() is image:
+            image.remove_layer(layer)
+        raise
+    finally:
+        image.select_item(Gimp.ChannelOps.REPLACE, selection)
+        Gimp.context_set_foreground(previous_foreground)
+        image.remove_channel(selection)
+        image.undo_group_end()
+    image.set_selected_layers([layer])
+    Gimp.displays_flush()
+    return layer
+
+
+def page_layout(procedure, run_mode, image, drawables, config, data):
+    """Generate a selectable frame template matching the open project's script page."""
+    try:
+        if load_project is None or layouts_for_count is None or FRAME_STYLES is None:
+            raise ValueError("This plug-in install is missing project layout support")
+        root = _DOCK_CONTEXT.get("root")
+        if root is None:
+            raise ValueError("Open an Imanganation project first")
+        manifest = load_project(root)
+        page_id = _project_page_id_for_image(image, manifest)
+        if page_id is None:
+            raise ValueError("Open a page from the active Imanganation project first")
+        page = next(page for page in manifest["pages"] if page["id"] == page_id)
+        page_number, count = page_panel_count(manifest, page.get("label", ""))
+        if page_number is None:
+            raise ValueError(f"Page label {page.get('label')!r} has no page number; "
+                             "use a label such as 'Page 2'")
+        if not count:
+            raise ValueError(f"No non-orphaned script panels match Page {page_number}")
+        choices = layouts_for_count(count)
+        if not choices:
+            raise ValueError(f"No built-in layout supports the {count} panels on "
+                             f"Page {page_number}")
+        if any(layer.get_name().startswith("Template - Imanganation Layout -")
+               for layer in image.get_layers()):
+            raise ValueError("This page already has an Imanganation layout layer. "
+                             "Remove it before applying another layout.")
+        selection = _choose_page_layout(choices, FRAME_STYLES) \
+            if run_mode == Gimp.RunMode.INTERACTIVE else (choices[0], FRAME_STYLES[0])
+        if selection is None:
+            return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
+        layout, frame_style = selection
+        layer = _draw_page_layout(image, layout, frame_style)
+        Gimp.message(f"Added {layout['name']} with {frame_style['name']} frames to "
+                     f"{page.get('label', 'page')}. "
+                     "Select inside a frame with Fuzzy Select, then render into it.")
+        return _success(procedure, layer)
+    except Exception as exc:
+        return _error(procedure, str(exc))
+
+
 def _activate_project(root):
     root = Path(root).resolve()
     manifest = load_project(root)
@@ -1293,7 +1471,7 @@ def _engine_reference_rows(root, manifest, selected_id):
     panel = next((p for p in manifest["panels"] if p["id"] == selected_id), None)
     if panel is None or not panel.get("characters"):
         return []
-    query = urllib.parse.urlencode({"project_dir": str(root)})
+    query = urllib.parse.urlencode(_engine_project(root, manifest))
     try:
         engine_characters = _http("GET", f"{ENGINE_URL}/characters?{query}", timeout=3)
     except EngineError as exc:
@@ -1314,7 +1492,7 @@ def _engine_reference_rows(root, manifest, selected_id):
 
 
 def _engine_character_rows(root, character_name):
-    query = urllib.parse.urlencode({"project_dir": str(root)})
+    query = urllib.parse.urlencode(_engine_project(root))
     try:
         characters = _http("GET", f"{ENGINE_URL}/characters?{query}", timeout=3)
     except EngineError as exc:
@@ -1502,6 +1680,16 @@ def _refresh_project_docks(sync_canvas=False):
 
 
 def _notify_project_docks(root):
+    if not _DOCK_CONTEXT:
+        # A command's own process (Render, Refine, Inpaint, ... from the menu): the docks
+        # live in the workspace extension, so ask it to refresh through its dock action.
+        try:
+            procedure = Gimp.get_pdb().lookup_procedure(DOCK_ACTIONS[DOCK_CHARACTERS])
+            if procedure is not None:
+                procedure.run(procedure.create_config())
+        except Exception:
+            pass  # the workspace is optional; a stale dock refreshes on the next click
+        return
     active_root = _DOCK_CONTEXT.get("root")
     if active_root and Path(root).resolve() == Path(active_root).resolve():
         try:
@@ -2055,7 +2243,7 @@ class Imanganation(Gimp.PlugIn):
 
     def do_query_procedures(self):
         return [PROC_RENDER, PROC_NEXT, PROC_REGEN, PROC_INPAINT, PROC_REFINE, PROC_SETREF,
-                PROC_PLACE, PROC_STATUS, PROC_PROJECT_DOCKS, PROC_AUTOSTART,
+                PROC_PLACE, PROC_STATUS, PROC_PROJECT_DOCKS, PROC_PAGE_LAYOUT, PROC_AUTOSTART,
                 *DOCK_SHOW.values()]
 
     def do_create_procedure(self, name):
@@ -2104,7 +2292,8 @@ class Imanganation(Gimp.PlugIn):
         run = {PROC_RENDER: render_panel, PROC_NEXT: place_next_panel,
                PROC_REFINE: refine_panel, PROC_REGEN: regenerate_panel,
                PROC_SETREF: set_character_reference, PROC_INPAINT: inpaint_selection,
-               PROC_PLACE: place_panel, PROC_STATUS: engine_status}[name]
+               PROC_PLACE: place_panel, PROC_STATUS: engine_status,
+               PROC_PAGE_LAYOUT: page_layout}[name]
         proc = Gimp.ImageProcedure.new(self, name, Gimp.PDBProcType.PLUGIN, run, None)
         proc.set_image_types("*")
         proc.set_sensitivity_mask(
@@ -2129,6 +2318,19 @@ class Imanganation(Gimp.PlugIn):
             proc.add_string_return_value(
                 "report", "Report", "The status report text", "",
                 GObject.ParamFlags.READWRITE)
+            return proc
+
+        if name == PROC_PAGE_LAYOUT:
+            proc.add_layer_return_value(
+                "layer", "Template layer", "The generated page layout layer", False,
+                GObject.ParamFlags.READWRITE)
+            proc.set_menu_label("Generate Page _Panel Layout...")
+            proc.set_documentation(
+                "Generate selectable panel frames for the current project page",
+                "Choose a built-in layout with one frame per non-orphaned script panel "
+                "for the page number in the current project page label. Adds editable "
+                "frame borders to the page without replacing its existing content.",
+                name)
             return proc
 
         proc.add_layer_return_value(

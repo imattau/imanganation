@@ -6,21 +6,21 @@ interface.
 
 ## The workflow
 
-**The AI makes panels and the artist makes pages.** The engine renders one text-free
-panel at a time. Every page is built **by hand** in GIMP: the artist decides the layout,
-draws each frame, places each panel into it, then letters it. The plug-in never lays
-out, sizes, or arranges anything on a page. It only answers one question: "what's the
-next panel, and can you drop it into the frame I've selected?"
+**The AI makes panels and the artist directs the page.** The engine renders one
+text-free panel at a time. In GIMP, artists can choose a built-in panel layout whose
+frame count matches the script panels for that page, or use their own template. The
+plug-in creates selectable frame borders; the artist still chooses the composition,
+places panels and letters the page.
 
 ```
-artist's page template in GIMP (frame lines on a layer named "Template…")
+artist's own template or a generated layout (frame lines on a layer named "Template…")
    │
    ├─ click inside a frame (Fuzzy Select)
    ├─ Filters → imanganation → Render Panel into Frame
    │      plug-in ──POST /jobs {seq, frame w×h}──▶ engine ──▶ ComfyUI
    │      renders the next script panel at the frame's proportions (~15 s)
    │      ◀── panels/003.png ── placed, clipped to the frame, beneath the frame lines
-   └─ click the next frame … repeat; new page image whenever the artist decides
+   └─ click the next frame … repeat; the artist chooses when to create a new page
 ```
 
 ## Why GIMP fits this project
@@ -64,7 +64,7 @@ later launches. The **Open / Switch Project…** command remains available under
 *Windows → Imanganation*. Row callbacks carry stable IDs.
 For container projects, generated and imported images are
 copied into immutable `takes/` files and linked through take IDs; XCF parasites and
-page placement metadata are still being migrated. It adds nine commands under
+page placement metadata are still being migrated. It adds ten commands under
 *Filters → imanganation*:
 
 - **Open / Switch Project…**: choose a folder containing `project.json` to populate the
@@ -85,6 +85,11 @@ page placement metadata are still being migrated. It adds nine commands under
   to the frame. The frame is saved to a channel while rendering, so the artist can
   keep clicking. Seed, size and prompt are stored on the layer for a later
   regenerate.
+- **Generate Page Panel Layout…**: on an open project page, chooses among built-in
+  layouts with exactly the number of non-orphaned script panels matching the number in
+  the page label, then lets the artist choose Fine ink, Classic ink, Bold ink, Slanted
+  frames, or Double rule treatment. Adds transparent frame-line art as a selectable
+  `Template` layer and preserves the other page layers. It does not render or place panels.
 - **Regenerate Panel…**: select a placed panel (its layer or group). It is re-rendered
   from the **current** `panels.json`, so script edits apply, at its frame's size. The
   new take (`003_take02.png`…) goes into the same group, cover-fitted to the frame
@@ -224,7 +229,8 @@ GIMP (flatpak)                         host
 
 Each one is a PDB procedure, so you can also script it from Python-Fu or batch mode.
 
-None of these create or arrange pages.
+Only **Generate Page Panel Layout** creates frame borders; page creation and composition
+remain artist-directed.
 
 1. **Render Panel into Frame** ✅ (built).
 2. **Place Next Panel** ✅ (built).
@@ -260,8 +266,9 @@ None of these create or arrange pages.
   Fixed by switching to NoobAI's own IP-Adapter Mark 1 + ViT-bigG, with single-figure
   references. See `docs/quality/2026-10-04_live_quality_check.md`. Open: two-shot
   identity bleed.
-- **"No page compositing" holds for the whole system.** Pages are made by hand in
-  GIMP. Neither the engine nor the plug-in makes layout decisions.
+- **"No page compositing" holds for the whole system.** The engine never composites
+  panels into pages. GIMP can draw a selected built-in frame arrangement; artists
+  remain in control of layout choice and page composition.
 - **New requirement:** the engine runs as a background user service, managed outside
   GIMP.
 
