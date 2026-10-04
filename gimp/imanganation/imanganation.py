@@ -391,6 +391,18 @@ def _registered_take_id(root, manifest, source, panel_id):
     return None
 
 
+def _take_reference(root, seq, source):
+    manifest = _manifest_for(root)
+    if manifest is None:
+        return None
+    panel_id = manifest["panels"][seq - 1]["id"]
+    take_id = _registered_take_id(root, manifest, source, panel_id)
+    if take_id is None:
+        return None
+    return {"project": manifest["project"]["id"], "panel": panel_id,
+            "take": take_id}
+
+
 def _source_dimensions(source):
     opened = Gimp.file_load(Gimp.RunMode.NONINTERACTIVE,
                             Gio.File.new_for_path(str(source)))
@@ -520,7 +532,7 @@ def _frame_box(image, layer):
     return (x1, y1, x2 - x1, y2 - y1) if non_empty else own
 
 
-def _swap_in(image, old, path, stored, name, fit="frame"):
+def _swap_in(image, old, path, stored, name, fit="frame", take_ref=None):
     """Put a new take of ``old``'s panel beside it, in the same group with the same
     frame mask. The old take is kept, hidden; the artist's selection is untouched.
 
@@ -554,6 +566,10 @@ def _swap_in(image, old, path, stored, name, fit="frame"):
             new.add_mask(new.create_mask(Gimp.AddMaskType.SELECTION))
         new.attach_parasite(Gimp.Parasite.new(
             PARASITE, Gimp.PARASITE_PERSISTENT, list(json.dumps(stored).encode())))
+        if take_ref:
+            new.attach_parasite(Gimp.Parasite.new(
+                TAKE_PARASITE, Gimp.PARASITE_PERSISTENT,
+                list(json.dumps(take_ref, separators=(",", ":")).encode())))
         old.set_visible(False)
         image.select_item(Gimp.ChannelOps.REPLACE, saved)
     finally:
@@ -603,7 +619,8 @@ def refine_panel(procedure, run_mode, image, drawables, config, data):
                   refined={k: result.get(k) for k in ("source", "width", "height",
                                                       "upscaler", "denoise", "seed")})
     hires = _swap_in(image, layer, str(path), stored, f"{_base_name(layer)} hi-res",
-                     fit="layer")
+                     fit="layer", take_ref=_take_reference(
+                         source.parent.parent, seq, path))
     Gimp.message(f"Refined panel {seq:03d}: {result['width']}×{result['height']} "
                  f"(previous take kept, hidden).")
     return _success(procedure, hires)
@@ -674,7 +691,8 @@ def regenerate_panel(procedure, run_mode, image, drawables, config, data):
                                                      "path")})
     take = Path(result["path"]).stem.split("_", 1)[-1] if "_" in Path(result["path"]).stem \
         else "take01"
-    new = _swap_in(image, layer, str(path), stored, f"{_base_name(layer)} {take}")
+    new = _swap_in(image, layer, str(path), stored, f"{_base_name(layer)} {take}",
+                   take_ref=_take_reference(root, seq, path))
     Gimp.message(f"Regenerated panel {seq:03d} as {Path(result['path']).name} "
                  f"(seed {seed}; previous take kept, hidden).")
     return _success(procedure, new)
@@ -785,7 +803,7 @@ def inpaint_selection(procedure, run_mode, image, drawables, config, data):
                   inpainted={k: result.get(k) for k in ("prompt", "source", "mask", "denoise",
                                                         "grow_mask_by", "seed")})
     new = _swap_in(image, layer, str(path), stored, f"{_base_name(layer)} inpaint",
-                   fit="layer")
+                   fit="layer", take_ref=_take_reference(root, seq, path))
     Gimp.message(f"Inpainted panel {seq:03d} ({Path(result['path']).name}); outside the "
                  f"selection the take is unchanged. Previous take kept, hidden.")
     return _success(procedure, new)
