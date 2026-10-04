@@ -88,6 +88,7 @@ DOCK_ITEMS = {
 REF_MAX = 1024  # reference export cap; the CLIP encoder only sees 224-448 px anyway
 PARASITE = "imanganation-panelspec"
 PROJECT_PARASITE = "imanganation-project"
+PANEL_PARASITE = "imanganation-panel"
 TAKE_PARASITE = "imanganation-take"
 CURSOR_FILE = "gimp_cursor.json"  # per project: which panel comes next
 ENGINE_URL = "http://127.0.0.1:8790"
@@ -170,6 +171,15 @@ def _find_template(image):
     return walk(image.get_layers())
 
 
+def _tag_panel_group(group, take_ref):
+    if group is None or not take_ref:
+        return
+    panel_ref = {"project": take_ref["project"], "panel": take_ref["panel"]}
+    group.attach_parasite(Gimp.Parasite.new(
+        PANEL_PARASITE, Gimp.PARASITE_PERSISTENT,
+        list(json.dumps(panel_ref, separators=(",", ":")).encode())))
+
+
 def _place(image, panel_file, spec, seq=None, render=None, take_ref=None):
     """Load a panel as a layer in its own group, fitted to the selection if any."""
     label = f"Panel {spec.get('page', '?')}.{spec.get('panel', '?')}"
@@ -190,6 +200,7 @@ def _place(image, panel_file, spec, seq=None, render=None, take_ref=None):
                            image.get_item_position(template) + 1)
     else:
         image.insert_layer(group, None, 0)
+    _tag_panel_group(group, take_ref)
 
     layer = Gimp.file_load_layer(Gimp.RunMode.NONINTERACTIVE, image, panel_file)
     layer.set_name(f"{label} render")
@@ -592,6 +603,7 @@ def _swap_in(image, old, path, stored, name, fit="frame", take_ref=None):
             new.attach_parasite(Gimp.Parasite.new(
                 TAKE_PARASITE, Gimp.PARASITE_PERSISTENT,
                 list(json.dumps(take_ref, separators=(",", ":")).encode())))
+            _tag_panel_group(old.get_parent(), take_ref)
         old.set_visible(False)
         image.select_item(Gimp.ChannelOps.REPLACE, saved)
     finally:
@@ -1144,6 +1156,11 @@ def _canvas_take_rows(manifest):
             return []
         rows = []
         for layer in image.get_selected_layers():
+            panel_parasite = layer.get_parasite(PANEL_PARASITE)
+            if panel_parasite is not None:
+                panel_ref = json.loads(bytes(panel_parasite.get_data()))
+                if panel_ref.get("project") == manifest["project"]["id"]:
+                    rows.append(f"Panel group\t{panel_ref.get('panel')}")
             parasite = layer.get_parasite(TAKE_PARASITE)
             if parasite is None:
                 continue
@@ -1174,6 +1191,12 @@ def _selected_canvas_panel_id(manifest):
             return None
         panels = {panel["id"]: panel for panel in manifest["panels"]}
         for layer in image.get_selected_layers():
+            panel_parasite = layer.get_parasite(PANEL_PARASITE)
+            if panel_parasite is not None:
+                panel_ref = json.loads(bytes(panel_parasite.get_data()))
+                if (panel_ref.get("project") == manifest["project"]["id"]
+                        and panel_ref.get("panel") in panels):
+                    return panel_ref["panel"]
             parasite = layer.get_parasite(TAKE_PARASITE)
             if parasite is None:
                 continue
@@ -1390,6 +1413,23 @@ def _focus_panel_on_canvas(root, manifest, panel):
     expected = {"project": manifest["project"]["id"], "panel": panel["id"],
                 "take": panel.get("active_take")}
 
+    def find_panel_group(layers):
+        for layer in layers:
+            parasite = layer.get_parasite(PANEL_PARASITE)
+            if parasite is not None:
+                try:
+                    reference = json.loads(bytes(parasite.get_data()))
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    reference = {}
+                if (reference.get("project") == expected["project"]
+                        and reference.get("panel") == expected["panel"]):
+                    return layer
+            if layer.is_group():
+                match = find_panel_group(layer.get_children())
+                if match is not None:
+                    return match
+        return None
+
     def find_take(layers):
         for layer in layers:
             parasite = layer.get_parasite(TAKE_PARASITE)
@@ -1406,7 +1446,8 @@ def _focus_panel_on_canvas(root, manifest, panel):
                     return match
         return None
 
-    layer = find_take(image.get_layers())
+    layers = image.get_layers()
+    layer = find_panel_group(layers) or find_take(layers)
     if layer is not None:
         image.set_selected_layers([layer])
         Gimp.displays_flush()

@@ -148,7 +148,11 @@ Pages keep only **references** in parasites; the manifest holds the data, so not
 drifts between files:
 
 - Image parasite `imanganation-project`: `{"project": "prj_…", "page": "pg_…"}`
+- Panel-group parasite `imanganation-panel`: `{"project": "prj_…", "panel": "pnl_…"}`
 - Layer parasite `imanganation-take`: `{"project": "prj_…", "panel": "pnl_…", "take": "tk_…"}`
+
+The panel-group reference makes a panel's layer group a stable canvas object; individual
+render layers still identify their take. These parasites carry identity only.
 
 (Replaces today's `imanganation-panelspec` layer parasite, which embeds a full spec
 copy.) To find the manifest from an open XCF, walk up from the XCF's folder to the
@@ -204,7 +208,8 @@ page status cues in the page tree. **Add page** asks for dimensions (defaulting 
 first existing page), creates a white XCF, records it atomically, and opens it. Activating
 a page in Project or Page Filmstrip opens its XCF and raises the already-open page display
 when the plug-in created it earlier in the session. Activating a placed panel opens its
-page and selects the layer carrying that panel's active-take reference, when available.
+page and selects its stable panel group, falling back to the active-take layer for older
+XCFs without a panel-group reference.
 Inspector's Refresh action also syncs the dock selection from a selected take layer in the
 current canvas image back to that panel's stable project identity.
 For container projects it also copies newly rendered, refined, and inpainted images into
