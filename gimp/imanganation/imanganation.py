@@ -79,6 +79,7 @@ DOCK_ITEMS = {
 }
 REF_MAX = 1024  # reference export cap; the CLIP encoder only sees 224-448 px anyway
 PARASITE = "imanganation-panelspec"
+PROJECT_PARASITE = "imanganation-project"
 CURSOR_FILE = "gimp_cursor.json"  # per project: which panel comes next
 ENGINE_URL = "http://127.0.0.1:8790"
 RENDER_TIMEOUT = 600  # seconds
@@ -1174,6 +1175,10 @@ def _dock_action(procedure, config, data):
                 raise ValueError(f"Page document is missing: {relative or page_id}")
             image = Gimp.file_load(Gimp.RunMode.NONINTERACTIVE,
                                    Gio.File.new_for_path(str(page_path)))
+            project_ref = {"project": manifest["project"]["id"], "page": page_id}
+            image.attach_parasite(Gimp.Parasite.new(
+                PROJECT_PARASITE, Gimp.PARASITE_PERSISTENT,
+                list(json.dumps(project_ref, separators=(",", ":")).encode())))
             Gimp.Display.new(image)
         else:
             _refresh_project_docks()
