@@ -1,0 +1,357 @@
+{
+  "format": "imanganation.project",
+  "version": 1,
+  "project": {
+    "id": "prj_rooftop7k3q9",
+    "title": "Rooftop",
+    "chapter": "Chapter 1",
+    "reading_order": "rtl",
+    "default_color_mode": "color",
+    "created": "2026-10-04T09:00:00+11:00",
+    "modified": "2026-10-04T10:14:02+11:00"
+  },
+  "script": {
+    "file": "script/rooftop.md",
+    "sha256": "49bf849e08097730602052e0cc5dd75a5063f887f79d3a4b949642bb94aff31f",
+    "format": "canonical",
+    "parsed_at": "2026-10-04T09:01:30+11:00",
+    "parser": {
+      "kind": "canonical"
+    }
+  },
+  "panels": [
+    {
+      "id": "pnl_r8k2m1",
+      "label": {
+        "page": 1,
+        "panel": 1
+      },
+      "scene_heading": "School rooftop — late afternoon",
+      "location": "",
+      "characters": [
+        {
+          "name": "Akira",
+          "version": null
+        }
+      ],
+      "action": "Wide shot. Akira sits alone against the chain-link fence, lunchbox on his knees.",
+      "camera": "wide shot",
+      "expressions": {},
+      "dialogue": [
+        {
+          "speaker": "Akira",
+          "text": "Finally, some peace and quiet.",
+          "kind": "speech"
+        }
+      ],
+      "sfx": [],
+      "notes": "",
+      "flashback": false,
+      "aspect_ratio": "1:1",
+      "seed": null,
+      "status": "placed",
+      "placement": {
+        "page": "pg_a1b2c3",
+        "frame": [
+          606,
+          72,
+          522,
+          498
+        ]
+      },
+      "takes": [
+        "tk_000001",
+        "tk_000002",
+        "tk_000003"
+      ],
+      "active_take": "tk_000003"
+    },
+    {
+      "id": "pnl_q4n7x0",
+      "label": {
+        "page": 1,
+        "panel": 2
+      },
+      "scene_heading": "School rooftop — late afternoon",
+      "location": "",
+      "characters": [
+        {
+          "name": "Yuki",
+          "version": null
+        }
+      ],
+      "action": "Close-up. Akira's head snaps up, eyes wide.",
+      "camera": "close-up",
+      "expressions": {},
+      "dialogue": [
+        {
+          "speaker": "Yuki",
+          "text": "There you are!",
+          "kind": "speech"
+        }
+      ],
+      "sfx": [
+        "BANG"
+      ],
+      "notes": "",
+      "flashback": false,
+      "aspect_ratio": "1:1",
+      "seed": null,
+      "status": "placed",
+      "placement": {
+        "page": "pg_a1b2c3",
+        "frame": [
+          72,
+          72,
+          522,
+          636
+        ]
+      },
+      "takes": [
+        "tk_000004"
+      ],
+      "active_take": "tk_000004"
+    },
+    {
+      "id": "pnl_t1c9v5",
+      "label": {
+        "page": 2,
+        "panel": 1
+      },
+      "scene_heading": "School rooftop — cont.",
+      "location": "",
+      "characters": [
+        {
+          "name": "Yuki",
+          "version": null
+        },
+        {
+          "name": "Akira",
+          "version": null
+        }
+      ],
+      "action": "Two-shot. Yuki stands over him, hands on her hips, grinning.",
+      "camera": "two-shot",
+      "expressions": {},
+      "dialogue": [
+        {
+          "speaker": "Yuki",
+          "text": "You're impossible to find, you know that?",
+          "kind": "speech"
+        },
+        {
+          "speaker": "Akira",
+          "text": "Not again...",
+          "kind": "thought"
+        }
+      ],
+      "sfx": [],
+      "notes": "",
+      "flashback": false,
+      "aspect_ratio": "1:1",
+      "seed": null,
+      "status": "unplaced",
+      "placement": null,
+      "takes": [],
+      "active_take": null
+    },
+    {
+      "id": "pnl_h6w3d8",
+      "label": {
+        "page": 2,
+        "panel": 2
+      },
+      "scene_heading": "School rooftop — cont.",
+      "location": "",
+      "characters": [
+        {
+          "name": "Akira",
+          "version": null
+        }
+      ],
+      "action": "Reaction shot. Akira sighs, shoulders slumping.",
+      "camera": "reaction shot",
+      "expressions": {},
+      "dialogue": [
+        {
+          "speaker": "Akira",
+          "text": "What do you want, Yuki?",
+          "kind": "speech"
+        }
+      ],
+      "sfx": [],
+      "notes": "keep his uniform consistent with the character sheet",
+      "flashback": false,
+      "aspect_ratio": "1:1",
+      "seed": null,
+      "status": "unplaced",
+      "placement": null,
+      "takes": [],
+      "active_take": null
+    },
+    {
+      "id": "pnl_z0b5p2",
+      "label": {
+        "page": 2,
+        "panel": 1
+      },
+      "scene_heading": "School rooftop — cont.",
+      "location": "the stairwell",
+      "characters": [
+        {
+          "name": "Yuki",
+          "version": null
+        },
+        {
+          "name": "Akira",
+          "version": null
+        }
+      ],
+      "action": "Medium shot. Yuki drags Akira by the wrist down the stairs.",
+      "camera": "medium shot",
+      "expressions": {},
+      "dialogue": [
+        {
+          "speaker": "Yuki",
+          "text": "Come on, you're going to miss it!",
+          "kind": "speech"
+        }
+      ],
+      "sfx": [
+        "CLATTER"
+      ],
+      "notes": "",
+      "flashback": false,
+      "aspect_ratio": "1:1",
+      "seed": null,
+      "status": "unplaced",
+      "placement": null,
+      "takes": [],
+      "active_take": null
+    }
+  ],
+  "pages": [
+    {
+      "id": "pg_a1b2c3",
+      "label": "Page 1",
+      "file": "pages/page-001.xcf"
+    }
+  ],
+  "takes": {
+    "tk_000001": {
+      "panel": "pnl_r8k2m1",
+      "file": "takes/pnl_r8k2m1-tk_000001.png",
+      "width": 960,
+      "height": 1088,
+      "kind": "render",
+      "parent": null,
+      "origin": "tk_000001",
+      "created": "2026-10-04T10:05:12+11:00",
+      "engine": {
+        "seed": 2062860518,
+        "frame": [
+          522,
+          498
+        ],
+        "prompt": "manga panel, anime illustration, solo, 1boy, …",
+        "references": {
+          "Akira": "base"
+        }
+      }
+    },
+    "tk_000002": {
+      "panel": "pnl_r8k2m1",
+      "file": "takes/pnl_r8k2m1-tk_000002.png",
+      "width": 1920,
+      "height": 2176,
+      "kind": "refine",
+      "parent": "tk_000001",
+      "origin": "tk_000001",
+      "created": "2026-10-04T10:09:40+11:00",
+      "engine": {
+        "scale": 2.0,
+        "upscaler": "realesrgan",
+        "denoise": 0.25,
+        "seed": 0
+      }
+    },
+    "tk_000003": {
+      "panel": "pnl_r8k2m1",
+      "file": "takes/pnl_r8k2m1-tk_000003.png",
+      "width": 1920,
+      "height": 2176,
+      "kind": "inpaint",
+      "parent": "tk_000002",
+      "origin": "tk_000001",
+      "created": "2026-10-04T10:14:02+11:00",
+      "engine": {
+        "prompt": "lunchbox, chopsticks",
+        "positive": "manga panel, anime illustration, lunchbox, chopsticks",
+        "mask": "masks/tk_000003.png",
+        "crop": [
+          544,
+          1224,
+          1920,
+          2176
+        ],
+        "work_size": [
+          1024,
+          1024
+        ],
+        "denoise": 0.85,
+        "grow_mask_by": 8,
+        "seed": 1413339834
+      }
+    },
+    "tk_000004": {
+      "panel": "pnl_q4n7x0",
+      "file": "takes/pnl_q4n7x0-tk_000004.png",
+      "width": 960,
+      "height": 1152,
+      "kind": "render",
+      "parent": null,
+      "origin": "tk_000004",
+      "created": "2026-10-04T10:06:30+11:00",
+      "engine": {
+        "seed": 2426851986,
+        "frame": [
+          522,
+          636
+        ],
+        "prompt": "manga panel, anime illustration, solo, 1girl, …",
+        "references": {
+          "Yuki": "base"
+        }
+      }
+    }
+  },
+  "cast": [
+    {
+      "name": "Akira",
+      "aliases": [],
+      "notes": "Quiet; wants to be left alone at lunch."
+    },
+    {
+      "name": "Yuki",
+      "aliases": [],
+      "notes": "Energetic, always grinning."
+    }
+  ],
+  "locations": [
+    {
+      "name": "School rooftop",
+      "notes": "Chain-link fence, late afternoon light"
+    },
+    {
+      "name": "Stairwell"
+    }
+  ],
+  "props": [
+    {
+      "name": "Akira's lunchbox"
+    }
+  ],
+  "cursor": {
+    "next_panel": "pnl_t1c9v5"
+  }
+}

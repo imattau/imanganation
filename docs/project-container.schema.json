@@ -1,0 +1,182 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://imanganation.local/schema/project-container-v1.json",
+  "title": "imanganation project container (v1)",
+  "description": "GIMP-owned project manifest: script, panels, pages, takes and provenance. Character identity and style live in the engine, keyed by project.id. See docs/project-container.md.",
+  "type": "object",
+  "required": ["format", "version", "project", "panels", "pages", "takes", "cast", "cursor"],
+  "properties": {
+    "format": {"const": "imanganation.project"},
+    "version": {"const": 1},
+    "project": {
+      "type": "object",
+      "required": ["id", "title", "reading_order", "created", "modified"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^prj_[a-z0-9]{6,}$",
+               "description": "Engine key for this project's consistency memory; never changes"},
+        "title": {"type": "string"},
+        "chapter": {"type": "string"},
+        "reading_order": {"enum": ["rtl", "ltr"]},
+        "default_color_mode": {"enum": ["inherit", "color", "bw"],
+                               "description": "Recorded only; the engine renders colour"},
+        "created": {"type": "string", "format": "date-time"},
+        "modified": {"type": "string", "format": "date-time"}
+      }
+    },
+    "script": {
+      "type": "object",
+      "required": ["file", "format"],
+      "properties": {
+        "file": {"$ref": "#/$defs/relpath"},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "format": {"enum": ["canonical", "prose", "mangaplay"]},
+        "parsed_at": {"type": "string", "format": "date-time"},
+        "parser": {"type": "object"}
+      }
+    },
+    "panels": {
+      "type": "array",
+      "description": "Script / reading order",
+      "items": {"$ref": "#/$defs/panel"}
+    },
+    "pages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "label", "file"],
+        "properties": {
+          "id": {"$ref": "#/$defs/page_id"},
+          "label": {"type": "string"},
+          "file": {"$ref": "#/$defs/relpath"}
+        }
+      }
+    },
+    "takes": {
+      "type": "object",
+      "propertyNames": {"$ref": "#/$defs/take_id"},
+      "additionalProperties": {"$ref": "#/$defs/take"}
+    },
+    "cast": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1},
+          "aliases": {"type": "array", "items": {"type": "string"}},
+          "notes": {"type": "string"}
+        },
+        "not": {"anyOf": [{"required": ["appearance"]}, {"required": ["versions"]},
+                          {"required": ["reference"]}]},
+        "description": "Story-side only: traits, versions and reference images are engine state"
+      }
+    },
+    "locations": {"type": "array", "items": {"$ref": "#/$defs/named_note"}},
+    "props": {"type": "array", "items": {"$ref": "#/$defs/named_note"}},
+    "cursor": {
+      "type": "object",
+      "required": ["next_panel"],
+      "properties": {"next_panel": {"oneOf": [{"$ref": "#/$defs/panel_id"}, {"type": "null"}]}}
+    }
+  },
+  "$defs": {
+    "relpath": {"type": "string", "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$)).+$",
+                "description": "Relative to the project folder, '/' separators, no '..'"},
+    "panel_id": {"type": "string", "pattern": "^pnl_[a-z0-9]{6,}$"},
+    "page_id": {"type": "string", "pattern": "^pg_[a-z0-9]{6,}$"},
+    "take_id": {"type": "string", "pattern": "^tk_[a-z0-9]{6,}$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "named_note": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {"name": {"type": "string"}, "notes": {"type": "string"}}
+    },
+    "panel": {
+      "type": "object",
+      "required": ["id", "label", "characters", "action", "status", "takes", "active_take"],
+      "properties": {
+        "id": {"$ref": "#/$defs/panel_id"},
+        "label": {
+          "type": "object",
+          "required": ["page", "panel"],
+          "properties": {"page": {"type": "integer", "minimum": 1},
+                         "panel": {"type": "integer", "minimum": 1}},
+          "description": "Script numbering; display only, not unique"
+        },
+        "scene_heading": {"type": "string"},
+        "location": {"type": "string"},
+        "characters": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name"],
+            "properties": {
+              "name": {"type": "string", "minLength": 1},
+              "version": {"type": ["string", "null"],
+                          "description": "Engine reference version (e.g. an outfit); null = active"}
+            }
+          }
+        },
+        "action": {"type": "string"},
+        "camera": {"type": "string"},
+        "expressions": {"type": "object", "additionalProperties": {"type": "string"}},
+        "dialogue": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["speaker", "text"],
+            "properties": {
+              "speaker": {"type": "string"},
+              "text": {"type": "string"},
+              "kind": {"enum": ["speech", "thought", "narration", "shout", "whisper"]}
+            }
+          }
+        },
+        "sfx": {"type": "array", "items": {"type": "string"}},
+        "notes": {"type": "string"},
+        "flashback": {"type": "boolean"},
+        "aspect_ratio": {"type": "string", "pattern": "^[0-9]+:[0-9]+$"},
+        "seed": {"type": ["integer", "null"], "minimum": 0},
+        "status": {"enum": ["unplaced", "placed", "orphaned"]},
+        "placement": {
+          "oneOf": [
+            {"type": "null"},
+            {
+              "type": "object",
+              "required": ["page"],
+              "properties": {
+                "page": {"$ref": "#/$defs/page_id"},
+                "frame": {"type": "array", "items": {"type": "number"},
+                          "minItems": 4, "maxItems": 4, "description": "[x, y, w, h] page px"}
+              }
+            }
+          ]
+        },
+        "takes": {"type": "array", "items": {"$ref": "#/$defs/take_id"}},
+        "active_take": {"oneOf": [{"$ref": "#/$defs/take_id"}, {"type": "null"}]}
+      }
+    },
+    "take": {
+      "type": "object",
+      "required": ["panel", "file", "width", "height", "kind", "parent", "origin", "created"],
+      "properties": {
+        "panel": {"$ref": "#/$defs/panel_id"},
+        "file": {"$ref": "#/$defs/relpath"},
+        "width": {"type": "integer", "minimum": 1},
+        "height": {"type": "integer", "minimum": 1},
+        "kind": {"enum": ["render", "refine", "inpaint", "import"]},
+        "parent": {"oneOf": [{"$ref": "#/$defs/take_id"}, {"type": "null"}]},
+        "origin": {"$ref": "#/$defs/take_id",
+                   "description": "Root render/import take; refine scales against its size"},
+        "created": {"$ref": "#/$defs/timestamp"},
+        "engine": {"type": "object"}
+      },
+      "allOf": [
+        {"if": {"properties": {"kind": {"enum": ["render", "import"]}}},
+         "then": {"properties": {"parent": {"type": "null"}}}},
+        {"if": {"properties": {"kind": {"enum": ["refine", "inpaint"]}}},
+         "then": {"properties": {"parent": {"$ref": "#/$defs/take_id"}}}}
+      ]
+    }
+  }
+}

@@ -1,0 +1,179 @@
+# Project container (GIMP-owned) — schema draft
+
+Status: **draft v1**, 2026-10-04. Target for the imanganation-gimp fork's project work
+and the Python plug-in. Machine-readable: [`project-container.schema.json`](./project-container.schema.json)
+(JSON Schema 2020-12). Worked example: [`project-container.example.json`](./project-container.example.json).
+
+## The split this encodes
+
+**GIMP owns the story and the document; the engine owns identity and style.**
+
+| In the project container (GIMP) | In the engine (consistency memory) |
+|---|---|
+| Script source and the parsed panels | Character traits, reference versions, (later) LoRAs |
+| Reading order, pages, which panel sits on which page | Style (checkpoint, style prefix, IP-Adapter, weights) |
+| Every take of every panel, which one is active, and its history | Models, GPU queue, ComfyUI workflows |
+| Story continuity: *who* appears in a panel and *which version* (outfit) | Recurring locations/props, if added |
+| The place-next cursor | |
+
+The container **names** characters (and the version to use per panel). It never stores
+their traits or reference images: those live in the engine, keyed by `project.id`.
+Docks that show character details fetch them from the engine (`GET /characters`).
+
+## On disk
+
+```
+rooftop.imanga/            any folder name; the manifest marks it as a project
+  project.json             the manifest (this schema)
+  script/rooftop.md        the source script, as given
+  pages/page-001.xcf       the artist's pages (one image per page)
+  takes/                   every generated image; immutable, never overwritten
+  masks/                   inpaint masks, kept for provenance
+```
+
+- All paths in the manifest are **relative to the project folder**, using `/`.
+- **Take files are immutable.** A new image always gets a new file and a new take id.
+  Overwriting the file under a take silently changes what layers and derived takes
+  point at, and has already made a take history loop once.
+- **Writes are atomic:** write `project.json.tmp`, then rename over `project.json`.
+- **Unknown keys are preserved** on load/save, so newer writers don't lose data when an
+  older reader saves.
+
+## IDs, not labels
+
+Every panel, page and take has a **stable opaque id**: `pnl_…`, `pg_…`, `tk_…`, 6 or
+more `[a-z0-9]` characters after the prefix. These ids are what UIs pass around,
+including dock row activation. Script numbers (`page 2, panel 1`) are **labels only**.
+They are not unique: the rooftop script legitimately has two "page 2, panel 1" entries
+(after `CUT TO:`). The array order of `panels` is the script/reading order.
+
+> Fork note: the extension-panel API currently returns the activated row's *rendered
+> text*. Rows should carry a hidden id (e.g. `id<TAB>label`) that is returned on
+> activation instead, so a dock can name a panel unambiguously.
+
+## Manifest sections
+
+### `format`, `version`
+`"format": "imanganation.project"`, `"version": 1`. Readers refuse a higher major
+version, and preserve unknown keys within the same version.
+
+### `project`
+| Field | Notes |
+|---|---|
+| `id` | **The engine's key for this project's consistency memory.** Generated once (e.g. `prj_` + 12 chars), never changes, even if the folder is renamed. |
+| `title`, `chapter` | Display only. |
+| `reading_order` | `rtl` (manga) or `ltr`. |
+| `default_color_mode` | Recorded only; the engine renders colour (`docs/color-policy.md`). |
+| `created`, `modified` | ISO 8601 timestamps. |
+
+### `script`
+Where the panels came from: `file` (relative path), `sha256` of the source text (to
+detect edits since parsing), `format` (`canonical` / `prose` / `mangaplay`),
+`parsed_at`, and `parser` (e.g. `{"kind": "llm", "model": "qwen3.5:latest"}`).
+Re-parsing creates **new panels** and keeps old ones that have takes, marked
+`"status": "orphaned"`, so placed work is never silently dropped.
+
+### `panels` (ordered)
+The panel spec, the same fields the engine's `PanelSpec` uses, plus identity and
+production state.
+
+| Field | Notes |
+|---|---|
+| `id` | `pnl_…` |
+| `label` | `{"page": 2, "panel": 1}` from the script; display only |
+| `scene_heading`, `location`, `action`, `camera`, `notes`, `flashback` | as in `PanelSpec` |
+| `characters` | `[{"name": "Yuki", "version": "summer"}]`. `version` is optional (the engine's active reference otherwise). This is how story continuity reaches the engine. |
+| `expressions` | `{"Akira": "sighing"}` |
+| `dialogue`, `sfx` | Never rendered. Lettering reference only. |
+| `aspect_ratio` | A hint for panels rendered before a frame exists. A frame's real size wins. |
+| `seed` | Optional pinned seed. |
+| `status` | `unplaced`, `placed` or `orphaned` |
+| `placement` | `{"page": "pg_…", "frame": [x, y, w, h]}` once placed. The page id is the source of truth for "which page is this panel on". |
+| `takes` | Take ids for this panel, oldest first |
+| `active_take` | The take the page shows, or null |
+
+### `pages` (ordered)
+`id`, `label` (e.g. `"Page 1"`), `file` (relative `.xcf`). No panel list: that's
+derived from `panels[].placement.page`, so it can't drift.
+
+### `takes` (map: take id → take)
+Replaces today's per-image sidecar files. Provenance lives here, by id.
+
+| Field | Notes |
+|---|---|
+| `panel` | Owning panel id |
+| `file`, `width`, `height` | The immutable image, relative path |
+| `kind` | `render` (first or regenerated), `refine`, `inpaint`, `import` (an outside image) |
+| `parent` | The take it was made from (refine/inpaint), else null |
+| `origin` | The root `render`/`import` take of the chain. **Refine scales against the origin's size, never the parent's**, so scales never compound. |
+| `created` | ISO 8601 |
+| `engine` | What the engine did. `render`: `seed`, `prompt`, `frame` (requested w×h), `references` (character → version used). `refine`: `scale`, `upscaler`, `denoise`, `seed`. `inpaint`: `prompt`, `positive`, `mask` (relative path), `crop`, `work_size`, `denoise`, `grow_mask_by`, `seed`. |
+
+Integrity rules: `origin` is reachable by following `parent`; `parent` chains never
+loop; `origin` is a `render` or `import` take; a take derives only from takes of its
+own panel.
+
+## Validation
+
+- **Shape:** `project-container.schema.json` (JSON Schema 2020-12). It also rejects
+  identity fields in `cast`, refine/inpaint takes without a parent, renders with one,
+  absolute or `..` paths, and labels used as ids.
+- **Cross-references** (what JSON Schema can't express):
+  `manganation.project_container.integrity_errors(doc, root=None)`. It checks unique
+  ids, panel ↔ take ownership, `active_take`, placement pages, the cursor, parent
+  chains (no loops, end at the declared origin) and, given the project folder, that
+  every referenced file exists. Pure Python, so the fork (via the Python plug-in), the
+  engine and an importer can share it. Tested against the example in
+  `tests/test_project_container.py`.
+
+### `cast`, `locations`, `props`
+Story-side lists. `cast` entries: `name`, `aliases`, `notes` (story notes, e.g. "Yuki
+is energetic, always grinning"). **No traits or images**, which are engine state.
+`locations` and `props` hold `name` and `notes` now, with room for engine refs later
+(recurring-location consistency).
+
+### `cursor`
+`{"next_panel": "pnl_…"}`. The place-next/render-next pointer (today's
+`gimp_cursor.json`).
+
+## XCF linkage
+
+Pages keep only **references** in parasites; the manifest holds the data, so nothing
+drifts between files:
+
+- Image parasite `imanganation-project`: `{"project": "prj_…", "page": "pg_…"}`
+- Layer parasite `imanganation-take`: `{"project": "prj_…", "panel": "pnl_…", "take": "tk_…"}`
+
+(Replaces today's `imanganation-panelspec` layer parasite, which embeds a full spec
+copy.) To find the manifest from an open XCF, walk up from the XCF's folder to the
+first `project.json` whose `project.id` matches.
+
+## Engine contract changes (follow-on)
+
+The container makes engine requests **self-contained**:
+
+- `POST /jobs` (render): send the panel spec inline plus `project` (the id),
+  `characters[].version`, `frame` and `seed`. The engine no longer reads `panels.json`.
+- `POST /refine`: send the source image plus the **origin's size**, which replaces the
+  engine's sidecar walk.
+- `POST /inpaint`: as now (source + mask).
+- Results: the engine returns the image (bytes, or a path in its own output cache).
+  The plug-in copies it into `takes/` and records the take. The engine never writes
+  into the project folder.
+- Character endpoints take `project` (the id) to scope identity.
+
+The current `seq` / `project_dir` forms keep working during migration.
+
+## Migration from today's layout
+
+`projects/<name>/` maps one-to-one:
+
+| Today | Container |
+|---|---|
+| `panels.json` | `script` + `panels` (ids generated; script `page/panel` → `label`) |
+| `panels/NNN*.png` + sidecar `.json` | `takes/` + `takes{}` (`seq` → panel id; sidecar `source` → `parent`; refine `origin` → `origin`; inpaint `mask` → `engine.mask`) |
+| `gimp_cursor.json` | `cursor` |
+| `characters.json`, `characters/` | **stays engine-side**; `cast` keeps names/aliases only |
+| layer parasite with full spec | `imanganation-take` reference |
+
+A one-shot importer can do this. The rooftop example file was hand-converted this way.
