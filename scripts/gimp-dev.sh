@@ -3,6 +3,8 @@
 #   scripts/gimp-dev.sh [gimp args...]
 # Environment overrides: GIMP_BUILD (default /tmp/imanganation-gimp-build),
 # GIMP_DEPS (default ~/.local/gimp-deps), GIMP3_DIRECTORY (default ~/.config/GIMP/3.3).
+# The imanganation workspace starts the engine and ComfyUI with GIMP and stops them when
+# it quits (IMANGANATION_AUTOSTART=0 to skip).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

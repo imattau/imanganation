@@ -47,3 +47,6 @@ projects/*.imanga/masks/
 
 # Engine render cache for inline (project-container) renders; the plug-in copies takes out
 outputs/
+
+# Engine log when GIMP starts it (the workspace extension)
+engine.log

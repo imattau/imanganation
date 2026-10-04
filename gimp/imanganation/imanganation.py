@@ -114,6 +114,11 @@ TAKE_PARASITE = "imanganation-take"
 CURSOR_FILE = "gimp_cursor.json"  # per project: which panel comes next
 ENGINE_URL = "http://127.0.0.1:8790"
 RENDER_TIMEOUT = 600  # seconds
+# The checkout the plug-in files are symlinked from: the workspace starts the engine and
+# ComfyUI from it. IMANGANATION_HOME overrides; IMANGANATION_AUTOSTART=0 turns it off.
+ENGINE_HOME = Path(os.environ.get("IMANGANATION_HOME")
+                   or Path(__file__).resolve().parents[2])
+COMFY_URL = f"http://127.0.0.1:{os.environ.get('COMFY_PORT', '8188')}"
 
 _DOCK_PLUGIN = None
 _DOCK_CONTEXT = {}
@@ -1459,10 +1464,95 @@ def _activate_project(root):
     _register_project_docks(_DOCK_PLUGIN)
 
 
+_SERVICES = {}  # name -> Popen, for services the workspace started itself
+
+
+def _url_up(url):
+    try:
+        urllib.request.urlopen(url, timeout=2).close()
+    except urllib.error.HTTPError:
+        pass  # something answers on the port
+    except (urllib.error.URLError, OSError):
+        return False
+    return True
+
+
+def _die_with_parent():
+    """Child pre-exec: SIGTERM when the workspace extension (and so GIMP) exits."""
+    try:
+        import ctypes
+        import signal
+        ctypes.CDLL(None, use_errno=True).prctl(1, signal.SIGTERM)  # PR_SET_PDEATHSIG
+    except Exception:
+        pass
+
+
+def _start_service(name, command, cwd, log):
+    import subprocess
+
+    try:
+        with open(log, "wb") as out:
+            _SERVICES[name] = subprocess.Popen(
+                command, cwd=cwd, stdin=subprocess.DEVNULL, stdout=out,
+                stderr=subprocess.STDOUT, preexec_fn=_die_with_parent)
+    except OSError as exc:
+        Gimp.message(f"Could not start {name}: {exc} (see {log})")
+
+
+def _start_engine_services():
+    """Start ComfyUI and the engine with GIMP, unless they are already running. They
+    stop when GIMP quits; anything that was already running is left alone."""
+    import shutil
+
+    home = ENGINE_HOME
+    if os.environ.get("IMANGANATION_AUTOSTART", "1") == "0" or not (
+            home / "pyproject.toml").is_file():
+        return
+    comfy_python = home / "vendor/ComfyUI/.venv/bin/python"
+    if comfy_python.is_file() and not _url_up(COMFY_URL + "/system_stats"):
+        _start_service("ComfyUI", [
+            str(comfy_python), "main.py", "--extra-model-paths-config",
+            str(home / "config/comfyui_extra_model_paths.yaml"),
+            "--listen", "127.0.0.1", "--port", COMFY_URL.rsplit(":", 1)[1]],
+            home / "vendor/ComfyUI", home / "comfyui.log")
+        if "ComfyUI" in _SERVICES:  # so scripts/comfy.sh status/stop see it
+            (home / ".comfyui.pid").write_text(f"{_SERVICES['ComfyUI'].pid}\n")
+    if not _url_up(ENGINE_URL + "/health"):
+        engine = home / ".venv/bin/manganation"
+        uv = shutil.which("uv") or str(Path.home() / ".local/bin/uv")
+        command = ([str(engine), "serve"] if engine.is_file()
+                   else [uv, "run", "manganation", "serve"])
+        _start_service("engine", command, home, home / "engine.log")
+    if "engine" in _SERVICES:
+        _refresh_when_engine_up(time.monotonic() + 180)
+
+
+def _refresh_when_engine_up(deadline):
+    """Redraw the docks once the engine answers, so their status rows catch up."""
+    def poll():
+        process = _SERVICES.get("engine")
+        if _url_up(ENGINE_URL + "/health"):
+            try:
+                _refresh_project_docks()
+            except Exception:
+                pass
+            return GLib.SOURCE_REMOVE
+        if process is not None and process.poll() is not None:
+            Gimp.message(f"The imanganation engine exited (code {process.returncode}); "
+                         f"see {ENGINE_HOME / 'engine.log'}")
+            return GLib.SOURCE_REMOVE
+        return GLib.SOURCE_CONTINUE if time.monotonic() < deadline else GLib.SOURCE_REMOVE
+
+    GLib.timeout_add_seconds(2, poll)
+
+
 def _engine_status(exc):
     """Short engine error for a dock row (the full message suits dialogs)."""
     if isinstance(exc.__cause__, (urllib.error.URLError, OSError)) and not isinstance(
             exc.__cause__, urllib.error.HTTPError):
+        process = _SERVICES.get("engine")
+        if process is not None and process.poll() is None:
+            return "Engine starting…"
         return "Engine not running · start it with: uv run manganation serve"
     return f"Unavailable ({exc})"
 
@@ -2268,6 +2358,7 @@ def _autostart_run(procedure, config, data):
             _DOCK_CONTEXT.update(root=None, selected_id=None,
                                  orphan_id=None, candidate_id=None)
         _add_dock_callbacks(_DOCK_PLUGIN)
+        _start_engine_services()
         _register_project_docks(_DOCK_PLUGIN)
     except Exception as exc:
         Gimp.message(f"Could not start Imanganation workspace: {exc}")

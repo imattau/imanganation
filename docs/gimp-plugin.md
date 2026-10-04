@@ -208,9 +208,14 @@ GIMP (flatpak)                         host
   `projects/<name>/tmp/`. Both sides can see the host filesystem.
 - **Jobs are async.** Use `POST /jobs` → `GET /jobs/{id}` polling. Renders take 11–16 s,
   so the plug-in polls with `Gimp.progress_update` and doesn't block on one long request.
-- **The engine runs as a user service** (e.g. a systemd `--user` unit that also brings
-  up ComfyUI). The plug-in can't start it, so it has to show a clear "engine not
-  running" message.
+- **The engine starts with GIMP.** In the fork build (not sandboxed), the workspace
+  extension starts ComfyUI (`vendor/ComfyUI`, log `comfyui.log`) and the engine
+  (`.venv/bin/manganation serve`, or `uv run`; log `engine.log`) if they aren't already
+  answering. It stops them again when GIMP quits; services that were already running are
+  left alone. The docks show "Engine starting…" until it answers.
+  `IMANGANATION_AUTOSTART=0` turns this off, and `IMANGANATION_HOME` points at another
+  checkout (the default is the one the plug-in files are symlinked from). Under the
+  flatpak the plug-in still can't start anything, so it shows "engine not running".
 - The CLI and the GIMP plug-in talk to the **same engine code**, so the engine stays
   testable without GIMP.
 
