@@ -13,6 +13,7 @@ from gimp.imanganation.project_store import (
     ProjectFileError,
     load_project,
     new_id,
+    record_take,
     save_project,
 )
 from manganation.project_container import integrity_errors
@@ -58,3 +59,50 @@ def test_load_rejects_unknown_versions(tmp_path):
     (tmp_path / "project.json").write_text(json.dumps(document))
     with pytest.raises(ProjectFileError, match="unsupported project version"):
         load_project(tmp_path)
+
+
+def test_record_take_copies_to_a_new_immutable_file_and_preserves_graph(tmp_path):
+    document = copy.deepcopy(EXAMPLE)
+    document["future_extension"] = {"untouched": True}
+    panel_id = document["panels"][2]["id"]  # no existing takes
+    source = tmp_path / "engine-render.png"
+    source.write_bytes(b"image bytes")
+
+    take, path = record_take(
+        tmp_path, document, panel_id, source, kind="import", width=16, height=8,
+        engine={"source": "legacy panels/003.png"})
+
+    assert path.read_bytes() == b"image bytes"
+    assert take["file"] == path.relative_to(tmp_path).as_posix()
+    take_id = document["panels"][2]["takes"][-1]
+    assert take["origin"] == take_id
+    stored = document["takes"][take_id]
+    assert stored["file"] == take["file"]
+    assert document["future_extension"] == {"untouched": True}
+    jsonschema.validate(document, SCHEMA)
+    assert integrity_errors(document) == []
+    assert load_project(tmp_path)["panels"][2]["active_take"] == take_id
+
+
+def test_derived_take_has_new_file_and_links_to_parent(tmp_path):
+    document = copy.deepcopy(EXAMPLE)
+    panel = document["panels"][2]
+    source = tmp_path / "base.png"
+    source.write_bytes(b"base image")
+    _base, original_path = record_take(
+        tmp_path, document, panel["id"], source, kind="import", width=10, height=12)
+    original_id = document["panels"][2]["takes"][-1]
+    refined_source = tmp_path / "refined.png"
+    refined_source.write_bytes(b"refined image")
+
+    refined, refined_path = record_take(
+        tmp_path, document, panel["id"], refined_source, kind="refine", width=20, height=24,
+        parent=original_id, engine={"upscaler": "example"})
+
+    assert original_path.read_bytes() == b"base image"
+    assert refined_path.read_bytes() == b"refined image"
+    assert refined["parent"] == original_id
+    assert refined["origin"] == original_id
+    assert refined_path != original_path
+    assert integrity_errors(document) == []
+    jsonschema.validate(document, SCHEMA)

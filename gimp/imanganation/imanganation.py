@@ -26,6 +26,7 @@ render.
 import json
 import random
 import re
+import secrets
 import sys
 import time
 from datetime import datetime
@@ -40,10 +41,10 @@ from gi.repository import Gimp  # noqa: E402
 from gi.repository import Gio, GLib, GObject  # noqa: E402
 
 try:
-    from project_store import ProjectFileError, load_project, save_project
+    from project_store import ProjectFileError, load_project, record_take, save_project
 except ImportError:  # Keep older single-file plug-in installs usable for legacy projects.
     ProjectFileError = ValueError
-    load_project = save_project = None
+    load_project = record_take = save_project = None
 
 PROC_RENDER = "plug-in-imanganation-render-panel"
 PROC_NEXT = "plug-in-imanganation-place-next-panel"
@@ -305,12 +306,82 @@ def _run_job(engine, path, body, label):
     return job["result"]
 
 
-def _newest_take(root, seq):
+def _newest_take(root, seq, manifest=None):
     """Newest file for a panel: a fresh retake beats an older hi-res, and a hi-res
     made from the current take beats that take. (Name order can't express this:
-    ``003_hires`` sorts before ``003_take02``.)"""
+    ``003_hires`` sorts before ``003_take02``.) A container's active take is the
+    source of truth when one is recorded."""
+    if manifest is not None and seq <= len(manifest["panels"]):
+        panel = manifest["panels"][seq - 1]
+        take = manifest["takes"].get(panel.get("active_take"))
+        if take:
+            path = root / take["file"]
+            return path if path.is_file() else None
     matches = list((root / "panels").glob(f"{seq:03d}*.png"))
     return max(matches, key=lambda p: p.stat().st_mtime) if matches else None
+
+
+def _record_take(root, manifest, seq, source, kind, width, height, engine=None,
+                 parent=None):
+    """Register a new container take and return its immutable project-local copy."""
+    if manifest is None:
+        return Path(source), None
+    try:
+        take, path = record_take(
+            root, manifest, manifest["panels"][seq - 1]["id"], source,
+            kind=kind, width=width, height=height, engine=engine, parent=parent)
+    except (ProjectFileError, OSError, IndexError) as exc:
+        raise ValueError(f"Could not record project take: {exc}") from exc
+    return path, take
+
+
+def _manifest_for(root):
+    if not (Path(root) / "project.json").exists():
+        return None
+    if load_project is None:
+        raise ValueError("This plug-in install is missing project_store.py")
+    try:
+        return load_project(root)
+    except ProjectFileError as exc:
+        raise ValueError(str(exc)) from exc
+
+
+def _registered_take_id(root, manifest, source, panel_id):
+    if manifest is None:
+        return None
+    source_path = Path(source).resolve()
+    for take_id, take in manifest["takes"].items():
+        if take.get("panel") == panel_id and (Path(root) / take["file"]).resolve() == source_path:
+            return take_id
+    return None
+
+
+def _source_dimensions(source):
+    opened = Gimp.file_load(Gimp.RunMode.NONINTERACTIVE,
+                            Gio.File.new_for_path(str(source)))
+    try:
+        return opened.get_width(), opened.get_height()
+    finally:
+        opened.delete()
+
+
+def _record_derived_take(root, seq, source, result, kind, engine):
+    """Register a refine/inpaint child, importing its source take if needed."""
+    manifest = _manifest_for(root)
+    if manifest is None:
+        return Path(result["path"]), None
+    panel_id = manifest["panels"][seq - 1]["id"]
+    parent_id = _registered_take_id(root, manifest, source, panel_id)
+    if parent_id is None:
+        width, height = _source_dimensions(source)
+        _record_take(
+            root, manifest, seq, source, "import", width, height,
+            engine={"imported_from_legacy_layout": True})
+        parent_id = manifest["panels"][seq - 1]["takes"][-1]
+    path, take = _record_take(
+        root, manifest, seq, result["path"], kind, result["width"], result["height"],
+        engine=engine, parent=parent_id)
+    return path, take
 
 
 def render_panel(procedure, run_mode, image, drawables, config, data):
@@ -340,11 +411,15 @@ def render_panel(procedure, run_mode, image, drawables, config, data):
         result = _run_job(engine, "/jobs", body,
                           f"Rendering panel {seq:03d} (script page {spec['page']}, "
                           f"panel {spec['panel']})…")
+        image_path, _take = _record_take(
+            root, manifest, seq, result["path"], "render", result["width"],
+            result["height"], engine={k: result.get(k) for k in
+                                      ("seed", "width", "height", "prompt")})
         image.select_item(Gimp.ChannelOps.REPLACE, frame)
-        layer = _place(image, Gio.File.new_for_path(result["path"]), spec, seq,
+        layer = _place(image, Gio.File.new_for_path(str(image_path)), spec, seq,
                        render={k: result.get(k) for k in ("seed", "width", "height",
                                                           "prompt", "path")})
-    except EngineError as exc:
+    except (EngineError, ValueError, KeyError) as exc:
         return _error(procedure, str(exc))
     finally:
         image.remove_channel(frame)
@@ -477,10 +552,16 @@ def refine_panel(procedure, run_mode, image, drawables, config, data):
     except EngineError as exc:
         return _error(procedure, str(exc))
 
-    stored = dict(meta, file=result["path"],
+    try:
+        path, _take = _record_derived_take(
+            source.parent.parent, seq, source, result, "refine",
+            {k: result.get(k) for k in ("width", "height", "upscaler", "denoise", "seed")})
+    except ValueError as exc:
+        return _error(procedure, str(exc))
+    stored = dict(meta, file=str(path),
                   refined={k: result.get(k) for k in ("source", "width", "height",
                                                       "upscaler", "denoise", "seed")})
-    hires = _swap_in(image, layer, result["path"], stored, f"{_base_name(layer)} hi-res",
+    hires = _swap_in(image, layer, str(path), stored, f"{_base_name(layer)} hi-res",
                      fit="layer")
     Gimp.message(f"Refined panel {seq:03d}: {result['width']}×{result['height']} "
                  f"(previous take kept, hidden).")
@@ -490,7 +571,7 @@ def refine_panel(procedure, run_mode, image, drawables, config, data):
 def _recorded_seed(meta, source):
     """The seed that *composed* ``source``. A hi-res take's own sidecar seed is the
     refine polish seed, so follow its ``source`` back to the original render."""
-    if "refined" not in meta and (meta.get("render") or {}).get("seed") is not None:
+    if (meta.get("render") or {}).get("seed") is not None:
         return meta["render"]["seed"]
     path = Path((meta.get("refined") or {}).get("source") or source)
     for _ in range(4):  # render <- hi-res (<- …), never loop forever
@@ -539,12 +620,20 @@ def regenerate_panel(procedure, run_mode, image, drawables, config, data):
     except EngineError as exc:
         return _error(procedure, str(exc))
 
-    stored = dict(spec, seq=seq, file=result["path"],
+    try:
+        manifest = _manifest_for(root)
+        path, _take = _record_take(
+            root, manifest, seq, result["path"], "render", result["width"],
+            result["height"], engine={k: result.get(k) for k in
+                                      ("seed", "width", "height", "prompt")})
+    except (ValueError, KeyError) as exc:
+        return _error(procedure, str(exc))
+    stored = dict(spec, seq=seq, file=str(path),
                   render={k: result.get(k) for k in ("seed", "width", "height", "prompt",
                                                      "path")})
     take = Path(result["path"]).stem.split("_", 1)[-1] if "_" in Path(result["path"]).stem \
         else "take01"
-    new = _swap_in(image, layer, result["path"], stored, f"{_base_name(layer)} {take}")
+    new = _swap_in(image, layer, str(path), stored, f"{_base_name(layer)} {take}")
     Gimp.message(f"Regenerated panel {seq:03d} as {Path(result['path']).name} "
                  f"(seed {seed}; previous take kept, hidden).")
     return _success(procedure, new)
@@ -629,7 +718,7 @@ def inpaint_selection(procedure, run_mode, image, drawables, config, data):
         return _error(procedure, "Describe what to paint in the selection.")
 
     root = source.parent.parent
-    mask = root / "tmp" / f"inpaint_{seq:03d}_{time.strftime('%Y%m%d-%H%M%S')}.png"
+    mask = root / "tmp" / f"inpaint_{seq:03d}_{time.strftime('%Y%m%d-%H%M%S')}_{secrets.token_hex(4)}.png"
     try:
         _export_inpaint_mask(image, layer, source, mask)
         body = {"project_dir": str(root), "seq": seq, "mask": str(mask), "prompt": prompt,
@@ -643,10 +732,18 @@ def inpaint_selection(procedure, run_mode, image, drawables, config, data):
     except EngineError as exc:
         return _error(procedure, str(exc))
 
-    stored = dict(meta, file=result["path"],
+    try:
+        mask_ref = mask.relative_to(root).as_posix()
+        path, _take = _record_derived_take(
+            root, seq, source, result, "inpaint",
+            {"mask": mask_ref, **{k: result.get(k) for k in
+                                  ("prompt", "denoise", "grow_mask_by", "seed")}})
+    except (ValueError, KeyError) as exc:
+        return _error(procedure, str(exc))
+    stored = dict(meta, file=str(path),
                   inpainted={k: result.get(k) for k in ("prompt", "source", "mask", "denoise",
                                                         "grow_mask_by", "seed")})
-    new = _swap_in(image, layer, result["path"], stored, f"{_base_name(layer)} inpaint",
+    new = _swap_in(image, layer, str(path), stored, f"{_base_name(layer)} inpaint",
                    fit="layer")
     Gimp.message(f"Inpainted panel {seq:03d} ({Path(result['path']).name}); outside the "
                  f"selection the take is unchanged. Previous take kept, hidden.")
@@ -837,11 +934,22 @@ def place_next_panel(procedure, run_mode, image, drawables, config, data):
         return _error(procedure, str(exc))
     spec = panels[seq - 1]
 
-    newest = _newest_take(root, seq)
+    newest = _newest_take(root, seq, manifest)
     if newest is None:
         return _error(procedure, f"Panel {seq:03d} (script page {spec['page']}, panel "
                                  f"{spec['panel']}) is not rendered yet: expected "
                                  f"panels/{seq:03d}*.png. Use Render Panel into Frame.")
+
+    if manifest is not None:
+        panel_id = manifest["panels"][seq - 1]["id"]
+        if _registered_take_id(root, manifest, newest, panel_id) is None:
+            try:
+                width, height = _source_dimensions(newest)
+                newest, _take = _record_take(
+                    root, manifest, seq, newest, "import", width, height,
+                    engine={"imported_from_legacy_layout": True})
+            except (OSError, ValueError) as exc:
+                return _error(procedure, str(exc))
 
     layer = _place(image, Gio.File.new_for_path(str(newest)), spec, seq)
     _advance(root, panels, seq, explicit, spec, manifest)

@@ -11,6 +11,9 @@ import json
 import os
 import re
 import secrets
+import shutil
+from copy import deepcopy
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -172,3 +175,91 @@ def save_project(root: str | os.PathLike[str], document: dict[str, Any]) -> Path
     except OSError as exc:
         raise ProjectFileError(f"cannot write {target}: {exc}") from exc
     return target
+
+
+def record_take(
+    root: str | os.PathLike[str],
+    document: dict[str, Any],
+    panel_id: str,
+    source: str | os.PathLike[str],
+    *,
+    kind: str,
+    width: int,
+    height: int,
+    engine: dict[str, Any] | None = None,
+    parent: str | None = None,
+) -> tuple[dict[str, Any], Path]:
+    """Copy an image to a new immutable take file and atomically record it.
+
+    On success ``document`` is updated in place and the new take becomes active.
+    If the manifest write fails, the just-created image is removed because nothing
+    references it yet. Existing take files are never opened for writing.
+    """
+    if kind not in {"render", "refine", "inpaint", "import"}:
+        raise ProjectFileError(f"unsupported take kind: {kind!r}")
+    if width < 1 or height < 1:
+        raise ProjectFileError("take dimensions must be positive")
+    if kind in {"refine", "inpaint"} and parent is None:
+        raise ProjectFileError(f"{kind} takes need a parent take")
+    if kind in {"render", "import"} and parent is not None:
+        raise ProjectFileError(f"{kind} takes cannot have a parent")
+
+    candidate = deepcopy(document)
+    panels = candidate.get("panels", [])
+    panel = next((item for item in panels if item.get("id") == panel_id), None)
+    if panel is None:
+        raise ProjectFileError(f"unknown panel id {panel_id!r}")
+    takes = candidate.get("takes", {})
+    if parent is not None and (parent not in takes or takes[parent].get("panel") != panel_id):
+        raise ProjectFileError(f"parent take {parent!r} does not belong to panel {panel_id}")
+
+    source_path = Path(source)
+    if not source_path.is_file():
+        raise ProjectFileError(f"take source is missing: {source_path}")
+
+    folder = Path(root)
+    takes_folder = folder / "takes"
+    takes_folder.mkdir(parents=True, exist_ok=True)
+    extension = source_path.suffix.lower() or ".png"
+    if extension not in {".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff"}:
+        extension = ".png"
+    take_id = new_id("tk_")
+    destination = takes_folder / f"{panel_id}-{take_id}{extension}"
+    relative_file = destination.relative_to(folder).as_posix()
+    origin = takes[parent]["origin"] if parent is not None else take_id
+    created = datetime.now().astimezone().isoformat(timespec="seconds")
+    take = {
+        "panel": panel_id,
+        "file": relative_file,
+        "width": width,
+        "height": height,
+        "kind": kind,
+        "parent": parent,
+        "origin": origin,
+        "created": created,
+        "engine": deepcopy(engine or {}),
+    }
+    takes[take_id] = take
+    panel.setdefault("takes", []).append(take_id)
+    panel["active_take"] = take_id
+    candidate["project"]["modified"] = created
+
+    try:
+        # Exclusive creation is the guard against accidentally reusing a filename.
+        with destination.open("xb") as output, source_path.open("rb") as input_stream:
+            shutil.copyfileobj(input_stream, output)
+            output.flush()
+            os.fsync(output.fileno())
+        save_project(folder, candidate)
+    except (OSError, ProjectFileError) as exc:
+        try:
+            destination.unlink(missing_ok=True)
+        except OSError:
+            pass
+        if isinstance(exc, ProjectFileError):
+            raise
+        raise ProjectFileError(f"cannot record take for {panel_id}: {exc}") from exc
+
+    document.clear()
+    document.update(candidate)
+    return take, destination

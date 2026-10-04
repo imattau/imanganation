@@ -184,6 +184,17 @@ The current `seq` / `project_dir` forms keep working during migration.
 
 A one-shot importer can do this. The rooftop example file was hand-converted this way.
 
+### Current plug-in transition
+
+The Python plug-in now reads the container cursor by panel id and writes it atomically.
+For container projects it also copies newly rendered, refined, and inpainted images into
+unique files under `takes/`, adds a new take id, and advances `active_take`; a legacy
+image used from `panels/` is first imported as an immutable take. The currently shipped
+engine still reads `panels.json` and writes its own compatibility files under `panels/`.
+The plug-in checks that both panel lists have matching counts and display labels before
+rendering. Manifest-only rendering, page placement references, and the XCF reference-only
+parasites are follow-on migration steps.
+
 ## Validation
 
 - **Shape:** `project-container.schema.json` (JSON Schema 2020-12). It also rejects
