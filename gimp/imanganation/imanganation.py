@@ -205,7 +205,7 @@ def _find_panel_group(image, reference, empty_only=False):
     return walk(image.get_layers())
 
 
-def _place(image, panel_file, spec, seq=None, render=None, take_ref=None):
+def _place(image, panel_file, spec, seq=None, render=None, take_ref=None, frame=None):
     """Load a panel as a layer in its own group, fitted to the selection if any."""
     label = f"Panel {spec.get('page', '?')}.{spec.get('panel', '?')}"
     if seq is not None:
@@ -233,9 +233,14 @@ def _place(image, panel_file, spec, seq=None, render=None, take_ref=None):
     layer.set_name(f"{label} render")
     image.insert_layer(layer, group, 0)
 
-    # Fit to the artist's selection (the panel frame), cover-style, then clip with
-    # a mask. No selection: drop it in at native size for the artist to position.
-    _, non_empty, x1, y1, x2, y2 = Gimp.Selection.bounds(image)
+    # Fit to the saved semantic frame when available, otherwise use the current
+    # selection. The panel group's mask clips the saved frame's actual shape.
+    _, selection_non_empty, x1, y1, x2, y2 = Gimp.Selection.bounds(image)
+    non_empty = selection_non_empty
+    if frame is not None:
+        x1, y1, fw, fh = frame
+        x2, y2 = x1 + fw, y1 + fh
+        non_empty = fw > 0 and fh > 0
     if non_empty:
         fw, fh = x2 - x1, y2 - y1
         lw, lh = layer.get_width(), layer.get_height()
@@ -243,7 +248,8 @@ def _place(image, panel_file, spec, seq=None, render=None, take_ref=None):
         nw, nh = round(lw * s), round(lh * s)
         layer.scale(nw, nh, False)
         layer.set_offsets(x1 + (fw - nw) // 2, y1 + (fh - nh) // 2)
-        layer.add_mask(layer.create_mask(Gimp.AddMaskType.SELECTION))
+        if frame is None and selection_non_empty:
+            layer.add_mask(layer.create_mask(Gimp.AddMaskType.SELECTION))
     else:
         _, x1, y1 = layer.get_offsets()
 
@@ -439,6 +445,28 @@ def _registered_take_id(root, manifest, source, panel_id):
     return None
 
 
+def _placed_frame_for_image(image, manifest, panel):
+    """Return this panel's saved frame when the active XCF is its placed page."""
+    placement = panel.get("placement") if panel else None
+    if not manifest or not placement:
+        return None
+    parasite = image.get_parasite(PROJECT_PARASITE)
+    if parasite is None:
+        return None
+    try:
+        page_ref = json.loads(bytes(parasite.get_data()))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    if (page_ref.get("project") != manifest["project"]["id"]
+            or page_ref.get("page") != placement.get("page")):
+        return None
+    frame = placement.get("frame")
+    if (not isinstance(frame, list) or len(frame) != 4
+            or frame[2] <= 0 or frame[3] <= 0):
+        return None
+    return tuple(frame)
+
+
 def _take_reference(root, seq, source):
     manifest = _manifest_for(root)
     if manifest is None:
@@ -489,10 +517,15 @@ def render_panel(procedure, run_mode, image, drawables, config, data):
         return _error(procedure, str(exc))
     spec = panels[seq - 1]
 
+    panel = manifest["panels"][seq - 1] if manifest else None
+    saved_frame = _placed_frame_for_image(image, manifest, panel)
     _, non_empty, x1, y1, x2, y2 = Gimp.Selection.bounds(image)
-    if not non_empty:
+    if saved_frame is None and not non_empty:
         return _error(procedure, "Select the target frame first (e.g. Fuzzy Select inside "
                                  "an empty panel of your template).")
+    if saved_frame is not None:
+        x1, y1, width, height = saved_frame
+        x2, y2 = x1 + width, y1 + height
 
     # Keep the frame safe while the engine works; the artist may keep clicking.
     frame = Gimp.Selection.save(image)
@@ -531,7 +564,8 @@ def render_panel(procedure, run_mode, image, drawables, config, data):
                                  "take": _registered_take_id(
                                      root, manifest, image_path,
                                      manifest["panels"][seq - 1]["id"])}
-                       if manifest is not None else None)
+                       if manifest is not None else None,
+                       frame=saved_frame)
     except (EngineError, ValueError, KeyError) as exc:
         return _error(procedure, str(exc))
     finally:
@@ -1080,11 +1114,13 @@ def place_next_panel(procedure, run_mode, image, drawables, config, data):
     take_id = (_registered_take_id(
         root, manifest, newest, manifest["panels"][seq - 1]["id"])
         if manifest is not None else None)
+    panel = manifest["panels"][seq - 1] if manifest else None
+    frame = _placed_frame_for_image(image, manifest, panel)
     layer = _place(
         image, Gio.File.new_for_path(str(newest)), spec, seq,
         take_ref={"project": manifest["project"]["id"],
                   "panel": manifest["panels"][seq - 1]["id"], "take": take_id}
-        if take_id else None)
+        if take_id else None, frame=frame)
     _advance(root, panels, seq, explicit, spec, manifest)
     return _success(procedure, layer)
 
