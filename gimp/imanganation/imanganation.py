@@ -1799,7 +1799,7 @@ def _register_project_docks(plugin):
     _refresh_project_docks()
 
 
-def _project_docks_run(procedure, run_mode, image, drawables, config, data):
+def _project_docks_run(procedure, config, data):
     folder = config.get_property("project-dir")
     if folder is None:
         return _error(procedure, "Choose a project folder containing project.json")
@@ -1838,13 +1838,12 @@ class Imanganation(Gimp.PlugIn):
         global _DOCK_PLUGIN
         _DOCK_PLUGIN = self
         if name == PROC_PROJECT_DOCKS:
-            proc = Gimp.ImageProcedure.new(
+            # Persistent procedures are generic GimpProcedure instances; GIMP
+            # rejects PERSISTENT in Gimp.ImageProcedure.new(). This command is
+            # project-scoped and gets its project folder from an argument rather
+            # than from an active image.
+            proc = Gimp.Procedure.new(
                 self, name, Gimp.PDBProcType.PERSISTENT, _project_docks_run, None)
-            proc.set_image_types("*")
-            proc.set_sensitivity_mask(
-                Gimp.ProcedureSensitivityMask.DRAWABLE
-                | Gimp.ProcedureSensitivityMask.DRAWABLES
-                | Gimp.ProcedureSensitivityMask.NO_DRAWABLES)
             proc.add_menu_path("<Image>/Filters/imanganation")
             proc.set_menu_label("Open Project _Docks...")
             proc.set_documentation(
