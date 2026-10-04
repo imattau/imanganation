@@ -80,6 +80,7 @@ DOCK_ITEMS = {
 REF_MAX = 1024  # reference export cap; the CLIP encoder only sees 224-448 px anyway
 PARASITE = "imanganation-panelspec"
 PROJECT_PARASITE = "imanganation-project"
+TAKE_PARASITE = "imanganation-take"
 CURSOR_FILE = "gimp_cursor.json"  # per project: which panel comes next
 ENGINE_URL = "http://127.0.0.1:8790"
 RENDER_TIMEOUT = 600  # seconds
@@ -159,7 +160,7 @@ def _find_template(image):
     return walk(image.get_layers())
 
 
-def _place(image, panel_file, spec, seq=None, render=None):
+def _place(image, panel_file, spec, seq=None, render=None, take_ref=None):
     """Load a panel as a layer in its own group, fitted to the selection if any."""
     label = f"Panel {spec.get('page', '?')}.{spec.get('panel', '?')}"
     if seq is not None:
@@ -207,6 +208,10 @@ def _place(image, panel_file, spec, seq=None, render=None):
         stored["render"] = render
     layer.attach_parasite(Gimp.Parasite.new(
         PARASITE, Gimp.PARASITE_PERSISTENT, list(json.dumps(stored).encode())))
+    if take_ref:
+        layer.attach_parasite(Gimp.Parasite.new(
+            TAKE_PARASITE, Gimp.PARASITE_PERSISTENT,
+            list(json.dumps(take_ref, separators=(",", ":")).encode())))
 
     # Dialogue/SFX as hidden text layers: reference for hand lettering only.
     lines = [f"{d.get('speaker', '')}: {d.get('text', '')}" for d in spec.get("dialogue", [])]
@@ -448,7 +453,13 @@ def render_panel(procedure, run_mode, image, drawables, config, data):
         image.select_item(Gimp.ChannelOps.REPLACE, frame)
         layer = _place(image, Gio.File.new_for_path(str(image_path)), spec, seq,
                        render={k: result.get(k) for k in ("seed", "width", "height",
-                                                          "prompt", "path")})
+                                                          "prompt", "path")},
+                       take_ref={"project": manifest["project"]["id"],
+                                 "panel": manifest["panels"][seq - 1]["id"],
+                                 "take": _registered_take_id(
+                                     root, manifest, image_path,
+                                     manifest["panels"][seq - 1]["id"])}
+                       if manifest is not None else None)
     except (EngineError, ValueError, KeyError) as exc:
         return _error(procedure, str(exc))
     finally:
@@ -981,7 +992,14 @@ def place_next_panel(procedure, run_mode, image, drawables, config, data):
             except (OSError, ValueError) as exc:
                 return _error(procedure, str(exc))
 
-    layer = _place(image, Gio.File.new_for_path(str(newest)), spec, seq)
+    take_id = (_registered_take_id(
+        root, manifest, newest, manifest["panels"][seq - 1]["id"])
+        if manifest is not None else None)
+    layer = _place(
+        image, Gio.File.new_for_path(str(newest)), spec, seq,
+        take_ref={"project": manifest["project"]["id"],
+                  "panel": manifest["panels"][seq - 1]["id"], "take": take_id}
+        if take_id else None)
     _advance(root, panels, seq, explicit, spec, manifest)
     return _success(procedure, layer)
 
