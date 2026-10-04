@@ -42,7 +42,9 @@ import gi
 
 gi.require_version("Gimp", "3.0")
 gi.require_version("Gtk", "3.0")
+gi.require_version("GdkPixbuf", "2.0")
 from gi.repository import (  # noqa: E402
+    GdkPixbuf,
     Gegl,
     Gimp,
     Gio,
@@ -52,25 +54,29 @@ from gi.repository import (  # noqa: E402
 )
 
 try:
-    from layouts import FRAME_STYLES, layouts_for_count, page_panel_count
+    from layouts import frame_rings, layout_preview_rgb, page_layout_availability
     from panel_ui import build_docks, build_welcome_docks, character_row_id, rgb_png
     from project_store import (
         ProjectFileError,
         apply_field_edit,
         load_project,
         new_id,
+        project_from_script,
         record_take,
         save_project,
     )
+    from script_canonical import looks_canonical as script_looks_canonical
+    from script_canonical import parse as parse_script_text
 except ImportError:  # Keep older single-file plug-in installs usable for legacy projects.
     ProjectFileError = ValueError
+    project_from_script = parse_script_text = script_looks_canonical = None
     load_project = record_take = save_project = apply_field_edit = None
     new_id = None
     build_docks = None
     character_row_id = None
     rgb_png = None
     build_welcome_docks = None
-    FRAME_STYLES = layouts_for_count = page_panel_count = None
+    frame_rings = layout_preview_rgb = page_layout_availability = None
 
 PROC_RENDER = "plug-in-imanganation-render-panel"
 PROC_NEXT = "plug-in-imanganation-place-next-panel"
@@ -83,6 +89,7 @@ PROC_STATUS = "plug-in-imanganation-engine-status"
 PROC_PROJECT_DOCKS = "plug-in-imanganation-project-docks"
 PROC_PAGE_LAYOUT = "plug-in-imanganation-page-layout"
 PROC_AUTOSTART = "extension-imanganation-ui"
+PROC_NEW_PROJECT = "plug-in-imanganation-new-project"
 DOCK_PROJECT = "project"
 DOCK_INSPECTOR = "inspector"
 DOCK_FILMSTRIP = "filmstrip"
@@ -101,6 +108,8 @@ DOCK_ACTIONS = {
 }
 DOCK_OPEN_PROJECT = "plug-in-imanganation-dock-open-project"
 DOCK_OPEN_PAGE = "plug-in-imanganation-dock-open-page"  # Context's "Open page" button
+DOCK_NEW_PROJECT = "plug-in-imanganation-dock-new-project"
+DOCK_DESIGN_CHARACTER = "plug-in-imanganation-dock-design-character"
 DOCK_GENERATE_LAYOUT = "plug-in-imanganation-dock-generate-page-layout"
 # Windows > Imanganation: reopen a closed dock (the host keeps closed docks closed).
 DOCK_SHOW = {dock: f"plug-in-imanganation-show-dock-{dock}" for dock in DOCK_IDS}
@@ -1330,40 +1339,103 @@ def _choose_page_size(width, height):
     return size
 
 
-def _choose_page_layout(layouts, frame_styles):
-    dialog = Gtk.Dialog(title="Choose panel layout", flags=Gtk.DialogFlags.MODAL)
+def _choose_page_layout(combinations, page_width, page_height, page_label):
+    dialog = Gtk.Dialog(title="Choose page layout", flags=Gtk.DialogFlags.MODAL)
     dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
                        "Apply", Gtk.ResponseType.OK)
-    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, margin=12)
-    box.pack_start(Gtk.Label(label="Built-in layouts matching this script page:"),
-                   False, False, 0)
-    chooser = Gtk.ComboBoxText()
-    for layout in layouts:
-        chooser.append_text(layout["name"])
-    chooser.set_active(0)
-    box.pack_start(chooser, False, False, 0)
-    box.pack_start(Gtk.Label(label="Frame style:"), False, False, 0)
-    style_chooser = Gtk.ComboBoxText()
-    for style in frame_styles:
-        style_chooser.append_text(style["name"])
-    style_chooser.set_active(0)
-    box.pack_start(style_chooser, False, False, 0)
-    dialog.get_content_area().add(box)
+    dialog.set_default_size(620, 520)
+    content = dialog.get_content_area()
+    content.set_spacing(8)
+    content.set_margin_top(12)
+    content.set_margin_bottom(12)
+    content.set_margin_start(12)
+    content.set_margin_end(12)
+    content.pack_start(Gtk.Label(
+        label=f"{page_label} · {len(combinations[0][0]['regions'])} panels · "
+              "choose a preview, then Apply"), False, False, 0)
+
+    flow = Gtk.FlowBox()
+    flow.set_selection_mode(Gtk.SelectionMode.SINGLE)
+    flow.set_min_children_per_line(2)
+    flow.set_max_children_per_line(3)
+    flow.set_row_spacing(8)
+    flow.set_column_spacing(8)
+    flow.set_homogeneous(True)
+    for layout, style in combinations:
+        ratio = page_width / page_height if page_height else 1.0
+        if ratio >= 1:
+            display_width = 120
+            display_height = max(1, round(display_width / ratio))
+        else:
+            display_height = 150
+            display_width = max(1, round(display_height * ratio))
+        # Draw at a larger logical size so fine, classic, and bold rules stay
+        # visibly distinct after GdkPixbuf scales the card to its display size.
+        preview_width = display_width * 2
+        preview_height = display_height * 2
+        pixels = layout_preview_rgb(layout, style, preview_width, preview_height)
+        png = rgb_png(preview_width, preview_height, pixels)
+        if png is None:
+            continue
+        loader = GdkPixbuf.PixbufLoader.new()
+        loader.write(png)
+        loader.close()
+        pixbuf = loader.get_pixbuf().scale_simple(
+            display_width, display_height, GdkPixbuf.InterpType.BILINEAR)
+        preview = Gtk.Image.new_from_pixbuf(pixbuf)
+        caption = Gtk.Label(label=f"{layout['name']}\n{style['name']}")
+        caption.set_justify(Gtk.Justification.CENTER)
+        caption.set_line_wrap(True)
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
+        card.set_border_width(8)
+        card.pack_start(preview, True, True, 0)
+        card.pack_start(caption, False, False, 0)
+        child = Gtk.FlowBoxChild()
+        child.set_can_focus(True)
+        child.set_tooltip_text(f"{layout['name']} — {style['name']}")
+        child.add(card)
+        flow.add(child)
+
+    scroll = Gtk.ScrolledWindow()
+    scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+    scroll.set_min_content_height(360)
+    scroll.set_min_content_width(460)
+    scroll.add(flow)
+    content.pack_start(scroll, True, True, 0)
     dialog.show_all()
-    selected = None
+    first = flow.get_child_at_index(0)
+    if first is not None:
+        flow.select_child(first)
+        flow.grab_focus()
+    selection = None
     if dialog.run() == Gtk.ResponseType.OK:
-        index = chooser.get_active()
-        style_index = style_chooser.get_active()
-        if 0 <= index < len(layouts) and 0 <= style_index < len(frame_styles):
-            selected = layouts[index], frame_styles[style_index]
+        selected = flow.get_selected_children()
+        if selected:
+            index = selected[0].get_index()
+            if 0 <= index < len(combinations):
+                selection = combinations[index]
     dialog.destroy()
-    return selected
+    return selection
 
 
-def _draw_page_layout(image, layout, frame_style):
-    """Add transparent frame-line art to the page, preserving its current selection."""
+def _generated_layout_layers(image):
+    """Find generated frame layers, including if the user grouped them."""
+    found = []
+
+    def walk(layers):
+        for item in layers:
+            if item.get_name().startswith("Template - Imanganation Layout -"):
+                found.append(item)
+            if item.is_group():
+                walk(item.get_children())
+
+    walk(image.get_layers())
+    return found
+
+
+def _draw_page_layout(image, layout, frame_style, replace_layers=()):
+    """Add or replace generated frame art in one undo step, preserving page content."""
     width, height = image.get_width(), image.get_height()
-    line = max(2, min(32, round(min(width, height) * frame_style["weight"])))
     selection = Gimp.Selection.save(image)
     layer = Gimp.Layer.new(
         image, f"Template - Imanganation Layout - {layout['name']} - {frame_style['name']}",
@@ -1375,36 +1447,18 @@ def _draw_page_layout(image, layout, frame_style):
         layer.fill(Gimp.FillType.TRANSPARENT)
         image.insert_layer(layer, None, 0)
         Gimp.context_set_foreground(Gegl.Color.new("black"))
-        for index, (nx, ny, nw, nh) in enumerate(layout["regions"]):
-            x = round(nx * width)
-            y = round(ny * height)
-            w = round(nw * width)
-            h = round(nh * height)
-            thickness = max(1, min(line, (w - 2) // 2, (h - 2) // 2))
-            slant = round(w * frame_style["slant"])
-            direction = 1 if index % 2 == 0 else -1
-
-            def polygon(px, py, pw, ph, tilt, lean):
-                tilt *= lean
-                return [px + tilt, py, px + pw, py,
-                        px + pw - tilt, py + ph, px, py + ph]
-
-            def ring(px, py, pw, ph, border, tilt, lean):
-                image.select_polygon(Gimp.ChannelOps.REPLACE,
-                                     polygon(px, py, pw, ph, tilt, lean))
+        for index, region in enumerate(layout["regions"]):
+            for outer, inner in frame_rings(region, width, height, frame_style, index):
+                image.select_polygon(
+                    Gimp.ChannelOps.REPLACE,
+                    [coordinate for point in outer for coordinate in point])
                 image.select_polygon(
                     Gimp.ChannelOps.SUBTRACT,
-                    polygon(px + border, py + border,
-                            pw - 2 * border, ph - 2 * border, tilt, lean))
+                    [coordinate for point in inner for coordinate in point])
                 layer.edit_fill(Gimp.FillType.FOREGROUND)
-
-            ring(x, y, w, h, thickness, slant, direction)
-            if frame_style["double"]:
-                inset = max(thickness * 2, round(min(w, h) * 0.018))
-                inner_weight = max(1, thickness // 2)
-                if w > inset * 2 + inner_weight * 2 and h > inset * 2 + inner_weight * 2:
-                    ring(x + inset, y + inset, w - 2 * inset, h - 2 * inset,
-                         inner_weight, slant, direction)
+        for old_layer in replace_layers:
+            if old_layer.get_image() is image:
+                image.remove_layer(old_layer)
     except Exception:
         if layer.get_image() is image:
             image.remove_layer(layer)
@@ -1422,7 +1476,7 @@ def _draw_page_layout(image, layout, frame_style):
 def page_layout(procedure, run_mode, image, drawables, config, data):
     """Generate a selectable frame template matching the open project's script page."""
     try:
-        if load_project is None or layouts_for_count is None or FRAME_STYLES is None:
+        if load_project is None or frame_rings is None or page_layout_availability is None:
             raise ValueError("This plug-in install is missing project layout support")
         root = _DOCK_CONTEXT.get("root")
         if root is None:
@@ -1432,26 +1486,19 @@ def page_layout(procedure, run_mode, image, drawables, config, data):
         if page_id is None:
             raise ValueError("Open a page from the active Imanganation project first")
         page = next(page for page in manifest["pages"] if page["id"] == page_id)
-        page_number, count = page_panel_count(manifest, page.get("label", ""))
-        if page_number is None:
-            raise ValueError(f"Page label {page.get('label')!r} has no page number; "
-                             "use a label such as 'Page 2'")
-        if not count:
-            raise ValueError(f"No non-orphaned script panels match Page {page_number}")
-        choices = layouts_for_count(count)
-        if not choices:
-            raise ValueError(f"No built-in layout supports the {count} panels on "
-                             f"Page {page_number}")
-        if any(layer.get_name().startswith("Template - Imanganation Layout -")
-               for layer in image.get_layers()):
-            raise ValueError("This page already has an Imanganation layout layer. "
-                             "Remove it before applying another layout.")
-        selection = _choose_page_layout(choices, FRAME_STYLES) \
-            if run_mode == Gimp.RunMode.INTERACTIVE else (choices[0], FRAME_STYLES[0])
+        availability = page_layout_availability(manifest, page_id)
+        if not availability["available"]:
+            raise ValueError(availability["reason"])
+        combinations = availability["combinations"]
+        existing_layers = _generated_layout_layers(image)
+        selection = _choose_page_layout(
+            combinations, image.get_width(), image.get_height(),
+            page.get("label", "Page")) if run_mode == Gimp.RunMode.INTERACTIVE \
+            else combinations[0]
         if selection is None:
             return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
         layout, frame_style = selection
-        layer = _draw_page_layout(image, layout, frame_style)
+        layer = _draw_page_layout(image, layout, frame_style, existing_layers)
         Gimp.message(f"Added {layout['name']} with {frame_style['name']} frames to "
                      f"{page.get('label', 'page')}. "
                      "Select inside a frame with Fuzzy Select, render into it, and "
@@ -1778,7 +1825,7 @@ def _refresh_project_docks(sync_canvas=False):
         selected_id = _selected_canvas_panel_id(manifest) or selected_id
     contents = build_docks(
         manifest, selected_id, root, _project_page_thumbnails(root, manifest),
-        DOCK_OPEN_PAGE, DOCK_GENERATE_LAYOUT)
+        DOCK_OPEN_PAGE, DOCK_GENERATE_LAYOUT, design_action=DOCK_DESIGN_CHARACTER)
     _DOCK_CONTEXT["selected_id"] = contents["selected_id"]
     canvas_rows = _canvas_take_rows(manifest)
     if canvas_rows:
@@ -1805,6 +1852,8 @@ def _refresh_project_docks(sync_canvas=False):
         character = next(c for c in manifest["cast"]
                          if character_row_id(c["name"]) == selected_id)
         engine_rows = "\n".join(_engine_character_rows(root, character["name"]))
+        if character["name"] in _DESIGN_JOBS.values():
+            engine_rows += "\nDesign\tIn progress…"
         contents["inspector"] += "\n" + engine_rows
         contents["characters"] += "\n" + engine_rows
 
@@ -2053,7 +2102,8 @@ def _default_page_size(root, manifest):
     return 1600, 2400
 
 
-def _create_project_page(root, manifest, width, height):
+def _create_project_page(root, manifest, width, height, number=None):
+    """A new page document; ``number`` (a script page) fixes its label and file name."""
     if width < 1 or height < 1:
         raise ValueError("Page width and height must be positive")
     if width > 20000 or height > 20000:
@@ -2064,7 +2114,8 @@ def _create_project_page(root, manifest, width, height):
         match = re.fullmatch(r"Page\s+(\d+)", page.get("label", ""), re.IGNORECASE)
         if match:
             used_numbers.append(int(match.group(1)))
-    number = max(used_numbers, default=0) + 1
+    if number is None:
+        number = max(used_numbers, default=0) + 1
     folder = Path(root) / "pages"
     folder.mkdir(parents=True, exist_ok=True)
     relative = f"pages/page-{number:03d}.xcf"
@@ -2212,11 +2263,210 @@ def _dock_action(procedure, config, data):
             _set_panel_frame_from_selection()
         elif data == "generate":
             _generate_selected_panel()
+        elif data == "new-project":
+            options = _choose_new_project()
+            if options is None:
+                return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
+            _create_project_from_script(**options)
+        elif data == "design-character":
+            _design_selected_character()
         else:
             _refresh_project_docks()
         return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
     except Exception as exc:
         return _error(procedure, str(exc))
+
+
+_DESIGN_JOBS = {}  # engine job id -> character name, while a design sheet renders
+
+
+def _choose_new_project():
+    """New Project from Script dialog -> keyword arguments for
+    _create_project_from_script, or None if cancelled."""
+    dialog = Gtk.Dialog(title="New Project from Script", flags=Gtk.DialogFlags.MODAL)
+    dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+                       "Create", Gtk.ResponseType.OK)
+    dialog.set_default_response(Gtk.ResponseType.OK)
+    grid = Gtk.Grid(column_spacing=12, row_spacing=8, margin=12)
+    script = Gtk.FileChooserButton(title="Choose a script", action=Gtk.FileChooserAction.OPEN)
+    text_filter = Gtk.FileFilter()
+    text_filter.set_name("Scripts (.md, .txt, .fountain)")
+    for pattern in ("*.md", "*.txt", "*.fountain", "*.markdown"):
+        text_filter.add_pattern(pattern)
+    script.add_filter(text_filter)
+    title = Gtk.Entry(activates_default=True, hexpand=True)
+    folder = Gtk.FileChooserButton(title="Save the project in",
+                                   action=Gtk.FileChooserAction.SELECT_FOLDER)
+    projects = ENGINE_HOME / "projects"
+    folder.set_current_folder(str(projects if projects.is_dir() else Path.home()))
+    width = Gtk.SpinButton.new_with_range(1, 20000, 100)
+    height = Gtk.SpinButton.new_with_range(1, 20000, 100)
+    width.set_value(1600)
+    height.set_value(2400)
+    size = Gtk.Box(spacing=6)
+    size.pack_start(width, False, False, 0)
+    size.pack_start(Gtk.Label(label="×"), False, False, 0)
+    size.pack_start(height, False, False, 0)
+    design = Gtk.CheckButton(label="Design the cast now (uses the engine)", active=True)
+    hint = Gtk.Label(label="The renders need the project inside the projects folder.",
+                     xalign=0.0)
+    hint.get_style_context().add_class("dim-label")
+
+    def script_chosen(button):
+        path = button.get_filename()
+        if path and not title.get_text().strip():
+            title.set_text(Path(path).stem.replace("_", " ").replace("-", " ").title())
+
+    script.connect("file-set", script_chosen)
+    for row, (label, widget) in enumerate((("Script", script), ("Title", title),
+                                           ("Save in", folder), ("Page size", size))):
+        grid.attach(Gtk.Label(label=label, xalign=0.0), 0, row, 1, 1)
+        grid.attach(widget, 1, row, 1, 1)
+    grid.attach(hint, 1, 4, 1, 1)
+    grid.attach(design, 1, 5, 1, 1)
+    dialog.get_content_area().add(grid)
+    dialog.show_all()
+    try:
+        while dialog.run() == Gtk.ResponseType.OK:
+            options = {"script_path": Path(script.get_filename() or ""),
+                       "title": title.get_text().strip(),
+                       "parent": Path(folder.get_filename() or Path.home()),
+                       "page_size": (width.get_value_as_int(), height.get_value_as_int()),
+                       "design": design.get_active()}
+            problem = (None if options["script_path"].is_file() else "Choose a script file.")
+            problem = problem or (None if options["title"] else "Give the project a title.")
+            target = options["parent"] / f"{_slug(options['title'])}.imanga"
+            problem = problem or (f"{target} already exists." if target.exists() else None)
+            if problem is None:
+                return options
+            Gimp.message(problem)
+        return None
+    finally:
+        dialog.destroy()
+
+
+def _slug(text):
+    return re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_") or "project"
+
+
+def _parse_script(text, title):
+    """-> (parsed dict, format). Page/panel scripts parse here, instantly and with the
+    engine off; prose needs the engine's LLM."""
+    if script_looks_canonical(text):
+        return parse_script_text(text), "canonical"
+    try:
+        result = _run_job(ENGINE_URL, "/scripts/parse", {"text": text, "title": title},
+                          "Reading the script (prose, via the engine)…")
+    except EngineError as exc:
+        raise EngineError("This script is prose, not PAGE / Panel format, so it needs the "
+                          f"engine to read it: {exc}") from exc
+    return {"cast": result["cast"], "panels": result["panels"]}, result["format"]
+
+
+def _create_project_from_script(script_path, title, parent, page_size, design):
+    """Build a project from a script: panels, cast (with the script's descriptions),
+    locations and one page document per script page; open it, then queue a design
+    sheet for each described character."""
+    text = Path(script_path).read_text(encoding="utf-8")
+    parsed, script_format = _parse_script(text, title)
+    root = Path(parent) / f"{_slug(title)}.imanga"
+    root.mkdir(parents=True)
+    try:
+        suffix = Path(script_path).suffix or ".md"
+        (root / "script").mkdir()
+        (root / "script" / f"script{suffix}").write_text(text, encoding="utf-8")
+        manifest = project_from_script(parsed, title=title,
+                                       script_file=f"script/script{suffix}",
+                                       script_text=text, script_format=script_format)
+        save_project(root, manifest)
+        for number in dict.fromkeys(p["label"]["page"] for p in manifest["panels"]):
+            _create_project_page(root, manifest, *page_size, number=number)
+    except Exception:
+        import shutil
+
+        shutil.rmtree(root, ignore_errors=True)  # never leave half a project behind
+        raise
+    _activate_project(root)
+    manifest = load_project(root)
+    if manifest["pages"]:
+        _show_project_page(root, manifest, manifest["pages"][0]["id"])
+    if not design:
+        return
+    described = [c for c in manifest["cast"] if c.get("notes")]
+    try:
+        for character in described:
+            _queue_character_design(root, manifest, character)
+    except EngineError as exc:
+        Gimp.message(f"Project created. The cast was not designed: {_engine_status(exc)}. "
+                     "Select a character and use Design character when the engine runs.")
+        return
+    undescribed = [c["name"] for c in manifest["cast"] if not c.get("notes")]
+    if undescribed:
+        Gimp.message("No description for " + ", ".join(undescribed) + ": write one in "
+                     "their Context notes, then use Design character.")
+
+
+def _queue_character_design(root, manifest, character, redesign=False):
+    """Ask the engine to design one character from its notes; the docks refresh when
+    the sheet is ready."""
+    body = {**_engine_project(root, manifest), "name": character["name"],
+            "description": character.get("notes", ""),
+            "aliases": character.get("aliases", []), "redesign": redesign}
+    job = _http("POST", f"{ENGINE_URL}/characters", body)
+    if not _DESIGN_JOBS:
+        GLib.timeout_add_seconds(3, _poll_design_jobs)
+    _DESIGN_JOBS[job["id"]] = character["name"]
+
+
+def _poll_design_jobs():
+    for job_id, name in list(_DESIGN_JOBS.items()):
+        try:
+            job = _http("GET", f"{ENGINE_URL}/jobs/{job_id}", timeout=3)
+        except EngineError:
+            continue  # engine restarting: try again next tick
+        if job["status"] in ("queued", "running"):
+            continue
+        del _DESIGN_JOBS[job_id]
+        if job["status"] == "error":
+            Gimp.message(f"Designing {name} failed: {job.get('error')}")
+        try:
+            _refresh_project_docks()
+        except Exception:
+            pass
+    return GLib.SOURCE_CONTINUE if _DESIGN_JOBS else GLib.SOURCE_REMOVE
+
+
+def _design_selected_character():
+    """Context's Design character: design (or redesign) the selected character from
+    its notes."""
+    root = _DOCK_CONTEXT["root"]
+    manifest = load_project(root)
+    character = next((c for c in manifest["cast"]
+                      if character_row_id(c["name"]) == _DOCK_CONTEXT.get("selected_id")),
+                     None)
+    if character is None:
+        raise ValueError("Select a character first")
+    if character["name"] in _DESIGN_JOBS.values():
+        raise ValueError(f"{character['name']} is already being designed")
+    query = urllib.parse.urlencode(_engine_project(root, manifest))
+    known = _http("GET", f"{ENGINE_URL}/characters?{query}", timeout=3)
+    record = next((c for c in known
+                   if c.get("name", "").casefold() == character["name"].casefold()), None)
+    if not character.get("notes") and (record is None or not record.get("default_version")):
+        raise ValueError(f"Describe {character['name']} in their notes first")
+    _queue_character_design(root, manifest, character,
+                            redesign=bool(record and record.get("default_version")))
+    _refresh_project_docks()
+
+
+def _new_project_run(procedure, config, data):
+    """Filters > imanganation > New Project from Script: the extension shows the dialog."""
+    try:
+        _dock_pdb_call(DOCK_NEW_PROJECT, {})
+    except Exception:
+        return _error(procedure, "The Imanganation workspace is not running; restart GIMP "
+                                 "to start it")
+    return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
 
 
 def _dock_field_edit(procedure, config, data):
@@ -2270,6 +2520,8 @@ def _add_dock_callbacks(plugin):
         (DOCK_ACTIONS[DOCK_INSPECTOR], _dock_action, "generate", False),
         (DOCK_ITEMS[DOCK_INSPECTOR], _dock_field_edit, "field", True),
         (DOCK_OPEN_PAGE, _dock_action, "open-page", False),
+        (DOCK_NEW_PROJECT, _dock_action, "new-project", False),
+        (DOCK_DESIGN_CHARACTER, _dock_action, "design-character", False),
         (DOCK_GENERATE_LAYOUT, _dock_action, "generate-layout", False),
         # Page strip: clicking a page opens it; the button adds one (as in Project)
         (DOCK_ACTIONS[DOCK_FILMSTRIP], _dock_action, "project-action", False),
@@ -2296,7 +2548,8 @@ def _add_dock_callbacks(plugin):
 def _register_project_docks(plugin):
     root = _DOCK_CONTEXT.get("root")
     if root is None:
-        contents = (build_welcome_docks() if build_welcome_docks is not None else {
+        contents = (build_welcome_docks(DOCK_NEW_PROJECT)
+                    if build_welcome_docks is not None else {
             "project": "# Imanganation\nChoose a project folder to open your workspace.",
             "inspector": "# Workspace\nOpen a project to get started.",
             "filmstrip": "# Pages\nOpen a project to see its pages.",
@@ -2323,7 +2576,7 @@ def _register_project_docks(plugin):
         contents = build_docks(
             manifest, _DOCK_CONTEXT.get("selected_id"), root,
             _project_page_thumbnails(root, manifest), DOCK_OPEN_PAGE,
-            DOCK_GENERATE_LAYOUT)
+            DOCK_GENERATE_LAYOUT, design_action=DOCK_DESIGN_CHARACTER)
         rows = [
             (DOCK_PROJECT, "Project", "tree", contents["project"],
              contents["project_selected"], "Add page", DOCK_ACTIONS[DOCK_PROJECT],
@@ -2426,7 +2679,7 @@ class Imanganation(Gimp.PlugIn):
     def do_query_procedures(self):
         return [PROC_RENDER, PROC_NEXT, PROC_REGEN, PROC_INPAINT, PROC_REFINE, PROC_SETREF,
                 PROC_PLACE, PROC_STATUS, PROC_PROJECT_DOCKS, PROC_PAGE_LAYOUT, PROC_AUTOSTART,
-                *DOCK_SHOW.values()]
+                PROC_NEW_PROJECT, *DOCK_SHOW.values()]
 
     def do_create_procedure(self, name):
         global _DOCK_PLUGIN
@@ -2451,6 +2704,20 @@ class Imanganation(Gimp.PlugIn):
             proc.set_documentation(
                 "Show an Imanganation dock",
                 "Reopen a closed Imanganation workspace dock, or bring it forward.", name)
+            proc.set_attribution("imanganation", "imanganation", "2026")
+            return proc
+        if name == PROC_NEW_PROJECT:
+            proc = Gimp.Procedure.new(
+                self, name, Gimp.PDBProcType.PLUGIN, _new_project_run, None)
+            proc.set_menu_label("_New Project from Script...")
+            proc.add_enum_argument("run-mode", "Run mode", "How to run the procedure",
+                                   Gimp.RunMode, Gimp.RunMode.INTERACTIVE,
+                                   GObject.ParamFlags.READWRITE)
+            proc.add_menu_path("<Image>/Filters/imanganation")
+            proc.set_documentation(
+                "New Imanganation project from a script",
+                "Build a project (panels, pages, cast, locations) from a script and "
+                "design its characters.", name)
             proc.set_attribution("imanganation", "imanganation", "2026")
             return proc
         if name == PROC_PROJECT_DOCKS:

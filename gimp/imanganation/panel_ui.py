@@ -9,9 +9,9 @@ from typing import Any
 from urllib.parse import quote
 
 try:  # Installed plug-in imports siblings as top-level modules.
-    from layouts import FRAME_STYLES, layouts_for_count, page_panel_count
+    from layouts import page_layout_availability
 except ImportError:  # Package import in tests and external tooling.
-    from .layouts import FRAME_STYLES, layouts_for_count, page_panel_count
+    from .layouts import page_layout_availability
 
 
 def _label(value: Any) -> str:
@@ -78,7 +78,8 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
                 root: str | Path | None = None,
                 previews: dict[str, str] | None = None,
                 open_page_action: str = "",
-                generate_layout_action: str = "") -> dict[str, str]:
+                generate_layout_action: str = "",
+                design_action: str = "") -> dict[str, str]:
     """Build generic host content and stable selections from a project manifest.
 
     The Context (inspector) rows are editable fields; ``open_page_action``, a dock
@@ -322,27 +323,18 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
             f"Progress\t{page_progress(page)}",
             f"Placed panels\t{len(panels_on_page)}",
         ])
-        script_page, script_panel_count = page_panel_count(
-            manifest, page.get("label", ""))
+        availability = page_layout_availability(manifest, selected_id)
         inspector_rows.append("# Page layout")
-        if script_page is None:
-            inspector_rows.append("Layout status\tRename this page to Page N")
-        elif not script_panel_count:
-            inspector_rows.append(
-                f"Layout status\tNo script panels match Page {script_page}")
-        elif not layouts_for_count(script_panel_count):
-            inspector_rows.append(
-                f"Layout status\tNo built-in layout for {script_panel_count} panels")
+        if not availability["available"]:
+            inspector_rows.append(f"Layout status\t{availability['reason']}")
         else:
-            layout_count = len(layouts_for_count(script_panel_count))
-            layout_noun = "layout" if layout_count == 1 else "layouts"
-            style_count = len(FRAME_STYLES)
-            style_noun = "frame style" if style_count == 1 else "frame styles"
+            script_panel_count = availability["panel_count"]
+            option_count = len(availability["combinations"])
             inspector_rows.append(
                 f"Layout status\t{script_panel_count} script panels · "
-                f"{layout_count} {layout_noun} · {style_count} {style_noun}")
+                f"{option_count} preview choices")
             if generate_layout_action:
-                inspector_rows.append(f"!{generate_layout_action}\tGenerate layout")
+                inspector_rows.append(f"!{generate_layout_action}\tChoose layout…")
         if open_page_action:
             inspector_rows.append(f"!{open_page_action}\tOpen page")
         if panels_on_page:
@@ -366,6 +358,8 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
             "# Story notes",
             _field(selected_id, "notes", "Notes", character.get("notes")),
         ])
+        if design_action:
+            inspector_rows.append(f"!{design_action}\tDesign character")
     else:
         inspector_rows.extend(["# Project", f"Title\t{title}",
                                f"Panels\t{len(panels)}", f"Pages\t{len(pages)}"])
@@ -389,13 +383,17 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
     }
 
 
-def build_welcome_docks() -> dict[str, str]:
-    """First-run workspace content shown before a project is selected."""
+def build_welcome_docks(new_project_action: str = "") -> dict[str, str]:
+    """First-run workspace content shown before a project is selected; with
+    ``new_project_action``, Context offers to start one from a script."""
+    start = (f"\nStart one from a script:\n!{new_project_action}\tNew project from script…"
+             if new_project_action else "")
     return {
         "selected_id": "",
         "project": "# Imanganation\nChoose a project folder to open your workspace.",
         "project_selected": "",
-        "inspector": "# Context\nProject\tNot open\n\nChoose or create an Imanganation project.",
+        "inspector": ("# Context\nProject\tNot open\n\nChoose or create an Imanganation project."
+                      + start),
         "inspector_selected": "",
         "filmstrip": "Open a project to see its pages here.",  # tiles: no headings
         "filmstrip_selected": "",

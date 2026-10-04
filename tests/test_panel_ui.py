@@ -145,21 +145,40 @@ def test_context_rows_are_editable_fields_keyed_by_row_id():
 def test_page_context_offers_layout_generation_when_script_count_matches():
     manifest = copy.deepcopy(EXAMPLE)
     selected_page = manifest["pages"][0]["id"]
+    for panel in manifest["panels"]:
+        if (panel.get("placement") or {}).get("page") == selected_page:
+            panel.pop("placement")
+            panel["status"] = "unplaced"
 
     inspector = build_docks(
         manifest, selected_page, generate_layout_action="proc-layout")["inspector"]
 
-    assert "Layout status\t2 script panels · 2 layouts · 5 frame styles" in inspector
-    assert "!proc-layout\tGenerate layout" in inspector
+    assert "Layout status\t2 script panels · 10 preview choices" in inspector
+    assert "!proc-layout\tChoose layout…" in inspector
 
 
 def test_page_context_explains_when_label_has_no_script_page():
     manifest = copy.deepcopy(EXAMPLE)
     selected_page = manifest["pages"][0]["id"]
     manifest["pages"][0]["label"] = "Bonus spread"
+    for panel in manifest["panels"]:
+        if (panel.get("placement") or {}).get("page") == selected_page:
+            panel.pop("placement")
+            panel["status"] = "unplaced"
 
     inspector = build_docks(
         manifest, selected_page, generate_layout_action="proc-layout")["inspector"]
 
-    assert "Layout status\tRename this page to Page N" in inspector
-    assert "!proc-layout\tGenerate layout" not in inspector
+    assert "Layout status\tRename this page to Page N to match its script page." in inspector
+    assert "!proc-layout\tChoose layout…" not in inspector
+
+
+def test_page_context_locks_layout_when_a_panel_is_placed():
+    manifest = copy.deepcopy(EXAMPLE)
+    selected_page = manifest["pages"][0]["id"]
+
+    inspector = build_docks(
+        manifest, selected_page, generate_layout_action="proc-layout")["inspector"]
+
+    assert "Layout status\tLayout locked · 2 panels are already placed" in inspector
+    assert "!proc-layout\tChoose layout…" not in inspector

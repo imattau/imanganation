@@ -69,6 +69,17 @@ panel is placed on.
 With a page selected, Context reports the matching script-panel count and available
 layouts, then offers **Generate layout** when a built-in frame count matches. That
 action opens the selected page and layout picker in one step.
+**New project from script…** (Context, before a project is open, or *Filters →
+imanganation*) builds a project from a script file: panels, the cast (with the script's
+`CHARACTERS` descriptions as their notes), locations from scene headings, and one page
+document per script page, at the chosen size; then it opens page 1. A PAGE / Panel
+script is parsed in the plug-in itself (the engine's own tokenizer,
+`script_canonical.py`), so this works with the engine off; prose goes to the engine's
+LLM (`POST /scripts/parse`). With *Design the cast now*, every described character is
+queued for a design sheet (`POST /characters`), and Context refreshes as each one
+lands. A character's **Design character** button designs it from its notes, or makes a
+new design version if it has one. The engine has ComfyUI unload its models before an LLM
+step and unloads the LLM before a render, so both fit on 16 GB.
 On first launch, the Project dock offers **Open project…**; the
 chosen project folder is remembered in GIMP's user settings and its docks are restored on
 later launches. The **Open / Switch Project…** command remains available under
