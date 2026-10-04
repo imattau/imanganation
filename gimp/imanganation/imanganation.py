@@ -1108,6 +1108,36 @@ def _engine_character_rows(root, character_name):
     ]
 
 
+def _canvas_take_rows(manifest):
+    """Describe the selected canvas layer when it has a project take reference."""
+    try:
+        image = Gimp.context_get_image()
+        if image is None:
+            return []
+        rows = []
+        for layer in image.get_selected_layers():
+            parasite = layer.get_parasite(TAKE_PARASITE)
+            if parasite is None:
+                continue
+            reference = json.loads(bytes(parasite.get_data()))
+            if reference.get("project") != manifest["project"]["id"]:
+                continue
+            take_id = reference.get("take")
+            take = manifest["takes"].get(take_id)
+            panel = next((item for item in manifest["panels"]
+                          if item["id"] == reference.get("panel")), None)
+            if take is None or panel is None or take.get("panel") != panel["id"]:
+                rows.append(f"{layer.get_name()}\tReference is not in this manifest")
+                continue
+            parent = take.get("parent") or "None (origin)"
+            rows.append(f"{layer.get_name()}\t{take.get('kind', 'take')} · "
+                        f"{take_id} · parent: {parent}")
+            rows.append(f"File\t{take.get('file', 'Unknown')}")
+        return ["# Canvas selection", *rows] if rows else []
+    except Exception as exc:
+        return ["# Canvas selection", f"Status\tUnavailable ({exc})"]
+
+
 def _page_thumbnail(root, manifest, page):
     relative = page.get("file")
     if not relative:
@@ -1166,6 +1196,9 @@ def _refresh_project_docks():
     contents = build_docks(manifest, selected_id, root,
                            _project_page_thumbnails(root, manifest))
     _DOCK_CONTEXT["selected_id"] = contents["selected_id"]
+    canvas_rows = _canvas_take_rows(manifest)
+    if canvas_rows:
+        contents["inspector"] += "\n" + "\n".join(canvas_rows)
     if selected_id in {panel["id"] for panel in manifest["panels"]}:
         references = _engine_reference_rows(root, manifest, selected_id)
         if references:
