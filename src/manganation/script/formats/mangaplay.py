@@ -17,7 +17,7 @@ __all__ = ["add_mentioned_characters", "looks_canonical", "parse_canonical", "sp
 def add_mentioned_characters(script: Script) -> Script:
     """Add known characters named in a panel's action text (see ``canonical.add_mentions``)."""
     panels = [{"characters": list(p.characters), "action": p.action,
-               "dialogue": [{"speaker": d.speaker} for d in p.dialogue]}
+               "dialogue": [{"speaker": d.speaker, "kind": d.kind} for d in p.dialogue]}
               for p in script.panels]
     canonical.add_mentions([c.model_dump() for c in script.cast], panels)
     for panel, found in zip(script.panels, panels, strict=True):

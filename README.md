@@ -20,6 +20,10 @@ into a validated panel list. See [`docs/phase1.md`](./docs/phase1.md).
 **Phase 4 — COMPLETE (first cut).** Multi-character panels bind a reference per
 character to its own canvas region. See [`docs/phase4.md`](./docs/phase4.md).
 
+**Writing a script:** [`docs/script-template.md`](./docs/script-template.md) explains the
+format (cast block, pages, scenes, panels, dialogue, SFX), with a complete example to
+copy in [`docs/script-template.txt`](./docs/script-template.txt).
+
 **Rendering policy:** the engine renders colour only; B&W is the artist's post-process
 in GIMP. See [`docs/color-policy.md`](./docs/color-policy.md).
 

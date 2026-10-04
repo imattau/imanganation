@@ -22,9 +22,10 @@ Grammar (line-oriented, case-insensitive tokens):
     CUT TO: the classroom                         -> transition (new panel hint)
     [[any note]]                                  -> notes
 
-A panel's characters are its speakers plus any known character (declared in the
-cast block, by name or alias, or speaking anywhere in the script) named in its
-action text.
+A panel's characters are its speakers (not narration) plus any known character
+(declared in the cast block, by name or alias, or speaking anywhere in the script)
+named in its action text. ``[SCENE: ...]`` and ``[FLASHBACK START]`` apply to the
+panels that follow them. See docs/script-template.md.
 
 Output (plain dicts, keys as in ``PanelSpec`` / ``CastEntry``)::
 
@@ -180,7 +181,8 @@ def add_mentions(cast: list[dict], panels: list[dict]) -> None:
             known.setdefault(spelling, entry["name"])
     for panel in panels:
         for line in panel.get("dialogue", []):
-            known.setdefault(line["speaker"], line["speaker"])
+            if line.get("kind") != "narration":  # a narrator is never on the page
+                known.setdefault(line["speaker"], line["speaker"])
     if not known:
         return
     spellings = sorted(known, key=len, reverse=True)  # "Yuki-chan" before "Yuki"
@@ -231,18 +233,15 @@ def parse(text: str) -> dict:
             page = int(m.group(1))
             continue
 
+        # Scene headings and flashback markers introduce the panels that follow
+        # (written between panels, they used to rename the panel before them)
         m = _SCENE_RE.match(line)
         if m:
-            if current is not None:
-                current["scene_heading"] = m.group(1).strip()
-            else:
-                scene = m.group(1).strip()
+            scene = m.group(1).strip()
             continue
 
         if _FLASH_START_RE.match(line):
             flashback = True
-            if current is not None:
-                current["flashback"] = True
             continue
         if _FLASH_END_RE.match(line):
             flashback = False
@@ -286,9 +285,11 @@ def parse(text: str) -> dict:
         if d and d.group("speaker").strip().lower() not in _NON_DIALOGUE_TOKENS:
             speaker = canonical_name(d.group("speaker"))
             kind = (d.group("kind") or "speech").lower()
+            kind = kind if kind in _KINDS else "speech"
             current["dialogue"].append({"speaker": speaker, "text": d.group("text"),
-                                        "kind": kind if kind in _KINDS else "speech"})
-            if speaker and speaker not in current["characters"]:
+                                        "kind": kind})
+            # a narrator is not in the picture
+            if speaker and kind != "narration" and speaker not in current["characters"]:
                 current["characters"].append(speaker)
             continue
 

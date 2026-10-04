@@ -37,6 +37,8 @@ CUT TO: the stairwell          -> annotates the NEXT panel's location
 - **Names normalised:** `AKIRA:` → `Akira` (stable key for the character registry).
 - **Camera auto-detected** from action prose (wide shot, close-up, dutch angle…).
 - Dialogue is captured but **never rendered** (text-free panels).
+- **Writing a script:** [script-template.md](script-template.md) is the user guide, with
+  a full example in [script-template.txt](script-template.txt).
 - **Cast block (optional):** before the first page, `CHARACTERS` (or `CAST`) and one
   unindented `NAME (aka Alias, Other): description` per character; indented lines
   continue a description. Each description is the author's design and wins over the
