@@ -45,16 +45,17 @@ GIMP also gives three things for free that a custom web UI would have to build:
 `~/.config/GIMP/3.2/plug-ins/imanganation`. The store reads and atomically updates
 `project.json` while preserving unknown keys. It validates format/version, stable IDs,
 and project-relative paths. The persistent **Open Project Docks…** command registers
-Project, Inspector, and Page Filmstrip panels; row callbacks carry panel/page IDs.
+Project, Script, Inspector, and Page Filmstrip panels; row callbacks carry stable IDs.
 For container projects, generated and imported images are
 copied into immutable `takes/` files and linked through take IDs; XCF parasites and
 page placement metadata are still being migrated. It adds nine commands under
 *Filters → imanganation*:
 
 - **Open Project Docks…**: choose a folder containing `project.json` to open the
-  persistent Project, Inspector, and Page Filmstrip docks. Select project rows to
+  persistent Project, Script, Inspector, and Page Filmstrip docks. Select project rows to
   inspect panels or pages; page tiles show placed-panel counts and basic progress,
   and **Open page** opens the selected page's XCF (or the selected panel's page).
+  Script rows follow reading order and select the same panel in Project and Inspector.
   The Inspector shows panel placement, scene details, lettering counts, and take
   lineage. Cast rows select a character context with project notes and engine-owned
   versions/reference availability. GIMP restores dock placement and visibility through

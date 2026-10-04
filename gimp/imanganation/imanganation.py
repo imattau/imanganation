@@ -62,15 +62,18 @@ PROC_PROJECT_DOCKS = "plug-in-imanganation-project-docks"
 DOCK_PROJECT = "project"
 DOCK_INSPECTOR = "inspector"
 DOCK_FILMSTRIP = "filmstrip"
-DOCK_IDS = (DOCK_PROJECT, DOCK_INSPECTOR, DOCK_FILMSTRIP)
+DOCK_SCRIPT = "script"
+DOCK_IDS = (DOCK_PROJECT, DOCK_INSPECTOR, DOCK_FILMSTRIP, DOCK_SCRIPT)
 DOCK_ACTIONS = {
     DOCK_PROJECT: "plug-in-imanganation-dock-project-refresh",
     DOCK_INSPECTOR: "plug-in-imanganation-dock-inspector-refresh",
     DOCK_FILMSTRIP: "plug-in-imanganation-dock-filmstrip-open-page",
+    DOCK_SCRIPT: "plug-in-imanganation-dock-script-refresh",
 }
 DOCK_ITEMS = {
     DOCK_PROJECT: "plug-in-imanganation-dock-project-item",
     DOCK_FILMSTRIP: "plug-in-imanganation-dock-filmstrip-item",
+    DOCK_SCRIPT: "plug-in-imanganation-dock-script-item",
 }
 REF_MAX = 1024  # reference export cap; the CLIP encoder only sees 224-448 px anyway
 PARASITE = "imanganation-panelspec"
@@ -1086,7 +1089,8 @@ def _refresh_project_docks():
     for identifier, content_key, selection_key in (
             (DOCK_PROJECT, "project", "project_selected"),
             (DOCK_INSPECTOR, "inspector", None),
-            (DOCK_FILMSTRIP, "filmstrip", "filmstrip_selected")):
+            (DOCK_FILMSTRIP, "filmstrip", "filmstrip_selected"),
+            (DOCK_SCRIPT, "script", "script_selected")):
         values = {"identifier": identifier, "content": contents[content_key],
                   "selected-item": contents[selection_key] if selection_key else ""}
         _dock_pdb_call("gimp-extension-panel-update", values)
@@ -1148,6 +1152,8 @@ def _add_dock_callbacks(plugin):
         (DOCK_ACTIONS[DOCK_FILMSTRIP], _dock_action, "open-page", False),
         (DOCK_ITEMS[DOCK_PROJECT], _dock_item_action, DOCK_PROJECT, True),
         (DOCK_ITEMS[DOCK_FILMSTRIP], _dock_item_action, DOCK_FILMSTRIP, True),
+        (DOCK_ACTIONS[DOCK_SCRIPT], _dock_action, "refresh", False),
+        (DOCK_ITEMS[DOCK_SCRIPT], _dock_item_action, DOCK_SCRIPT, True),
     ]
     for name, callback, data, takes_item in callbacks:
         procedure = Gimp.Procedure.new(plugin, name, Gimp.PDBProcType.TEMPORARY,
@@ -1173,6 +1179,9 @@ def _register_project_docks(plugin):
         (DOCK_FILMSTRIP, "Page Filmstrip", "tiles", contents["filmstrip"],
          contents["filmstrip_selected"], "Open page", DOCK_ACTIONS[DOCK_FILMSTRIP],
          DOCK_ITEMS[DOCK_FILMSTRIP]),
+        (DOCK_SCRIPT, "Script", "list", contents["script"],
+         contents["script_selected"], "Refresh", DOCK_ACTIONS[DOCK_SCRIPT],
+         DOCK_ITEMS[DOCK_SCRIPT]),
     ]
     for identifier, title, presentation, content, selected, action_label, action, item in rows:
         _dock_pdb_call("gimp-extension-panel-register", {

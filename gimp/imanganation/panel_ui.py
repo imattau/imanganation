@@ -21,6 +21,20 @@ def _panel_label(panel: dict[str, Any]) -> str:
     return f"{number}  —  {action}" if action else number
 
 
+def _script_panel_label(panel: dict[str, Any]) -> str:
+    label = panel.get("label", {})
+    title = f"Page {label.get('page', '?')} · Panel {label.get('panel', '?')}"
+    action = _label(panel.get("action"))
+    dialogue = panel.get("dialogue", [])
+    if dialogue:
+        first = dialogue[0]
+        line = _label(f"{first.get('speaker', '')}: {first.get('text', '')}")
+        action = f"{action} · {line}" if action else line
+    if len(action) > 176:
+        action = action[:173].rstrip() + "…"
+    return f"{title} — {action}" if action else title
+
+
 def character_row_id(name: str) -> str:
     """Build a collision-safe row key from the engine's character identity name."""
     return "character:" + quote(name, safe="")
@@ -91,6 +105,7 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
         f"{page['id']}\t{_label(page.get('label')) or 'Page'} · "
         f"{page_counts[page['id']]} panels · {page_progress(page)}"
         for page in pages]
+    script_rows = [f"{panel['id']}\t{_script_panel_label(panel)}" for panel in panels]
 
     inspector_rows: list[str] = []
     if selected_id in panel_by_id:
@@ -189,4 +204,6 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
         "inspector": "\n".join(inspector_rows),
         "filmstrip": "\n".join(filmstrip_rows),
         "filmstrip_selected": page_selection,
+        "script": "\n".join(script_rows),
+        "script_selected": selected_id if selected_id in panel_by_id else "",
     }

@@ -76,3 +76,15 @@ def test_cast_rows_select_a_character_context_by_engine_name():
     assert f"{selected}\t{character['name']}" in docks["project"]
     assert docks["project_selected"] == selected
     assert f"Name\t{character['name']}" in docks["inspector"]
+
+
+def test_script_rows_use_panel_ids_and_keep_repeated_script_labels_distinct():
+    manifest = copy.deepcopy(EXAMPLE)
+    panel = manifest["panels"][4]
+
+    docks = build_docks(manifest, panel["id"])
+
+    assert f"{panel['id']}\tPage 2 · Panel 1" in docks["script"]
+    assert docks["script_selected"] == panel["id"]
+    assert "Page 2 · Panel 1" in docks["script"]
+    assert sum("Page 2 · Panel 1" in row for row in docks["script"].splitlines()) == 2
