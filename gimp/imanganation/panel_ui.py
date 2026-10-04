@@ -228,12 +228,28 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
     if selected_id in panel_by_id:
         panel = panel_by_id[selected_id]
         script_label = panel.get("label", {})
+        # Context for a panel: the production brief (who, where, shot, action) first,
+        # then placement and takes. Generate acts on this panel.
         inspector_rows.extend([
-            "# Panel",
-            f"ID\t{panel['id']}",
-            f"Script page\t{script_label.get('page', '—')}",
-            f"Panel number\t{script_label.get('panel', '—')}",
+            f"# Panel {script_label.get('panel', '—')} · Page {script_label.get('page', '—')}",
             f"Status\t{_label(panel.get('status')) or 'unplaced'}",
+            "# Characters",
+        ])
+        characters = panel.get("characters", [])
+        inspector_rows.extend(
+            f"{_label(c.get('name'))}\t{_label(c.get('version')) or 'Active version'}"
+            for c in characters)
+        if not characters:
+            inspector_rows.append("None\tNo characters specified")
+        inspector_rows.extend([
+            "# Scene",
+            f"Location\t{_label(panel.get('location')) or 'Unspecified'}",
+            f"Shot\t{_label(panel.get('camera')) or 'Unspecified'}",
+            f"Aspect ratio\t{_label(panel.get('aspect_ratio')) or 'Unspecified'}",
+            "# Action",
+            _label(panel.get("action")) or "No action text",
+            "# Production",
+            f"ID\t{panel['id']}",
             f"Takes\t{len(panel.get('takes', []))}",
             f"Active take\t{panel.get('active_take') or 'None'}",
         ])
@@ -324,7 +340,7 @@ def build_welcome_docks() -> dict[str, str]:
         "selected_id": "",
         "project": "# Imanganation\nChoose a project folder to open your workspace.",
         "project_selected": "",
-        "inspector": "# Workspace\nProject\tNot open\n\nChoose or create an Imanganation project.",
+        "inspector": "# Context\nProject\tNot open\n\nChoose or create an Imanganation project.",
         "inspector_selected": "",
         "filmstrip": "# Pages\nOpen a project to see its pages here.",
         "filmstrip_selected": "",

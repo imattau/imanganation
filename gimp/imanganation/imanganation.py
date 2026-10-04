@@ -76,7 +76,7 @@ DOCK_IDS = (DOCK_PROJECT, DOCK_INSPECTOR, DOCK_FILMSTRIP, DOCK_SCRIPT,
             DOCK_CHARACTERS, DOCK_PANEL)
 DOCK_ACTIONS = {
     DOCK_PROJECT: "plug-in-imanganation-dock-project-action",
-    DOCK_INSPECTOR: "plug-in-imanganation-dock-inspector-refresh",
+    DOCK_INSPECTOR: "plug-in-imanganation-dock-inspector-generate",
     DOCK_FILMSTRIP: "plug-in-imanganation-dock-filmstrip-open-page",
     DOCK_SCRIPT: "plug-in-imanganation-dock-script-refresh",
     DOCK_CHARACTERS: "plug-in-imanganation-dock-characters-refresh",
@@ -86,7 +86,7 @@ DOCK_OPEN_PROJECT = "plug-in-imanganation-dock-open-project"
 # Windows > Imanganation: reopen a closed dock (the host keeps closed docks closed).
 DOCK_SHOW = {dock: f"plug-in-imanganation-show-dock-{dock}" for dock in DOCK_IDS}
 DOCK_MENU_LABELS = {
-    DOCK_PROJECT: "_Project", DOCK_INSPECTOR: "_Inspector",
+    DOCK_PROJECT: "_Project", DOCK_INSPECTOR: "_Context",
     DOCK_FILMSTRIP: "Page _Filmstrip", DOCK_SCRIPT: "_Script",
     DOCK_CHARACTERS: "_Character Bible", DOCK_PANEL: "P_anel",
 }
@@ -1272,6 +1272,14 @@ def _activate_project(root):
     _register_project_docks(_DOCK_PLUGIN)
 
 
+def _engine_status(exc):
+    """Short engine error for a dock row (the full message suits dialogs)."""
+    if isinstance(exc.__cause__, (urllib.error.URLError, OSError)) and not isinstance(
+            exc.__cause__, urllib.error.HTTPError):
+        return "Engine not running · start it with: uv run manganation serve"
+    return f"Unavailable ({exc})"
+
+
 def _engine_reference_rows(root, manifest, selected_id):
     panel = next((p for p in manifest["panels"] if p["id"] == selected_id), None)
     if panel is None or not panel.get("characters"):
@@ -1280,7 +1288,7 @@ def _engine_reference_rows(root, manifest, selected_id):
     try:
         engine_characters = _http("GET", f"{ENGINE_URL}/characters?{query}", timeout=3)
     except EngineError as exc:
-        return ["# Engine references", f"Status\tUnavailable ({exc})"]
+        return ["# Engine references", f"Status\t{_engine_status(exc)}"]
     by_name = {c.get("name", "").casefold(): c for c in engine_characters}
     rows = ["# Engine references"]
     for character in panel["characters"]:
@@ -1301,7 +1309,7 @@ def _engine_character_rows(root, character_name):
     try:
         characters = _http("GET", f"{ENGINE_URL}/characters?{query}", timeout=3)
     except EngineError as exc:
-        return ["# Engine character record", f"Status\tUnavailable ({exc})"]
+        return ["# Engine character record", f"Status\t{_engine_status(exc)}"]
     character = next((c for c in characters
                       if c.get("name", "").casefold() == character_name.casefold()), None)
     if character is None:
@@ -1464,6 +1472,7 @@ def _refresh_project_docks(sync_canvas=False):
         references = _engine_reference_rows(root, manifest, selected_id)
         if references:
             contents["panel"] += "\n" + "\n".join(references)
+            contents["inspector"] += "\n" + "\n".join(references)
     elif selected_id in {character_row_id(c["name"]) for c in manifest["cast"]}:
         character = next(c for c in manifest["cast"]
                          if character_row_id(c["name"]) == selected_id)
@@ -1731,7 +1740,7 @@ def _create_project_page(root, manifest, width, height):
 
     image = Gimp.Image.new(width, height, Gimp.ImageBaseType.RGB)
     try:
-        image.set_name(page_label)
+        # (GIMP 3 images have no set_name; the saved file name titles the page)
         background = Gimp.Layer.new(
             image, "Background", width, height, Gimp.ImageType.RGB_IMAGE, 100,
             Gimp.LayerMode.NORMAL)
@@ -1756,6 +1765,53 @@ def _create_project_page(root, manifest, width, height):
     finally:
         image.delete()
     return page_id
+
+
+def _project_image(manifest):
+    """The active image if it is a page of this project, else any open project page."""
+    images = [Gimp.context_get_image(), *Gimp.get_images()]
+    return next((image for image in images if image is not None
+                 and _project_page_id_for_image(image, manifest)), None)
+
+
+def _generate_selected_panel():
+    """Context > Generate: render the selected panel through the render command.
+
+    A panel selected on the canvas wins over the dock selection. A placed panel renders
+    into its saved frame on its page; an unplaced one uses the selection on an open page
+    of the project (and is placed there, as with Render Panel into Frame)."""
+    root = _DOCK_CONTEXT.get("root")
+    if root is None:
+        raise ValueError("Open a project first")
+    manifest = load_project(root)
+    selected = _selected_canvas_panel_id(manifest) or _DOCK_CONTEXT.get("selected_id")
+    ids = [panel["id"] for panel in manifest["panels"]]
+    if selected not in ids:
+        raise ValueError("Select a panel (in Project or Script, or on the canvas) to "
+                         "generate it")
+    _DOCK_CONTEXT["selected_id"] = selected
+    panel = manifest["panels"][ids.index(selected)]
+    page_id = (panel.get("placement") or {}).get("page")
+    image = (_show_project_page(root, manifest, page_id) if page_id
+             else _project_image(manifest))
+    if image is None:
+        raise ValueError("Open a project page and select this panel's frame, then "
+                         "Generate")
+
+    procedure = Gimp.get_pdb().lookup_procedure(PROC_RENDER)
+    config = procedure.create_config()
+    config.set_property("run-mode", Gimp.RunMode.NONINTERACTIVE)
+    config.set_property("image", image)
+    drawables = image.get_selected_drawables() or image.get_layers()[:1]
+    config.set_core_object_array("drawables", drawables)
+    config.set_property("project-dir", Gio.File.new_for_path(str(root)))
+    config.set_property("panel-number", ids.index(selected) + 1)
+    result = procedure.run(config)
+    status = result.index(0)
+    error = Gimp.get_pdb().get_last_error()  # read before other PDB calls replace it
+    _refresh_project_docks()
+    if status not in (Gimp.PDBStatusType.SUCCESS, Gimp.PDBStatusType.CANCEL):
+        raise RuntimeError(error or "Generate failed")
 
 
 def _dock_action(procedure, config, data):
@@ -1795,8 +1851,8 @@ def _dock_action(procedure, config, data):
             _refresh_project_docks()
         elif data == "set-panel-frame":
             _set_panel_frame_from_selection()
-        elif data == "refresh-canvas":
-            _refresh_project_docks(sync_canvas=True)
+        elif data == "generate":
+            _generate_selected_panel()
         else:
             _refresh_project_docks()
         return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
@@ -1838,7 +1894,7 @@ def _add_dock_callbacks(plugin):
     callbacks = [
         (DOCK_ACTIONS[DOCK_PROJECT], _dock_action, "project-action", False),
         (DOCK_OPEN_PROJECT, _dock_action, "open-project", False),
-        (DOCK_ACTIONS[DOCK_INSPECTOR], _dock_action, "refresh-canvas", False),
+        (DOCK_ACTIONS[DOCK_INSPECTOR], _dock_action, "generate", False),
         (DOCK_ACTIONS[DOCK_FILMSTRIP], _dock_action, "open-page", False),
         (DOCK_ITEMS[DOCK_PROJECT], _dock_item_action, DOCK_PROJECT, True),
         (DOCK_ITEMS[DOCK_FILMSTRIP], _dock_item_action, DOCK_FILMSTRIP, True),
@@ -1874,7 +1930,7 @@ def _register_project_docks(plugin):
         rows = [
             (DOCK_PROJECT, "Project", "tree", contents["project"], "",
              "Open project…", DOCK_OPEN_PROJECT, ""),
-            (DOCK_INSPECTOR, "Inspector", "properties", contents["inspector"],
+            (DOCK_INSPECTOR, "Context", "properties", contents["inspector"],
              "", "", "", ""),
             (DOCK_FILMSTRIP, "Page Filmstrip", "tiles", contents["filmstrip"],
              "", "", "", ""),
@@ -1894,8 +1950,8 @@ def _register_project_docks(plugin):
             (DOCK_PROJECT, "Project", "tree", contents["project"],
              contents["project_selected"], "Add page", DOCK_ACTIONS[DOCK_PROJECT],
              DOCK_ITEMS[DOCK_PROJECT]),
-            (DOCK_INSPECTOR, "Inspector", "properties", contents["inspector"],
-             "", "Refresh", DOCK_ACTIONS[DOCK_INSPECTOR], ""),
+            (DOCK_INSPECTOR, "Context", "properties", contents["inspector"],
+             "", "Generate", DOCK_ACTIONS[DOCK_INSPECTOR], ""),
             (DOCK_FILMSTRIP, "Page Filmstrip", "tiles", contents["filmstrip"],
              contents["filmstrip_selected"], "Open page", DOCK_ACTIONS[DOCK_FILMSTRIP],
              DOCK_ITEMS[DOCK_FILMSTRIP]),

@@ -45,8 +45,14 @@ GIMP also gives three things for free that a custom web UI would have to build:
 `~/.config/GIMP/3.2/plug-ins/imanganation`. The store reads and atomically updates
 `project.json` while preserving unknown keys. It validates format/version, stable IDs,
 and project-relative paths. A zero-argument persistent workspace extension starts with
-GIMP and registers the Project, Script, Inspector, Panel, Page Filmstrip, and Character
-Bible docks by default. On first launch, the Project dock offers **Open project…**; the
+GIMP and registers the workspace docks. In the fork's default layout the **Project**
+navigator (pages, script panels, assets) sits left of a compact toolbox; on the right,
+**Context** shows whatever is selected (project, page, panel or character), with
+**Script** and **Page Filmstrip** as tabs beside it, above GIMP's Layers. With a panel
+selected (in a dock or on the canvas), Context's **Generate** renders it through *Render
+Panel into Frame*: into its saved frame, or the selection on an open project page. Panel
+and Character Bible are folded into Context and open only from *Windows → Imanganation*.
+On first launch, the Project dock offers **Open project…**; the
 chosen project folder is remembered in GIMP's user settings and its docks are restored on
 later launches. The **Open / Switch Project…** command remains available under
 *Filters → imanganation*. A dock you close stays closed on later launches; reopen it from
