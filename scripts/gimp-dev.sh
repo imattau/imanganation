@@ -43,4 +43,10 @@ export GIMP_TESTING_PLUGINDIRS="$PLUGINS:$PROFILE/plug-ins"
 export GIMP_TESTING_PLUGINDIRS_BASENAME_IGNORES="extension-panels"
 [ -n "${GIMP3_DIRECTORY:-}" ] && export GIMP3_DIRECTORY
 
+# Lettering fonts (assets/fonts, SIL OFL): GIMP reads fonts from <profile>/fonts.
+mkdir -p "$PROFILE/fonts"
+for font in "$ROOT"/assets/fonts/*.ttf; do
+  [ -e "$PROFILE/fonts/$(basename "$font")" ] || ln -s "$font" "$PROFILE/fonts/"
+done
+
 exec "$B/app/gimp-3.3" "$@"

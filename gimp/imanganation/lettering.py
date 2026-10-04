@@ -19,7 +19,9 @@ BUBBLES_PARASITE = "imanganation-bubbles"  # the page's "Speech bubbles" group
 BUBBLE_PARASITE = "imanganation-bubble"    # one bubble group
 GROUP_NAME = "Speech bubbles"
 DEFAULT_FONTS = ("Comic Neue Bold", "Comic Neue", "Sans-serif Bold", "Sans-serif")
-SFX_FONTS = ("Bangers", "Sans-serif Bold", "Sans-serif")
+SFX_FONTS = ("Bangers", "Bangers Regular", "Sans-serif Bold", "Sans-serif")
+# Comic Neue and Bangers ship in assets/fonts (SIL OFL); scripts/gimp-dev.sh links
+# them into the profile's fonts folder.
 
 
 def _gimp():
