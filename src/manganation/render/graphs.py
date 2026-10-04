@@ -123,8 +123,14 @@ def inpaint(
 
     The init image is encoded to a latent, then ``SetLatentNoiseMask`` marks the region
     to regenerate; the sampler runs at high ``denoise`` so the masked area is
-    re-synthesised from noise while everything outside the mask is preserved. The mask
-    is dilated (``grow_mask_by``) so the new pixels blend into their surroundings.
+    re-synthesised from noise. The mask is dilated (``grow_mask_by``) so the new pixels
+    blend into their surroundings.
+
+    Decoding re-renders the *whole* latent, and a VAE round trip shifts line work
+    everywhere (measured: 7% of pixels outside the mask moved by >8 levels, up to
+    179). So the decoded image is composited back over the original through a blurred
+    copy of the grown mask: outside it the original pixels come through untouched,
+    and the seam is soft rather than a hard edge.
 
     ``mask_channel`` selects which channel of the uploaded mask image is the mask:
     ``alpha`` (a transparent selection export), or a colour channel for an opaque
@@ -166,9 +172,22 @@ def inpaint(
             },
         },
         "6": {"class_type": "VAEDecode", "inputs": {"samples": ["5", 0], "vae": ["1", 2]}},
+        # Soft blend mask: grown mask -> image -> blur -> mask.
+        "12": {"class_type": "MaskToImage", "inputs": {"mask": ["10", 0]}},
+        "13": {
+            "class_type": "ImageBlur",
+            "inputs": {"image": ["12", 0], "blur_radius": max(1, min(31, grow_mask_by // 2)),
+                       "sigma": 1.0},
+        },
+        "14": {"class_type": "ImageToMask", "inputs": {"image": ["13", 0], "channel": "red"}},
+        "15": {
+            "class_type": "ImageCompositeMasked",
+            "inputs": {"destination": ["8", 0], "source": ["6", 0], "x": 0, "y": 0,
+                       "resize_source": False, "mask": ["14", 0]},
+        },
         "7": {
             "class_type": "SaveImage",
-            "inputs": {"filename_prefix": prefix, "images": ["6", 0]},
+            "inputs": {"filename_prefix": prefix, "images": ["15", 0]},
         },
     }
 

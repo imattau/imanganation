@@ -38,6 +38,21 @@ def test_inpaint_graph_masks_the_latent():
     assert g["5"]["inputs"]["denoise"] == 0.85
 
 
+def test_inpaint_graph_composites_original_outside_the_mask():
+    """Only the masked region may change: the decode is blended over the original."""
+    g = graphs.inpaint(ckpt="c", image="a.png", mask="m.png", prompt="p", negative="n",
+                       seed=1, prefix="t", grow_mask_by=8)
+    comp = g["15"]
+    assert comp["class_type"] == "ImageCompositeMasked"
+    assert comp["inputs"]["destination"] == ["8", 0]  # the original init image
+    assert comp["inputs"]["source"] == ["6", 0]       # the decoded repaint
+    assert g["14"]["class_type"] == "ImageToMask" and comp["inputs"]["mask"] == ["14", 0]
+    assert g["13"]["inputs"]["image"] == ["12", 0] and g["12"]["inputs"]["mask"] == ["10", 0]
+    assert g["7"]["inputs"]["images"] == ["15", 0]   # save the composite, not the decode
+    assert graphs.inpaint(ckpt="c", image="a", mask="m", prompt="p", negative="n", seed=1,
+                          prefix="t", grow_mask_by=0)["13"]["inputs"]["blur_radius"] == 1
+
+
 def test_inpaint_graph_mask_channel_override():
     g = graphs.inpaint(
         ckpt="c", image="a.png", mask="m.png", prompt="p", negative="n",
@@ -119,7 +134,8 @@ def test_inpaint_panel_paints_region_and_writes_take(tmp_path):
     g = comfy.graphs[0]
     assert g["8"]["inputs"]["image"] == "001.png"       # init = newest panel
     assert g["9"]["inputs"]["image"] == "mask.png"
-    assert g["2"]["inputs"]["text"] == "a red apple"
+    assert g["2"]["inputs"]["text"].endswith(", a red apple")  # style prefix + prompt
+    assert g["2"]["inputs"]["text"] == r.positive and r.prompt == "a red apple"
     assert g["5"]["inputs"]["seed"] == 9
     # both the init and the mask were uploaded
     assert any("001.png" in p for p in comfy.uploads)
@@ -224,4 +240,15 @@ def test_api_inpaint_missing_mask_404(tmp_path):
                                    inpaint=lambda *a, **k: None))
     resp = client.post("/inpaint", json={"project_dir": str(project), "seq": 1,
                                          "mask": "nope.png", "prompt": "x"})
+    assert resp.status_code == 404
+
+
+def test_api_inpaint_missing_explicit_source_404(tmp_path):
+    """A named source that's gone must fail, not silently inpaint another take."""
+    project = _project(tmp_path / "proj")
+    client = TestClient(create_app(render=lambda *a, **k: None, root=tmp_path,
+                                   inpaint=lambda *a, **k: None))
+    resp = client.post("/inpaint", json={"project_dir": str(project), "seq": 1,
+                                         "mask": "mask.png", "prompt": "x",
+                                         "source": "panels/001_take09.png"})
     assert resp.status_code == 404

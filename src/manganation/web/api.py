@@ -161,7 +161,9 @@ def create_app(
         project = resolve_project(req.project_dir, root)
         req.project_dir = str(project)
         mask = _inside(project, req.mask, "mask", required=True)
-        source = _inside(project, req.source, "source", required=False) if req.source else None
+        # An explicit source is the exact take a GIMP layer shows: if it's gone, say so
+        # rather than silently painting a different take.
+        source = _inside(project, req.source, "source", required=True) if req.source else None
         return submit_job(
             "inpaint", req.model_dump(),
             lambda: inpaint(Path(req.project_dir), req.seq, mask=mask, prompt=req.prompt,

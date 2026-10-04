@@ -3,8 +3,9 @@
 The GIMP plug-in exports two images: the **init** (the current layer / panel take) and
 a **mask** (the selection). This module uploads both, runs the ComfyUI inpaint graph so
 only the masked region is re-synthesised from a short prompt, and saves the result as a
-new take — the untouched pixels come straight through the latent, so the rest of the
-panel is preserved exactly.
+new take. The result is composited back over the original through a soft copy of the
+grown mask, so pixels outside it are the original's, untouched (a bare VAE round trip
+would redraw line work across the whole panel).
 
 Output: ``panels/{seq:03d}_inpaint.png`` (plus ``_takeNN`` when repeated) with its own
 sidecar, so the original render and the artist's iterations all sit side by side.
@@ -40,6 +41,7 @@ class InpaintResult:
     denoise: float
     grow_mask_by: int
     seed: int
+    positive: str = ""  # the full prompt sent (style prefix + the artist's prompt)
 
 
 def mask_channel_for(path: Path) -> str:
@@ -122,13 +124,14 @@ def inpaint_panel(
         raise InpaintError(f"ComfyUI is not reachable at {settings.comfyui.base_url}")
 
     neg = negative if negative is not None else _style_negative()
+    positive = _with_style(prompt)
     seed = seed if seed is not None else random.randrange(2**32)
     source_up = client.upload_image(str(src))
     mask_up = client.upload_image(str(mask_path))
     graph = graphs.inpaint(
         ckpt=models["checkpoints"]["primary"]["id"],
         image=source_up["name"], mask=mask_up["name"],
-        prompt=prompt, negative=neg, seed=seed,
+        prompt=positive, negative=neg, seed=seed,
         prefix=f"imanganation_{seq:03d}_inpaint",
         denoise=denoise, grow_mask_by=grow_mask_by,
         mask_channel=mask_channel_for(mask_path),
@@ -144,9 +147,19 @@ def inpaint_panel(
     result = InpaintResult(
         path=str(out), seq=seq, source=str(src), mask=str(mask_path), prompt=prompt,
         width=width, height=height, denoise=denoise, grow_mask_by=grow_mask_by, seed=seed,
+        positive=positive,
     )
     out.with_suffix(".json").write_text(json.dumps(asdict(result), indent=2))
     return result
+
+
+def _with_style(prompt: str) -> str:
+    """The patch is drawn into a panel rendered with the colour style, so give it the
+    same style prefix; a bare "red apple" drifts from the surrounding art."""
+    from manganation.render.panel import load_style
+
+    prefix = load_style().get("prompt_prefix", "").strip().rstrip(",")
+    return f"{prefix}, {prompt.strip()}" if prefix else prompt.strip()
 
 
 def _style_negative() -> str:
