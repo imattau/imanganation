@@ -66,3 +66,32 @@ uv run manganation character add-ref Akira ref.png -p rooftop
 ## Next
 
 Phase 4 — multi-character regional references + per-panel continuity loop.
+
+## Appearance vs expression (2026-10-04)
+
+`AppearanceSpec` keeps **identity** (physical: gender, age, hair, eyes, skin, build,
+outfit, accessories, physical `distinguishing` marks, visual `descriptors`) apart from:
+
+- `default_expression`: the characteristic face ("wide toothed grin"). Renders use it
+  only when the panel gives no expression for that character; a panel's `expressions`
+  always wins. Design references include it; inpaint and training captions don't.
+- `mannerisms`: body language and demeanor ("relaxed slouch", "energetic stance").
+  Never in render or inpaint prompts (the panel's action decides the pose).
+
+| Method | Returns |
+|---|---|
+| `appearance_tags()` | identity only |
+| `prompt_tags()` | identity + default expression |
+| `prompt_tags(expression=False)` | identity |
+| `prompt_tags(mannerisms=True)` | identity + default expression + mannerisms |
+
+**Why:** stored as identity, Yuki's "wide toothed grin" overrode "surprised face, open
+mouth" in inpaint (even at IP-Adapter 0.3) and fought panel expressions in renders.
+Live, same seed: as scripted she grins; with `expressions: {"Yuki": "surprised, open
+mouth"}` she's surprised (`docs/quality/2026-10-04_render_expression_override.png`).
+
+**Migration:** older manifests (and LLM slips) stored these in `distinguishing` /
+`descriptors`. A validator moves them on load (`classify_trait`: body-language words
+first, then expression words), and the next save writes the split. rooftop and
+_gimp_smoke are migrated. The LLM trait prompt now asks for the two fields directly.
+

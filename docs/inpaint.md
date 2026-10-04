@@ -37,18 +37,18 @@ in the patch (`characters`):
   with their reference (`version` honoured) at `ipadapter_weight` (0.45), or the
   request's `character_weight`. Several: traits only, since one reference would pull
   every face to one identity.
-- **Expression/pose words are dropped from the traits** (`identity_tags`). Character
-  traits store some ("wide toothed grin", "quiet demeanor", "relaxed slouch"), and they
-  overrode "surprised face, open mouth" even at IP-Adapter weight 0.3. Physical
-  distinguishing marks (a scar, a pin) stay.
+- **Only appearance traits are used** (`AppearanceSpec.appearance_tags()`): never
+  the character's `default_expression` or `mannerisms`. Stored as identity, Yuki's
+  "wide toothed grin" overrode "surprised face, open mouth" even at IP-Adapter weight
+  0.3. Physical distinguishing marks (a scar, a pin) stay.
 
 Live (Yuki, whole-face mask, same seed): no characters gave an open mouth on another
 face; Yuki without the filter gave her stored grin; Yuki with the filter at 0.45 gave
 her face, surprised.
 
-**Follow-up (characters):** the trait schema should keep expression/pose apart from
-appearance (e.g. a `default_expression` field). The same stored grin also fights a
-render's per-panel `expressions`, not just inpaint.
+The character schema now keeps expression and body language apart from appearance
+(`docs/phase2.md`, "Appearance vs expression"), which also fixed renders, where the
+stored grin fought a panel's `expressions`.
 
 ## Mask convention
 

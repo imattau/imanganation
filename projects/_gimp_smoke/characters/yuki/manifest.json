@@ -15,12 +15,14 @@
       "silver hair barrettes"
     ],
     "distinguishing": [
-      "wide toothed grin",
       "snowflake pin on blazer lapel"
     ],
     "descriptors": [
-      "energetic stance",
       "slightly messy strands flying"
+    ],
+    "default_expression": "wide toothed grin",
+    "mannerisms": [
+      "energetic stance"
     ]
   },
   "versions": [

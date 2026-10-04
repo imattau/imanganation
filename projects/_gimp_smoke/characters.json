@@ -20,7 +20,9 @@
           "loose collar button undone",
           "small scar above left eyebrow"
         ],
-        "descriptors": [
+        "descriptors": [],
+        "default_expression": "",
+        "mannerisms": [
           "quiet demeanor",
           "relaxed slouch"
         ]
@@ -58,12 +60,14 @@
           "silver hair barrettes"
         ],
         "distinguishing": [
-          "wide toothed grin",
           "snowflake pin on blazer lapel"
         ],
         "descriptors": [
-          "energetic stance",
           "slightly messy strands flying"
+        ],
+        "default_expression": "wide toothed grin",
+        "mannerisms": [
+          "energetic stance"
         ]
       },
       "versions": [

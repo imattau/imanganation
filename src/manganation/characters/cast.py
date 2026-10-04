@@ -66,7 +66,7 @@ def assemble_cast(
         if not existed:
             plan.created.append(name)
 
-        needs_appearance = not character.appearance.prompt_tags()
+        needs_appearance = not character.appearance.appearance_tags()
         if derive and needs_appearance and script_text:
             character.appearance = derive_appearance(
                 name, script_text, existing=character.appearance, settings=settings

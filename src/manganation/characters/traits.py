@@ -31,6 +31,10 @@ APPEARANCE_SCHEMA: dict[str, Any] = {
         "accessories": {"type": "array", "items": {"type": "string"}},
         "distinguishing": {"type": "array", "items": {"type": "string"}},
         "descriptors": {"type": "array", "items": {"type": "string"}},
+        "default_expression": {"type": "string",
+                               "description": "characteristic face, e.g. 'wide toothed grin'"},
+        "mannerisms": {"type": "array", "items": {"type": "string"},
+                       "description": "body language / demeanor, e.g. 'relaxed slouch'"},
     },
     "required": ["gender", "hair_color", "hair_style", "eye_color", "outfit"],
 }
@@ -47,8 +51,14 @@ Rules:
 - `gender` must be a count tag: '1girl', '1boy', or '1other'.
 - `hair_color`/`eye_color` may be anime colours (e.g. 'silver hair', 'crimson eyes').
 - `outfit` is a single phrase (e.g. 'school uniform with red necktie').
-- `accessories`/`distinguishing` are short tags (e.g. 'hair ribbon', 'scar over left eye').
-- `descriptors` is any extra visual tags (e.g. 'stoic expression', 'tall').
+- `accessories`/`distinguishing` are short *physical* tags (e.g. 'hair ribbon', \
+'scar over left eye').
+- `descriptors` is any extra *visual* tags (e.g. 'tall', 'freckles'), never an \
+expression or a pose.
+- `default_expression` is the character's characteristic face (e.g. 'wide toothed \
+grin', 'stoic expression'); panels may override it.
+- `mannerisms` is body language or demeanor (e.g. 'relaxed slouch', 'energetic \
+stance'); never put these in the physical fields.
 - Output ONLY the JSON object described by the schema."""
 
 
@@ -61,7 +71,7 @@ class LLMClient(Protocol):
 def _context_for(name: str, script_text: str, existing: AppearanceSpec | None) -> str:
     known = ""
     if existing is not None:
-        tags = existing.prompt_tags()
+        tags = existing.prompt_tags(mannerisms=True)
         if tags:
             known = "\nAlready known traits (keep these): " + ", ".join(tags)
     excerpt = script_text.strip()

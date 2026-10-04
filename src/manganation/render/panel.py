@@ -141,8 +141,13 @@ def find_references(project: Path, spec: PanelSpec) -> dict[str, Path]:
     return out
 
 
-def character_tags(project: Path, names: list[str]) -> dict[str, list[str]]:
-    """Appearance tags per character from the project's registry (best-effort)."""
+def character_tags(
+    project: Path, names: list[str], expressions: dict[str, str] | None = None,
+) -> dict[str, list[str]]:
+    """Tags per character from the project's registry (best-effort): their appearance,
+    plus their default expression *unless the panel gives one* (the panel wins; Yuki
+    grins by default, but "surprised" means surprised). Mannerisms are left out: the
+    panel's action decides the pose."""
     try:
         from manganation.characters.registry import CharacterRegistry
 
@@ -151,7 +156,8 @@ def character_tags(project: Path, names: list[str]) -> dict[str, list[str]]:
         for name in names:
             character = registry.get(name)
             if character is not None:
-                out[name] = character.appearance.prompt_tags()
+                out[name] = character.appearance.prompt_tags(
+                    expression=name not in (expressions or {}))
         return out
     except Exception:  # noqa: BLE001 - no registry yet just means bare names
         return {}
@@ -255,7 +261,8 @@ def _render(
         raise RenderError(f"ComfyUI is not reachable at {settings.comfyui.base_url}")
 
     style = load_style()
-    prompt = build_prompt(spec, style, character_tags(identity, spec.characters))
+    prompt = build_prompt(spec, style,
+                          character_tags(identity, spec.characters, spec.expressions))
     width, height = fit_resolution(frame_w, frame_h)
     seed = seed if seed is not None else (spec.seed if spec.seed is not None
                                           else random.randrange(2**32))
@@ -282,7 +289,7 @@ def _render(
     elif len(refs) > 1:
         ordered = [n for n in spec.characters if n in refs]
         boxes = regions_for(width, height, len(ordered), order=reading_order)
-        tags_by_char = character_tags(identity, ordered)
+        tags_by_char = character_tags(identity, ordered, spec.expressions)
         norm = assign_regions(len(ordered), order=reading_order, margin=0.05)
         references = []
         region_text = []

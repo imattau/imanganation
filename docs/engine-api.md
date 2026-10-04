@@ -92,8 +92,8 @@ Crop-and-stitch, with outside-mask pixels kept exactly (`docs/inpaint.md`). Outp
 `{"name", "version"}`). Their appearance traits follow the artist's prompt, and with
 exactly one character, IP-Adapter guides the patch with their reference (`version`
 honoured; `character_weight` overrides `defaults.inpaint.ipadapter_weight`, 0.45).
-With several characters, traits only. Expression and pose words are filtered out of the
-traits ("wide toothed grin", "quiet demeanor"), so the prompt decides the expression.
+With several characters, traits only. Only *appearance* traits are used, never the
+character's `default_expression` or `mannerisms`, so the prompt decides the expression.
 Unknown characters or versions fail, listing what exists. Leave `characters` out for
 props and backgrounds. Recommended plug-in default: the panel's characters as choices,
 none preselected for a two-shot.

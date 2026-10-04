@@ -125,7 +125,9 @@ def variant_specs(
     """
     if count < 1:
         return []
-    identity = character.appearance.prompt_tags()
+    # Appearance only: expression is a variation axis, so the LoRA must not learn the
+    # character's default face as part of who they are.
+    identity = character.appearance.appearance_tags()
     identity_caption = ", ".join(identity)
 
     # Walk the cartesian product of the variation axes as a mixed-radix odometer so

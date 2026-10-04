@@ -13,8 +13,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from enum import StrEnum
+from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class VersionKind(StrEnum):
@@ -23,11 +24,41 @@ class VersionKind(StrEnum):
     EVOLUTION = "evolution"  # in-story change (haircut, injury, timeskip)
 
 
+# Classifying free-text traits that are really expression or body language. Checked
+# mannerism-first, so "serious demeanor" is a mannerism and "stoic expression" an
+# expression. Used to migrate older manifests (and catch LLM slips), where these were
+# stored as identity in ``distinguishing``/``descriptors``.
+_MANNERISM_WORDS = (
+    "demeanor", "demeanour", "mood", "stance", "pose", "posture", "slouch", "gesture",
+    "attitude", "energetic", "shy", "confident", "cheerful", "bouncy", "fidget",
+)
+_EXPRESSION_WORDS = (
+    "grin", "smile", "smirk", "frown", "laugh", "pout", "scowl", "glare", "wink",
+    "tears", "crying", "blush", "teeth", "toothy", "open mouth", "closed eyes",
+    "expression", "angry", "happy", "sad", "surprised", "serious",
+)
+
+
+def classify_trait(tag: str) -> str:
+    """'mannerism', 'expression' or 'appearance' for a free-text trait."""
+    low = tag.lower()
+    if any(w in low for w in _MANNERISM_WORDS):
+        return "mannerism"
+    if any(w in low for w in _EXPRESSION_WORDS):
+        return "expression"
+    return "appearance"
+
+
 class AppearanceSpec(BaseModel):
     """Structured appearance traits, used to build generation prompts.
 
-    Free-text ``descriptors`` carries anything that does not fit a field; the
+    Free-text ``descriptors`` carries anything *visual* that does not fit a field; the
     structured fields exist so prompt building is deterministic and consistent.
+
+    Identity (``appearance_tags``) is physical only. A character's characteristic face
+    (``default_expression``) and body language (``mannerisms``) are kept apart: stored
+    as identity they overrode what a panel or an inpaint asked for (Yuki's "wide toothed
+    grin" beat "surprised face, open mouth").
     """
 
     gender: str = ""  # "1girl" / "1boy" / "1other" token or free text
@@ -40,10 +71,38 @@ class AppearanceSpec(BaseModel):
     outfit: str = ""
     accessories: list[str] = Field(default_factory=list)  # glasses, ribbon, scarf …
     distinguishing: list[str] = Field(default_factory=list)  # scar, tattoo, eyepatch …
-    descriptors: list[str] = Field(default_factory=list)  # extra tags, verbatim
+    descriptors: list[str] = Field(default_factory=list)  # extra *visual* tags, verbatim
+    # Not identity: a panel's expression or an inpaint prompt overrides these.
+    default_expression: str = ""  # the characteristic face, e.g. "wide toothed grin"
+    mannerisms: list[str] = Field(default_factory=list)  # e.g. "relaxed slouch"
 
-    def prompt_tags(self) -> list[str]:
-        """Flatten to an ordered list of prompt tags (deduped, order-preserving)."""
+    @model_validator(mode="before")
+    @classmethod
+    def _split_expression_traits(cls, data: Any) -> Any:
+        """Move expression/body-language words out of the identity lists (older
+        manifests and LLM output stored them in distinguishing/descriptors)."""
+        if not isinstance(data, dict):
+            return data
+        data = dict(data)
+        expressions = [data["default_expression"]] if data.get("default_expression") else []
+        mannerisms = list(data.get("mannerisms") or [])
+        for key in ("distinguishing", "descriptors"):
+            kept = []
+            for tag in data.get(key) or []:
+                kind = classify_trait(tag) if isinstance(tag, str) else "appearance"
+                if kind == "expression":
+                    expressions.append(tag.strip())
+                elif kind == "mannerism":
+                    mannerisms.append(tag.strip())
+                else:
+                    kept.append(tag)
+            data[key] = kept
+        data["default_expression"] = ", ".join(dict.fromkeys(e for e in expressions if e))
+        data["mannerisms"] = list(dict.fromkeys(m for m in mannerisms if m))
+        return data
+
+    def appearance_tags(self) -> list[str]:
+        """Physical identity only, ordered and deduped: what must hold in every panel."""
         tags: list[str] = []
         for value in (
             self.gender,
@@ -67,7 +126,16 @@ class AppearanceSpec(BaseModel):
                 seen.append(t)
         return seen
 
-    @field_validator("accessories", "distinguishing", "descriptors")
+    def prompt_tags(self, *, expression: bool = True, mannerisms: bool = False) -> list[str]:
+        """Appearance, plus the default expression (and mannerisms) when wanted."""
+        tags = self.appearance_tags()
+        if expression and self.default_expression:
+            tags.append(self.default_expression)
+        if mannerisms:
+            tags.extend(m for m in self.mannerisms if m not in tags)
+        return tags
+
+    @field_validator("accessories", "distinguishing", "descriptors", "mannerisms")
     @classmethod
     def _clean_list(cls, v: list[str]) -> list[str]:
         return [item.strip() for item in v if item and item.strip()]

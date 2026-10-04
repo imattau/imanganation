@@ -55,24 +55,6 @@ class InpaintResult:
     work_size: list[int] = field(default_factory=list)  # [w, h] the crop was painted at
 
 
-# Words that make a trait an expression or pose rather than appearance. Character
-# traits have stored these as identity ("wide toothed grin", "quiet demeanor", "relaxed
-# slouch"), and in an inpaint they override the artist's prompt: "surprised face, open
-# mouth" came out as the stored grin even at low IP-Adapter weight. Physical traits,
-# including distinguishing marks like a scar, are kept.
-_EXPRESSION_OR_POSE = (
-    "grin", "smile", "smirk", "frown", "laugh", "pout", "scowl", "glare", "wink",
-    "crying", "tears", "blush", "expression", "demeanor", "mood", "stance", "pose",
-    "posture", "slouch", "open mouth", "closed eyes", "teeth", "toothy", "energetic",
-    "angry", "happy", "sad", "surprised", "serious", "shy", "sleepy",
-)
-
-
-def identity_tags(tags: list[str]) -> list[str]:
-    """Appearance traits only: drop expression/pose words so the prompt decides those."""
-    return [t for t in tags if not any(w in t.lower() for w in _EXPRESSION_OR_POSE)]
-
-
 def resolve_characters(
     identity: Path, characters: list[dict] | None,
 ) -> tuple[list[str], Path | None, dict[str, str]]:
@@ -95,8 +77,9 @@ def resolve_characters(
         character = reg.get(name)
         if character is None:
             raise InpaintError(f"no character {name!r} in this project (known: {known})")
-        tags += [t for t in identity_tags(character.appearance.prompt_tags())
-                 if t not in tags]
+        # Appearance only: the artist's prompt decides expression and pose. (Stored as
+        # identity, Yuki's "wide toothed grin" beat "surprised face, open mouth".)
+        tags += [t for t in character.appearance.appearance_tags() if t not in tags]
         ref = reg.reference_path(character.name, version)
         if version and (ref is None or not ref.exists()):
             versions = ", ".join(v.id for v in character.versions) or "none"
