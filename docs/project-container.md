@@ -113,19 +113,6 @@ Integrity rules: `origin` is reachable by following `parent`; `parent` chains ne
 loop; `origin` is a `render` or `import` take; a take derives only from takes of its
 own panel.
 
-## Validation
-
-- **Shape:** `project-container.schema.json` (JSON Schema 2020-12). It also rejects
-  identity fields in `cast`, refine/inpaint takes without a parent, renders with one,
-  absolute or `..` paths, and labels used as ids.
-- **Cross-references** (what JSON Schema can't express):
-  `manganation.project_container.integrity_errors(doc, root=None)`. It checks unique
-  ids, panel ↔ take ownership, `active_take`, placement pages, the cursor, parent
-  chains (no loops, end at the declared origin) and, given the project folder, that
-  every referenced file exists. Pure Python, so the fork (via the Python plug-in), the
-  engine and an importer can share it. Tested against the example in
-  `tests/test_project_container.py`.
-
 ### `cast`, `locations`, `props`
 Story-side lists. `cast` entries: `name`, `aliases`, `notes` (story notes, e.g. "Yuki
 is energetic, always grinning"). **No traits or images**, which are engine state.
@@ -177,3 +164,16 @@ The current `seq` / `project_dir` forms keep working during migration.
 | layer parasite with full spec | `imanganation-take` reference |
 
 A one-shot importer can do this. The rooftop example file was hand-converted this way.
+
+## Validation
+
+- **Shape:** `project-container.schema.json` (JSON Schema 2020-12). It also rejects
+  identity fields in `cast`, refine/inpaint takes without a parent, renders with one,
+  absolute or `..` paths, and labels used as ids.
+- **Cross-references** (what JSON Schema can't express):
+  `manganation.project_container.integrity_errors(doc, root=None)`. It checks unique
+  ids, panel ↔ take ownership, `active_take`, placement pages, the cursor, parent
+  chains (no loops, end at the declared origin) and, given the project folder, that
+  every referenced file exists. Pure Python, so the fork (via the Python plug-in), the
+  engine and an importer can share it. Tested against the example in
+  `tests/test_project_container.py`.
