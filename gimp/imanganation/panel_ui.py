@@ -153,7 +153,25 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
                 and len(row.encode("utf-8")) + len(preview.encode("utf-8")) + 1 <= 4096):
             row += f"\t{preview}"
         filmstrip_rows.append(row)
-    script_rows = [f"{panel['id']}\t{_script_panel_label(panel)}" for panel in panels]
+    script_rows = ["# Reading order"]
+    for panel in panels:
+        if panel.get("status") == "orphaned":
+            continue
+        marker = "●" if panel.get("placement") or panel.get("status") == "placed" else "○"
+        take_count = len(panel.get("takes", []))
+        take_summary = f" · {take_count} take{'s' if take_count != 1 else ''}"
+        script_rows.append(
+            f"{panel['id']}\t{_script_panel_label(panel)} · {marker}{take_summary}")
+    orphaned_script = [panel for panel in panels if panel.get("status") == "orphaned"]
+    if orphaned_script:
+        script_rows.append("# Needs matching")
+        for panel in orphaned_script:
+            take_count = len(panel.get("takes", []))
+            active = panel.get("active_take")
+            retained = f" · active {active}" if active else ""
+            script_rows.append(
+                f"{panel['id']}\t{_script_panel_label(panel)} · "
+                f"{take_count} retained take{'s' if take_count != 1 else ''}{retained}")
 
     character_rows = ["# Cast"]
     if cast:
