@@ -316,3 +316,22 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
         "panel": "\n".join(panel_rows),
         "panel_selected": selected_id if selected_id in panel_by_id else "",
     }
+
+
+def build_welcome_docks() -> dict[str, str]:
+    """First-run workspace content shown before a project is selected."""
+    return {
+        "selected_id": "",
+        "project": "# Imanganation\nChoose a project folder to open your workspace.",
+        "project_selected": "",
+        "inspector": "# Workspace\nProject\tNot open\n\nChoose or create an Imanganation project.",
+        "inspector_selected": "",
+        "filmstrip": "# Pages\nOpen a project to see its pages here.",
+        "filmstrip_selected": "",
+        "script": "# Script\nOpen a project to see its reading order.",
+        "script_selected": "",
+        "characters": "# Character Bible\nOpen a project to see its cast and references.",
+        "character_selected": "",
+        "panel": "# Panel\nSelect a script panel to see its production brief.",
+        "panel_selected": "",
+    }

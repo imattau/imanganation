@@ -191,8 +191,12 @@ A one-shot importer can do this. The rooftop example file was hand-converted thi
 ### Current plug-in transition
 
 The Python plug-in now reads the container cursor by panel id and writes it atomically.
-The persistent Python **Open Project Docks…** command renders Project, Script, Inspector,
-Panel, Page Filmstrip, and Character Bible from the manifest; panel, page, and cast rows
+The zero-argument persistent Python workspace extension starts with GIMP, restores the
+last selected project, and registers Project, Script, Inspector, Panel, Page Filmstrip,
+and Character Bible by default. On first launch its Project dock offers **Open project…**;
+the selected project path is stored in GIMP's user settings. **Open / Switch Project…**
+can load another project from the Filters menu. The docks render from the manifest; panel,
+page, and cast rows
 send stable keys over the PDB. Script rows follow panel reading order, show placement and
 take counts, and group orphaned work under Needs matching; selecting a row synchronizes
 the same panel in the other docks. **Match selected** matches one orphan to one untouched

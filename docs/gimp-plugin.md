@@ -44,15 +44,19 @@ GIMP also gives three things for free that a custom web UI would have to build:
 `gimp/imanganation/project_store.py` and `gimp/imanganation/panel_ui.py` are installed together in
 `~/.config/GIMP/3.2/plug-ins/imanganation`. The store reads and atomically updates
 `project.json` while preserving unknown keys. It validates format/version, stable IDs,
-and project-relative paths. The persistent **Open Project Docks…** command registers
-Project, Script, Inspector, and Page Filmstrip panels; row callbacks carry stable IDs.
+and project-relative paths. A zero-argument persistent workspace extension starts with
+GIMP and registers the Project, Script, Inspector, Panel, Page Filmstrip, and Character
+Bible docks by default. On first launch, the Project dock offers **Open project…**; the
+chosen project folder is remembered in GIMP's user settings and its docks are restored on
+later launches. The **Open / Switch Project…** command remains available under
+*Filters → imanganation*. Row callbacks carry stable IDs.
 For container projects, generated and imported images are
 copied into immutable `takes/` files and linked through take IDs; XCF parasites and
 page placement metadata are still being migrated. It adds nine commands under
 *Filters → imanganation*:
 
-- **Open Project Docks…**: choose a folder containing `project.json` to open the
-  persistent Project, Script, Inspector, and Page Filmstrip docks. Select project rows to
+- **Open / Switch Project…**: choose a folder containing `project.json` to populate the
+  workspace docks. Select project rows to
   inspect panels or pages; page tiles show placed-panel counts and basic progress,
   and **Open page** opens the selected page's XCF (or the selected panel's page).
   Script rows follow reading order and select the same panel in Project and Inspector.
@@ -302,4 +306,3 @@ background stayed and only the face changed, even on a new seed. Through GIMP
 (`gimp/keep_composition_smoke_test.py`, `…_keep_composition_gimp.png`) a new-seed
 regenerate kept Akira's crouch, box and fence. Edges keep structure, not colour (his
 blazer changed colour), so combine with **Same seed** to keep colours.
-

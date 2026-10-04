@@ -39,13 +39,14 @@ from pathlib import Path
 import gi
 
 gi.require_version("Gimp", "3.0")
+gi.require_version("Gtk", "3.0")
 from gi.repository import Gimp  # noqa: E402
-from gi.repository import Gio, GLib, GObject  # noqa: E402
+from gi.repository import Gio, GLib, GObject, Gtk  # noqa: E402
 
 try:
     from project_store import (ProjectFileError, load_project, new_id, record_take,
                                save_project)
-    from panel_ui import build_docks, character_row_id, rgb_png
+    from panel_ui import build_docks, build_welcome_docks, character_row_id, rgb_png
 except ImportError:  # Keep older single-file plug-in installs usable for legacy projects.
     ProjectFileError = ValueError
     load_project = record_take = save_project = None
@@ -53,6 +54,7 @@ except ImportError:  # Keep older single-file plug-in installs usable for legacy
     build_docks = None
     character_row_id = None
     rgb_png = None
+    build_welcome_docks = None
 
 PROC_RENDER = "plug-in-imanganation-render-panel"
 PROC_NEXT = "plug-in-imanganation-place-next-panel"
@@ -63,6 +65,7 @@ PROC_SETREF = "plug-in-imanganation-set-character-reference"
 PROC_INPAINT = "plug-in-imanganation-inpaint-selection"
 PROC_STATUS = "plug-in-imanganation-engine-status"
 PROC_PROJECT_DOCKS = "plug-in-imanganation-project-docks"
+PROC_AUTOSTART = "extension-imanganation-ui"
 DOCK_PROJECT = "project"
 DOCK_INSPECTOR = "inspector"
 DOCK_FILMSTRIP = "filmstrip"
@@ -72,13 +75,14 @@ DOCK_PANEL = "panel"
 DOCK_IDS = (DOCK_PROJECT, DOCK_INSPECTOR, DOCK_FILMSTRIP, DOCK_SCRIPT,
             DOCK_CHARACTERS, DOCK_PANEL)
 DOCK_ACTIONS = {
-    DOCK_PROJECT: "plug-in-imanganation-dock-project-refresh",
+    DOCK_PROJECT: "plug-in-imanganation-dock-project-action",
     DOCK_INSPECTOR: "plug-in-imanganation-dock-inspector-refresh",
     DOCK_FILMSTRIP: "plug-in-imanganation-dock-filmstrip-open-page",
     DOCK_SCRIPT: "plug-in-imanganation-dock-script-refresh",
     DOCK_CHARACTERS: "plug-in-imanganation-dock-characters-refresh",
     DOCK_PANEL: "plug-in-imanganation-dock-panel-refresh",
 }
+DOCK_OPEN_PROJECT = "plug-in-imanganation-dock-open-project"
 DOCK_ITEMS = {
     DOCK_PROJECT: "plug-in-imanganation-dock-project-item",
     DOCK_FILMSTRIP: "plug-in-imanganation-dock-filmstrip-item",
@@ -1183,6 +1187,78 @@ def _dock_pdb_call(name, values):
         raise RuntimeError(f"GIMP procedure failed: {name}")
 
 
+def _last_project_file():
+    return Path(Gimp.directory()) / "imanganation" / "last-project.txt"
+
+
+def _remember_project(root):
+    state_file = _last_project_file()
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    temporary = state_file.with_suffix(".tmp")
+    temporary.write_text(str(Path(root).resolve()), encoding="utf-8")
+    os.replace(temporary, state_file)
+
+
+def _remembered_project():
+    try:
+        root = Path(_last_project_file().read_text(encoding="utf-8").strip())
+        load_project(root)
+        return root
+    except (OSError, ProjectFileError, ValueError):
+        return None
+
+
+def _choose_project_folder():
+    dialog = Gtk.FileChooserDialog(
+        title="Open Imanganation Project", action=Gtk.FileChooserAction.SELECT_FOLDER)
+    dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+                       Gtk.STOCK_OPEN, Gtk.ResponseType.ACCEPT)
+    dialog.set_modal(True)
+    previous = _remembered_project()
+    if previous is not None:
+        dialog.set_current_folder(str(previous))
+    response = dialog.run()
+    filename = dialog.get_filename() if response == Gtk.ResponseType.ACCEPT else None
+    dialog.destroy()
+    return Path(filename) if filename else None
+
+
+def _choose_page_size(width, height):
+    dialog = Gtk.Dialog(title="New page size", flags=Gtk.DialogFlags.MODAL)
+    dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+                       "Create", Gtk.ResponseType.OK)
+    grid = Gtk.Grid(column_spacing=12, row_spacing=8, margin=12)
+    width_spin = Gtk.SpinButton.new_with_range(1, 20000, 100)
+    height_spin = Gtk.SpinButton.new_with_range(1, 20000, 100)
+    width_spin.set_value(width)
+    height_spin.set_value(height)
+    grid.attach(Gtk.Label(label="Width"), 0, 0, 1, 1)
+    grid.attach(width_spin, 1, 0, 1, 1)
+    grid.attach(Gtk.Label(label="Height"), 0, 1, 1, 1)
+    grid.attach(height_spin, 1, 1, 1, 1)
+    dialog.get_content_area().add(grid)
+    dialog.show_all()
+    response = dialog.run()
+    size = (width_spin.get_value_as_int(), height_spin.get_value_as_int()) \
+        if response == Gtk.ResponseType.OK else None
+    dialog.destroy()
+    return size
+
+
+def _activate_project(root):
+    root = Path(root).resolve()
+    manifest = load_project(root)
+    selected = manifest.get("cursor", {}).get("next_panel")
+    if not selected:
+        selected = next((panel["id"] for panel in manifest["panels"]), None)
+    if not selected and manifest["pages"]:
+        selected = manifest["pages"][0]["id"]
+    _remember_project(root)
+    _DOCK_CONTEXT.update(root=root, selected_id=selected,
+                         orphan_id=None, candidate_id=None)
+    _register_project_docks(_DOCK_PLUGIN)
+
+
 def _engine_reference_rows(root, manifest, selected_id):
     panel = next((p for p in manifest["panels"] if p["id"] == selected_id), None)
     if panel is None or not panel.get("characters"):
@@ -1344,7 +1420,10 @@ def _project_page_thumbnails(root, manifest):
 def _refresh_project_docks(sync_canvas=False):
     if not _DOCK_CONTEXT or build_docks is None:
         return
-    root = _DOCK_CONTEXT["root"]
+    root = _DOCK_CONTEXT.get("root")
+    if root is None:
+        _register_project_docks(_DOCK_PLUGIN)
+        return
     manifest = load_project(root)
     selected_id = _DOCK_CONTEXT.get("selected_id")
     if sync_canvas:
@@ -1392,7 +1471,8 @@ def _refresh_project_docks(sync_canvas=False):
 
 
 def _notify_project_docks(root):
-    if _DOCK_CONTEXT and Path(root).resolve() == Path(_DOCK_CONTEXT["root"]).resolve():
+    active_root = _DOCK_CONTEXT.get("root")
+    if active_root and Path(root).resolve() == Path(active_root).resolve():
         try:
             _refresh_project_docks()
         except Exception as exc:
@@ -1667,26 +1747,35 @@ def _create_project_page(root, manifest, width, height):
 
 def _dock_action(procedure, config, data):
     try:
-        if data == "open-page":
+        if data == "open-project":
+            root = _remembered_project() or _choose_project_folder()
+            if root is None:
+                return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
+            _activate_project(root)
+        elif data == "project-action":
+            if _DOCK_CONTEXT.get("root") is None:
+                root = _choose_project_folder()
+                if root is None:
+                    return procedure.new_return_values(
+                        Gimp.PDBStatusType.CANCEL, GLib.Error())
+                _activate_project(root)
+                return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+            manifest = load_project(_DOCK_CONTEXT["root"])
+            width, height = _default_page_size(_DOCK_CONTEXT["root"], manifest)
+            size = _choose_page_size(width, height)
+            if size is None:
+                return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
+            page_id = _create_project_page(_DOCK_CONTEXT["root"], manifest, *size)
+            _DOCK_CONTEXT["selected_id"] = page_id
+            _refresh_project_docks()
+            manifest = load_project(_DOCK_CONTEXT["root"])
+            _show_project_page(_DOCK_CONTEXT["root"], manifest, page_id)
+        elif data == "open-page":
             manifest = load_project(_DOCK_CONTEXT["root"])
             selected = _DOCK_CONTEXT.get("selected_id")
             panel = next((p for p in manifest["panels"] if p["id"] == selected), None)
             page_id = selected if any(page["id"] == selected for page in manifest["pages"]) \
                 else (panel.get("placement") or {}).get("page") if panel else None
-            _show_project_page(_DOCK_CONTEXT["root"], manifest, page_id)
-        elif data == "add-page":
-            manifest = load_project(_DOCK_CONTEXT["root"])
-            width, height = _default_page_size(_DOCK_CONTEXT["root"], manifest)
-            config.set_property("width", width)
-            config.set_property("height", height)
-            if not _dialog(procedure, config, DOCK_ACTIONS[DOCK_PROJECT]):
-                return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
-            page_id = _create_project_page(
-                _DOCK_CONTEXT["root"], manifest,
-                config.get_property("width"), config.get_property("height"))
-            _DOCK_CONTEXT["selected_id"] = page_id
-            _refresh_project_docks()
-            manifest = load_project(_DOCK_CONTEXT["root"])
             _show_project_page(_DOCK_CONTEXT["root"], manifest, page_id)
         elif data == "match-panel":
             _match_selected_panel()
@@ -1734,7 +1823,8 @@ def _dock_item_action(procedure, config, data):
 
 def _add_dock_callbacks(plugin):
     callbacks = [
-        (DOCK_ACTIONS[DOCK_PROJECT], _dock_action, "add-page", False),
+        (DOCK_ACTIONS[DOCK_PROJECT], _dock_action, "project-action", False),
+        (DOCK_OPEN_PROJECT, _dock_action, "open-project", False),
         (DOCK_ACTIONS[DOCK_INSPECTOR], _dock_action, "refresh-canvas", False),
         (DOCK_ACTIONS[DOCK_FILMSTRIP], _dock_action, "open-page", False),
         (DOCK_ITEMS[DOCK_PROJECT], _dock_item_action, DOCK_PROJECT, True),
@@ -1751,11 +1841,6 @@ def _add_dock_callbacks(plugin):
         if takes_item:
             procedure.add_string_argument("item", "Item id", "Stable project row id",
                                           "", GObject.ParamFlags.READWRITE)
-        if name == DOCK_ACTIONS[DOCK_PROJECT]:
-            procedure.add_int_argument("width", "Page _width", "New page width in pixels",
-                                       1, 20000, 1600, GObject.ParamFlags.READWRITE)
-            procedure.add_int_argument("height", "Page _height", "New page height in pixels",
-                                       1, 20000, 2400, GObject.ParamFlags.READWRITE)
         procedure.set_documentation("Handle an Imanganation dock action",
                                     "Called by the host-rendered Imanganation docks.", name)
         procedure.set_attribution("imanganation", "imanganation", "2026")
@@ -1763,28 +1848,53 @@ def _add_dock_callbacks(plugin):
 
 
 def _register_project_docks(plugin):
-    manifest = load_project(_DOCK_CONTEXT["root"])
-    contents = build_docks(
-        manifest, _DOCK_CONTEXT.get("selected_id"), _DOCK_CONTEXT["root"],
-        _project_page_thumbnails(_DOCK_CONTEXT["root"], manifest))
-    rows = [
-        (DOCK_PROJECT, "Project", "tree", contents["project"],
-         contents["project_selected"], "Add page", DOCK_ACTIONS[DOCK_PROJECT],
-         DOCK_ITEMS[DOCK_PROJECT]),
-        (DOCK_INSPECTOR, "Inspector", "properties", contents["inspector"],
-         "", "Refresh", DOCK_ACTIONS[DOCK_INSPECTOR], ""),
-        (DOCK_FILMSTRIP, "Page Filmstrip", "tiles", contents["filmstrip"],
-         contents["filmstrip_selected"], "Open page", DOCK_ACTIONS[DOCK_FILMSTRIP],
-         DOCK_ITEMS[DOCK_FILMSTRIP]),
-        (DOCK_SCRIPT, "Script", "list", contents["script"],
-         contents["script_selected"], "Match selected", DOCK_ACTIONS[DOCK_SCRIPT],
-         DOCK_ITEMS[DOCK_SCRIPT]),
-        (DOCK_CHARACTERS, "Character Bible", "tree", contents["characters"],
-         contents["character_selected"], "Refresh", DOCK_ACTIONS[DOCK_CHARACTERS],
-         DOCK_ITEMS[DOCK_CHARACTERS]),
-        (DOCK_PANEL, "Panel", "properties", contents["panel"],
-         contents["panel_selected"], "Set frame", DOCK_ACTIONS[DOCK_PANEL], ""),
-    ]
+    root = _DOCK_CONTEXT.get("root")
+    if root is None:
+        contents = (build_welcome_docks() if build_welcome_docks is not None else {
+            "project": "# Imanganation\nChoose a project folder to open your workspace.",
+            "inspector": "# Workspace\nOpen a project to get started.",
+            "filmstrip": "# Pages\nOpen a project to see its pages.",
+            "script": "# Script\nOpen a project to see its reading order.",
+            "characters": "# Character Bible\nOpen a project to see its cast.",
+            "panel": "# Panel\nSelect a panel to see its production brief.",
+        })
+        rows = [
+            (DOCK_PROJECT, "Project", "tree", contents["project"], "",
+             "Open project…", DOCK_OPEN_PROJECT, ""),
+            (DOCK_INSPECTOR, "Inspector", "properties", contents["inspector"],
+             "", "", "", ""),
+            (DOCK_FILMSTRIP, "Page Filmstrip", "tiles", contents["filmstrip"],
+             "", "", "", ""),
+            (DOCK_SCRIPT, "Script", "list", contents["script"],
+             "", "", "", ""),
+            (DOCK_CHARACTERS, "Character Bible", "tree", contents["characters"],
+             "", "", "", ""),
+            (DOCK_PANEL, "Panel", "properties", contents["panel"],
+             "", "", "", ""),
+        ]
+    else:
+        manifest = load_project(root)
+        contents = build_docks(
+            manifest, _DOCK_CONTEXT.get("selected_id"), root,
+            _project_page_thumbnails(root, manifest))
+        rows = [
+            (DOCK_PROJECT, "Project", "tree", contents["project"],
+             contents["project_selected"], "Add page", DOCK_ACTIONS[DOCK_PROJECT],
+             DOCK_ITEMS[DOCK_PROJECT]),
+            (DOCK_INSPECTOR, "Inspector", "properties", contents["inspector"],
+             "", "Refresh", DOCK_ACTIONS[DOCK_INSPECTOR], ""),
+            (DOCK_FILMSTRIP, "Page Filmstrip", "tiles", contents["filmstrip"],
+             contents["filmstrip_selected"], "Open page", DOCK_ACTIONS[DOCK_FILMSTRIP],
+             DOCK_ITEMS[DOCK_FILMSTRIP]),
+            (DOCK_SCRIPT, "Script", "list", contents["script"],
+             contents["script_selected"], "Match selected", DOCK_ACTIONS[DOCK_SCRIPT],
+             DOCK_ITEMS[DOCK_SCRIPT]),
+            (DOCK_CHARACTERS, "Character Bible", "tree", contents["characters"],
+             contents["character_selected"], "Refresh", DOCK_ACTIONS[DOCK_CHARACTERS],
+             DOCK_ITEMS[DOCK_CHARACTERS]),
+            (DOCK_PANEL, "Panel", "properties", contents["panel"],
+             contents["panel_selected"], "Set frame", DOCK_ACTIONS[DOCK_PANEL], ""),
+        ]
     for identifier, title, presentation, content, selected, action_label, action, item in rows:
         _dock_pdb_call("gimp-extension-panel-register", {
             "identifier": identifier,
@@ -1796,7 +1906,8 @@ def _register_project_docks(plugin):
             "action-procedure": action,
             "item-action-procedure": item,
         })
-    _refresh_project_docks()
+    if root is not None:
+        _refresh_project_docks()
 
 
 def _project_docks_run(procedure, config, data):
@@ -1807,19 +1918,34 @@ def _project_docks_run(procedure, config, data):
         return _error(procedure, "The plug-in install is missing project_store.py or panel_ui.py")
     root = Path(folder.get_path())
     try:
-        manifest = load_project(root)
-        selected = manifest.get("cursor", {}).get("next_panel")
-        if not selected:
-            selected = next((panel["id"] for panel in manifest["panels"]), None)
-        if not selected and manifest["pages"]:
-            selected = manifest["pages"][0]["id"]
-        _DOCK_CONTEXT.update(root=root, selected_id=selected,
-                             orphan_id=None, candidate_id=None)
+        load_project(root)
+        _remember_project(root)
+        _dock_pdb_call(DOCK_OPEN_PROJECT, {})
+    except Exception as exc:
+        return _error(procedure, str(exc))
+    return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+
+
+def _autostart_run(procedure, config, data):
+    """Install the default workspace before GIMP restores its dock layout."""
+    try:
+        root = _remembered_project()
+        if root is not None:
+            manifest = load_project(root)
+            selected = manifest.get("cursor", {}).get("next_panel")
+            if not selected:
+                selected = next((panel["id"] for panel in manifest["panels"]), None)
+            if not selected and manifest["pages"]:
+                selected = manifest["pages"][0]["id"]
+            _DOCK_CONTEXT.update(root=root, selected_id=selected,
+                                 orphan_id=None, candidate_id=None)
+        else:
+            _DOCK_CONTEXT.update(root=None, selected_id=None,
+                                 orphan_id=None, candidate_id=None)
         _add_dock_callbacks(_DOCK_PLUGIN)
         _register_project_docks(_DOCK_PLUGIN)
     except Exception as exc:
-        return _error(procedure, str(exc))
-
+        Gimp.message(f"Could not start Imanganation workspace: {exc}")
     procedure.persistent_ready()
     _DOCK_PLUGIN.persistent_enable()
     GLib.MainLoop().run()
@@ -1832,27 +1958,30 @@ class Imanganation(Gimp.PlugIn):
 
     def do_query_procedures(self):
         return [PROC_RENDER, PROC_NEXT, PROC_REGEN, PROC_INPAINT, PROC_REFINE, PROC_SETREF,
-                PROC_PLACE, PROC_STATUS, PROC_PROJECT_DOCKS]
+                PROC_PLACE, PROC_STATUS, PROC_PROJECT_DOCKS, PROC_AUTOSTART]
 
     def do_create_procedure(self, name):
         global _DOCK_PLUGIN
         _DOCK_PLUGIN = self
-        if name == PROC_PROJECT_DOCKS:
-            # Persistent procedures are generic GimpProcedure instances; GIMP
-            # rejects PERSISTENT in Gimp.ImageProcedure.new(). This command is
-            # project-scoped and gets its project folder from an argument rather
-            # than from an active image.
+        if name == PROC_AUTOSTART:
             proc = Gimp.Procedure.new(
-                self, name, Gimp.PDBProcType.PERSISTENT, _project_docks_run, None)
-            proc.set_menu_label("Open Project _Docks...")
-            proc.add_enum_argument(
-                "run-mode", "Run mode", "How to run the project dock command",
-                Gimp.RunMode, Gimp.RunMode.INTERACTIVE, GObject.ParamFlags.READWRITE)
+                self, name, Gimp.PDBProcType.PERSISTENT, _autostart_run, None)
+            proc.set_documentation(
+                "Start the Imanganation workspace",
+                "Registers the Imanganation project docks at GIMP startup.", name)
+            proc.set_attribution("imanganation", "imanganation", "2026")
+            return proc
+        if name == PROC_PROJECT_DOCKS:
+            proc = Gimp.Procedure.new(
+                self, name, Gimp.PDBProcType.PLUGIN, _project_docks_run, None)
+            proc.set_menu_label("Open / Switch _Project...")
+            proc.add_enum_argument("run-mode", "Run mode", "How to run the procedure",
+                                   Gimp.RunMode, Gimp.RunMode.INTERACTIVE,
+                                   GObject.ParamFlags.READWRITE)
             proc.add_menu_path("<Image>/Filters/imanganation")
             proc.set_documentation(
                 "Open the Imanganation project docks",
-                "Register and keep the Project, Script, Inspector, Panel, Page Filmstrip, "
-                "and Character Bible docks connected to a project.json manifest.", name)
+                "Open or switch the project shown in the startup Imanganation workspace.", name)
             proc.add_file_argument(
                 "project-dir", "_Project folder", "Folder containing project.json",
                 Gimp.FileChooserAction.SELECT_FOLDER, False, None,
