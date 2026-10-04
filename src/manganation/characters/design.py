@@ -23,11 +23,20 @@ from manganation.characters.schema import AppearanceSpec, Character
 DESIGN_QUALITY = [
     "masterpiece",
     "best quality",
-    "cowboy shot",
+    "(cowboy shot:1.2)",  # thighs up: the head stays in CLIP's centre crop
+    # A neutral reference pose: leaning, crouching or close-up framings carry their
+    # composition into every panel through IP-Adapter
+    "standing",
+    "straight-on",
+    "arms at sides",
     "looking at viewer",
     "facing viewer",
-    "simple white background",
-    "clean lineart",
+    # Danbooru tags (NoobAI's vocabulary), weighted: free text like "simple white
+    # background", or the plain tags, still gave grey or tinted backdrops (dark
+    # outfits pull a dark one)
+    "(white background:1.4)",
+    "(simple background:1.2)",
+    "anime coloring",
     "anime",
     "highly detailed",
 ]
@@ -46,7 +55,13 @@ DESIGN_NEGATIVE = (
     "character sheet, reference sheet, turnaround, expression sheet, chibi, "
     # A shadowed/gradient backdrop rides along into IP-Adapter panels and dataset
     # variants (docs/phase6b.md); references want a flat, evenly lit background.
-    "shadow, cast shadow, dramatic lighting, gradient background"
+    "shadow, cast shadow, dramatic lighting, gradient background, grey background, "
+    "colored background, monochrome, greyscale, sketch, lineart, uncolored, "
+    # "looking at / facing viewer" pulls NoobAI toward POV framings, where the viewer's
+    # hand reaches into the shot (a stray hand at the edge of the sheet)
+    "pov, pov hands, disembodied limb, extra arms, extra hands, "
+    "leaning forward, bent over, squatting, kneeling, sitting, close-up, "
+    "from above, from below, dutch angle, foreshortening"
 )
 
 # Sane defaults when a trait is unknown, so generation never produces a blank look.

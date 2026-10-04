@@ -164,7 +164,11 @@ def test_registry_replace_version(tmp_path, monkeypatch):
 def test_build_design_prompt_has_quality_and_default_gender():
     p = build_design_prompt(AppearanceSpec(hair_color="black hair"))
     assert "1person" in p.tags  # default gender injected
-    assert "cowboy shot" in p.tags
+    assert "(cowboy shot:1.2)" in p.tags and "standing" in p.tags
+    assert "(white background:1.4)" in p.tags  # weighted: plain tags gave grey backdrops
+    # POV framings put the viewer's hand in the sheet; a reference wants a neutral pose
+    assert "pov hands" in p.negative and "disembodied limb" in p.negative
+    assert "leaning forward" in p.negative
     # Multi-view sheets make IP-Adapter render grids of repeated figures.
     assert not any("sheet" in t for t in p.tags)
     assert "character sheet" in p.negative and "multiple views" in p.negative
