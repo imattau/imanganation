@@ -387,3 +387,23 @@ def project_import(
         if "import_note" in t.get("engine", {}):
             rprint(f"  [yellow]note[/yellow] {t['engine'].get('legacy_file')}: "
                    f"{t['engine']['import_note']}")
+
+
+@project_app.command("link")
+def project_link(
+    container: Path = typer.Argument(..., exists=True, file_okay=False,
+                                     help="Project container folder (has project.json)."),
+    identity: str = typer.Argument(..., help="Folder under projects/ holding the cast's "
+                                             "characters.json, e.g. rooftop."),
+) -> None:
+    """Point a container's project id at an existing character registry."""
+    import json
+
+    from manganation.identity import register
+    from manganation.project import projects_root
+
+    project_id = json.loads((container / "project.json").read_text())["project"]["id"]
+    if not (projects_root() / identity / "characters.json").is_file():
+        raise typer.BadParameter(f"projects/{identity} has no characters.json")
+    register(project_id, identity)
+    rprint(f"[green]linked[/green] {project_id} -> projects/{identity}")

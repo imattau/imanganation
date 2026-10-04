@@ -9,6 +9,10 @@ Pure Python, no dependencies, so the engine, tests and an importer can all use i
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from manganation.script.schema import PanelSpec
 
 FORMAT = "imanganation.project"
 VERSION = 1
@@ -94,3 +98,29 @@ def integrity_errors(doc: dict, root: Path | None = None) -> list[str]:
             files.append(doc["script"]["file"])
         errors += [f"missing file: {f}" for f in files if not (root / f).is_file()]
     return errors
+
+
+_SPEC_FIELDS = ("scene_heading", "location", "action", "camera", "expressions", "dialogue",
+                "sfx", "notes", "flashback", "aspect_ratio", "seed")
+
+
+def panel_to_spec(panel: dict) -> tuple[PanelSpec, dict[str, str]]:
+    """A container panel -> the engine's ``PanelSpec`` plus ``{character: version}``.
+
+    Characters are ``[{"name", "version"}]`` in the container (``version`` optional,
+    null = the active reference) and plain names in ``PanelSpec``. Raises ``ValueError``
+    (pydantic) for an invalid spec."""
+    from manganation.script.schema import PanelSpec
+
+    label = panel.get("label") or {}
+    names, versions = [], {}
+    for c in panel.get("characters", []):
+        name = c["name"] if isinstance(c, dict) else str(c)
+        names.append(name)
+        if isinstance(c, dict) and c.get("version"):
+            versions[name] = c["version"]
+    spec = PanelSpec(
+        page=label.get("page", 1), panel=label.get("panel", 1), characters=names,
+        **{k: panel[k] for k in _SPEC_FIELDS if k in panel and panel[k] is not None},
+    )
+    return spec, versions

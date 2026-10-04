@@ -44,3 +44,6 @@ projects/*/tmp/
 # Project containers: generated takes and masks (the manifest, script and pages are tracked)
 projects/*.imanga/takes/
 projects/*.imanga/masks/
+
+# Engine render cache for inline (project-container) renders; the plug-in copies takes out
+outputs/

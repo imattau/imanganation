@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from manganation.project import projects_root
 from manganation.render import inpaint as inpaint_render
@@ -27,11 +27,33 @@ from manganation.render.comfy_client import ComfyClient
 
 
 class RenderRequest(BaseModel):
-    project_dir: str
-    seq: int = Field(ge=1, description="1-based position of the panel in panels.json")
+    """Either form, not both (docs/engine-api.md):
+
+    - **inline** (project container): ``project`` (``prj_…``) + ``panel`` (a container
+      panel object; per-character ``version`` honoured) + ``reading_order``.
+    - **legacy**: ``project_dir`` + ``seq`` (panel ``seq`` of ``panels.json``)."""
+
+    project_dir: str | None = None
+    seq: int | None = Field(default=None, ge=1,
+                            description="1-based position of the panel in panels.json")
+    project: str | None = Field(default=None, pattern=r"^prj_[a-z0-9]{6,}$")
+    panel: dict | None = None
+    reading_order: Literal["rtl", "ltr"] = "rtl"
     frame_width: float = Field(gt=0)
     frame_height: float = Field(gt=0)
     seed: int | None = None
+
+    @model_validator(mode="after")
+    def _one_form(self) -> RenderRequest:
+        inline = self.project is not None or self.panel is not None
+        legacy = self.project_dir is not None or self.seq is not None
+        if inline == legacy:
+            raise ValueError("send either project + panel (inline) or project_dir + seq")
+        if inline and (self.project is None or self.panel is None):
+            raise ValueError("inline renders need both project and panel")
+        if legacy and (self.project_dir is None or self.seq is None):
+            raise ValueError("legacy renders need both project_dir and seq")
+        return self
 
 
 class RefineRequest(BaseModel):
@@ -133,6 +155,7 @@ def create_app(
     inpaint=inpaint_render.inpaint_panel,
     comfy_stats=None,
     models_check=None,
+    render_inline=panel_render.render_inline,
 ) -> FastAPI:
     app = FastAPI(title="imanganation engine")
     jobs: dict[str, Job] = {}
@@ -188,7 +211,10 @@ def create_app(
         def summary(j: Job) -> dict:
             out = {"id": j.id, "kind": j.kind, "status": j.status,
                    "seq": j.request.get("seq"),
-                   "project": Path(j.request.get("project_dir", "")).name}
+                   "project": j.request.get("project")
+                   or Path(j.request.get("project_dir", "")).name}
+            if isinstance(j.request.get("panel"), dict):
+                out["panel"] = j.request["panel"].get("id")
             if j.status == "running" and j.started:
                 out["elapsed_s"] = round(now - j.started, 1)
             if j.finished and j.started:
@@ -214,6 +240,19 @@ def create_app(
 
     @app.post("/jobs", status_code=202)
     def submit(req: RenderRequest) -> Job:
+        if req.panel is not None:
+            from manganation.project_container import panel_to_spec
+
+            try:
+                panel_to_spec(req.panel)  # reject a bad spec now, not in the worker
+            except (ValueError, KeyError, TypeError) as exc:
+                raise HTTPException(422, f"invalid panel: {exc}") from exc
+            return submit_job(
+                "render", req.model_dump(exclude_none=True),
+                lambda: render_inline(req.panel, req.project, req.frame_width,
+                                      req.frame_height, reading_order=req.reading_order,
+                                      seed=req.seed),
+            )
         req.project_dir = str(resolve_project(req.project_dir, root))
         return submit_job(
             "render", req.model_dump(),

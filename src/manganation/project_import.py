@@ -8,7 +8,9 @@ Maps today's layout onto docs/project-container.md:
   ``source`` -> ``parent``, refine ``upscaler`` -> kind ``refine``, inpaint ``mask``
   -> kind ``inpaint`` (the mask is copied into ``masks/``); no sidecar -> ``import``
 - ``gimp_cursor.json`` -> ``cursor``
-- ``characters.json`` -> ``cast`` names/aliases only (identity stays in the engine)
+- ``characters.json`` -> ``cast`` names/aliases only (identity stays in the engine);
+  ``projects/identities.json`` maps the new ``project.id`` to the legacy folder, so
+  inline renders use the same character registry (``identity.py``)
 
 Legacy history can be broken: take files were overwritten (a refine and an inpaint
 once pointed at each other), sources deleted. Such a take is imported as kind
@@ -225,4 +227,7 @@ def import_project(src: Path, dest: Path) -> dict:
     tmp.write_text(json.dumps(doc, ensure_ascii=False, indent=2) + "\n")
     os.replace(tmp, work / "project.json")
     os.replace(work, dest)  # appears complete or not at all
+    from manganation.identity import register
+
+    register(doc["project"]["id"], src.name, root=src.parent)
     return doc

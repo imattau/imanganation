@@ -100,6 +100,10 @@ def test_import_builds_a_valid_container(tmp_path):
     assert doc["cursor"]["next_panel"] == p3["id"]
     assert doc["project"]["import_skipped"] == ["009.png"]
     assert doc["script"]["file"] == "script/script.md" and len(doc["script"]["sha256"]) == 64
+    # the new project id points at the legacy cast, so inline renders share it
+    from manganation.identity import identity_root
+
+    assert identity_root(doc["project"]["id"], root=tmp_path) == src.resolve()
     # the source is untouched
     assert (src / "panels/001_hires.json").exists() and (src / "panels.json").exists()
 

@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import json
 import random
-from dataclasses import asdict, dataclass
+import uuid
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 import yaml
@@ -20,7 +21,7 @@ from manganation.config import CONFIG_DIR, load_models, load_settings
 from manganation.layout.regions import assign_regions, regions_for
 from manganation.render import graphs
 from manganation.render.comfy_client import ComfyClient
-from manganation.script.schema import PanelSpec, Script
+from manganation.script.schema import PanelSpec, ReadingOrder, Script
 
 SDXL_PIXELS = 1024 * 1024
 MAX_ASPECT = 3.0  # beyond this SDXL composes badly; the frame mask crops the rest
@@ -33,12 +34,14 @@ class RenderError(RuntimeError):
 @dataclass
 class RenderResult:
     path: str
-    seq: int
+    seq: int | None
     seed: int
     width: int
     height: int
     prompt: str
     reference: str | None = None
+    panel_id: str | None = None  # container panel id, for inline renders
+    references: dict[str, str] = field(default_factory=dict)  # character -> version used
 
 
 def fit_resolution(
@@ -182,6 +185,7 @@ def render_panel(
     project: Path, seq: int, frame_w: float, frame_h: float, *,
     seed: int | None = None, client: ComfyClient | None = None,
 ) -> RenderResult:
+    """Legacy form: panel ``seq`` of ``project/panels.json``, written to its panels/."""
     project = Path(project)
     try:
         script = Script.from_json((project / "panels.json").read_text())
@@ -189,8 +193,61 @@ def render_panel(
         raise RenderError(f"cannot read {project / 'panels.json'}: {exc}") from exc
     if not 1 <= seq <= len(script.panels):
         raise RenderError(f"panel {seq} out of range (script has {len(script.panels)})")
-    spec = script.panels[seq - 1]
+    return _render(
+        script.panels[seq - 1], project, frame_w, frame_h,
+        reading_order=script.reading_order, seed=seed, client=client,
+        out=output_path(project, seq), seq=seq,
+    )
 
+
+def render_inline(
+    panel: dict, project_id: str, frame_w: float, frame_h: float, *,
+    reading_order: str = "rtl", seed: int | None = None,
+    client: ComfyClient | None = None, identity: Path | None = None,
+    outputs: Path | None = None,
+) -> RenderResult:
+    """Container form: the panel spec travels in the request (docs/engine-api.md).
+
+    Character identity comes from the project's identity store (``identity.py``); each
+    character's ``version`` selects that reference version. The image goes to the
+    engine's own ``outputs/<project id>/`` cache. The engine never writes into the
+    container: the plug-in copies the result in as a take."""
+    from manganation.config import REPO_ROOT
+    from manganation.identity import identity_root
+    from manganation.project_container import panel_to_spec
+
+    spec, versions = panel_to_spec(panel)
+    root = identity if identity is not None else identity_root(project_id)
+    used: dict[str, str] = {}
+    if versions:
+        from manganation.characters.registry import CharacterRegistry
+
+        reg = CharacterRegistry.from_path(root)
+        for name, version in versions.items():
+            ref = reg.reference_path(name, version)
+            if ref is None or not ref.exists():
+                character = reg.get(name)
+                known = [v.id for v in character.versions] if character else []
+                raise RenderError(f"{name} has no reference version {version!r} "
+                                  f"(known: {', '.join(known) or 'none'})")
+            spec.refs[name] = str(ref)  # the per-panel override path in reference_for
+            used[name] = version
+    out_dir = (outputs if outputs is not None else REPO_ROOT / "outputs") / project_id
+    out = out_dir / f"{panel.get('id', 'panel')}-{uuid.uuid4().hex[:12]}.png"
+    result = _render(spec, root, frame_w, frame_h, reading_order=ReadingOrder(reading_order),
+                     seed=seed, client=client, out=out, seq=None)
+    result.panel_id = panel.get("id")
+    result.references = {**{n: "active" for n in spec.characters}, **used}
+    out.with_suffix(".json").write_text(json.dumps(asdict(result), indent=2))
+    return result
+
+
+def _render(
+    spec: PanelSpec, identity: Path, frame_w: float, frame_h: float, *,
+    reading_order: ReadingOrder, seed: int | None, client: ComfyClient | None,
+    out: Path, seq: int | None,
+) -> RenderResult:
+    """Render ``spec`` with characters from ``identity`` (a character registry folder)."""
     settings = load_settings()
     models = load_models()
     client = client or ComfyClient(settings.comfyui.base_url)
@@ -198,7 +255,7 @@ def render_panel(
         raise RenderError(f"ComfyUI is not reachable at {settings.comfyui.base_url}")
 
     style = load_style()
-    prompt = build_prompt(spec, style, character_tags(project, spec.characters))
+    prompt = build_prompt(spec, style, character_tags(identity, spec.characters))
     width, height = fit_resolution(frame_w, frame_h)
     seed = seed if seed is not None else (spec.seed if spec.seed is not None
                                           else random.randrange(2**32))
@@ -207,10 +264,10 @@ def render_panel(
     graph = graphs.txt2img(
         ckpt=models["checkpoints"]["primary"]["id"], prompt=prompt,
         negative=build_negative(spec, style), width=width, height=height, seed=seed,
-        prefix=f"imanganation_{seq:03d}",
+        prefix=f"imanganation_{seq:03d}" if seq else "imanganation_inline",
         sampling=graphs.Sampling(d.steps, d.cfg, d.sampler, d.scheduler),
     )
-    refs = find_references(project, spec)
+    refs = find_references(identity, spec)
     ref_used: str | None = None
     ipa = settings.defaults.ipadapter
     ipa_file, clip_file = ipadapter_files(models, ipa.adapter)
@@ -224,9 +281,9 @@ def render_panel(
         ref_used = str(ref)
     elif len(refs) > 1:
         ordered = [n for n in spec.characters if n in refs]
-        boxes = regions_for(width, height, len(ordered), order=script.reading_order)
-        tags_by_char = character_tags(project, ordered)
-        norm = assign_regions(len(ordered), order=script.reading_order, margin=0.05)
+        boxes = regions_for(width, height, len(ordered), order=reading_order)
+        tags_by_char = character_tags(identity, ordered)
+        norm = assign_regions(len(ordered), order=reading_order, margin=0.05)
         references = []
         region_text = []
         for name, (x, y, w, h), region in zip(ordered, boxes, norm, strict=False):
@@ -248,7 +305,6 @@ def render_panel(
     blobs = client.run(graph)
     if not blobs:
         raise RenderError("ComfyUI returned no image")
-    out = output_path(project, seq)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(blobs[0])
 
