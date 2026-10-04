@@ -150,6 +150,23 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
         filmstrip_rows.append(row)
     script_rows = [f"{panel['id']}\t{_script_panel_label(panel)}" for panel in panels]
 
+    character_rows = ["# Cast"]
+    if cast:
+        character_rows.extend(
+            f"{character_row_id(character['name'])}\t{_label(character.get('name'))}"
+            for character in cast)
+    else:
+        character_rows.append("No characters in this project's cast")
+    if selected_id in character_by_id:
+        character = character_by_id[selected_id]
+        character_rows.extend([
+            "# Story record",
+            f"Name\t{_label(character.get('name'))}",
+            f"Aliases\t{', '.join(_label(a) for a in character.get('aliases', [])) or 'None'}",
+            "# Story notes",
+            _label(character.get("notes")) or "No project notes",
+        ])
+
     inspector_rows: list[str] = []
     if selected_id in panel_by_id:
         panel = panel_by_id[selected_id]
@@ -249,4 +266,6 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
         "filmstrip_selected": page_selection,
         "script": "\n".join(script_rows),
         "script_selected": selected_id if selected_id in panel_by_id else "",
+        "characters": "\n".join(character_rows),
+        "character_selected": selected_id if selected_id in character_by_id else "",
     }

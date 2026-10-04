@@ -65,17 +65,21 @@ DOCK_PROJECT = "project"
 DOCK_INSPECTOR = "inspector"
 DOCK_FILMSTRIP = "filmstrip"
 DOCK_SCRIPT = "script"
-DOCK_IDS = (DOCK_PROJECT, DOCK_INSPECTOR, DOCK_FILMSTRIP, DOCK_SCRIPT)
+DOCK_CHARACTERS = "characters"
+DOCK_IDS = (DOCK_PROJECT, DOCK_INSPECTOR, DOCK_FILMSTRIP, DOCK_SCRIPT,
+            DOCK_CHARACTERS)
 DOCK_ACTIONS = {
     DOCK_PROJECT: "plug-in-imanganation-dock-project-refresh",
     DOCK_INSPECTOR: "plug-in-imanganation-dock-inspector-refresh",
     DOCK_FILMSTRIP: "plug-in-imanganation-dock-filmstrip-open-page",
     DOCK_SCRIPT: "plug-in-imanganation-dock-script-refresh",
+    DOCK_CHARACTERS: "plug-in-imanganation-dock-characters-refresh",
 }
 DOCK_ITEMS = {
     DOCK_PROJECT: "plug-in-imanganation-dock-project-item",
     DOCK_FILMSTRIP: "plug-in-imanganation-dock-filmstrip-item",
     DOCK_SCRIPT: "plug-in-imanganation-dock-script-item",
+    DOCK_CHARACTERS: "plug-in-imanganation-dock-characters-item",
 }
 REF_MAX = 1024  # reference export cap; the CLIP encoder only sees 224-448 px anyway
 PARASITE = "imanganation-panelspec"
@@ -1206,14 +1210,16 @@ def _refresh_project_docks():
     elif selected_id in {character_row_id(c["name"]) for c in manifest["cast"]}:
         character = next(c for c in manifest["cast"]
                          if character_row_id(c["name"]) == selected_id)
-        contents["inspector"] += "\n" + "\n".join(
-            _engine_character_rows(root, character["name"]))
+        engine_rows = "\n".join(_engine_character_rows(root, character["name"]))
+        contents["inspector"] += "\n" + engine_rows
+        contents["characters"] += "\n" + engine_rows
 
     for identifier, content_key, selection_key in (
             (DOCK_PROJECT, "project", "project_selected"),
             (DOCK_INSPECTOR, "inspector", None),
             (DOCK_FILMSTRIP, "filmstrip", "filmstrip_selected"),
-            (DOCK_SCRIPT, "script", "script_selected")):
+            (DOCK_SCRIPT, "script", "script_selected"),
+            (DOCK_CHARACTERS, "characters", "character_selected")):
         values = {"identifier": identifier, "content": contents[content_key],
                   "selected-item": contents[selection_key] if selection_key else ""}
         _dock_pdb_call("gimp-extension-panel-update", values)
@@ -1281,6 +1287,8 @@ def _add_dock_callbacks(plugin):
         (DOCK_ITEMS[DOCK_FILMSTRIP], _dock_item_action, DOCK_FILMSTRIP, True),
         (DOCK_ACTIONS[DOCK_SCRIPT], _dock_action, "refresh", False),
         (DOCK_ITEMS[DOCK_SCRIPT], _dock_item_action, DOCK_SCRIPT, True),
+        (DOCK_ACTIONS[DOCK_CHARACTERS], _dock_action, "refresh", False),
+        (DOCK_ITEMS[DOCK_CHARACTERS], _dock_item_action, DOCK_CHARACTERS, True),
     ]
     for name, callback, data, takes_item in callbacks:
         procedure = Gimp.Procedure.new(plugin, name, Gimp.PDBProcType.TEMPORARY,
@@ -1311,6 +1319,9 @@ def _register_project_docks(plugin):
         (DOCK_SCRIPT, "Script", "list", contents["script"],
          contents["script_selected"], "Refresh", DOCK_ACTIONS[DOCK_SCRIPT],
          DOCK_ITEMS[DOCK_SCRIPT]),
+        (DOCK_CHARACTERS, "Character Bible", "tree", contents["characters"],
+         contents["character_selected"], "Refresh", DOCK_ACTIONS[DOCK_CHARACTERS],
+         DOCK_ITEMS[DOCK_CHARACTERS]),
     ]
     for identifier, title, presentation, content, selected, action_label, action, item in rows:
         _dock_pdb_call("gimp-extension-panel-register", {
@@ -1375,8 +1386,8 @@ class Imanganation(Gimp.PlugIn):
             proc.set_menu_label("Open Project _Docks...")
             proc.set_documentation(
                 "Open the Imanganation project docks",
-                "Register and keep the Project, Inspector, and Page Filmstrip docks "
-                "connected to a project.json manifest.", name)
+                "Register and keep the Project, Script, Inspector, Page Filmstrip, and "
+                "Character Bible docks connected to a project.json manifest.", name)
             proc.add_file_argument(
                 "project-dir", "_Project folder", "Folder containing project.json",
                 Gimp.FileChooserAction.SELECT_FOLDER, False, None,
