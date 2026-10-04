@@ -200,8 +200,10 @@ and props are grouped under Assets; location and prop notes are shown as non-act
 summaries because those manifest entries do not yet have IDs. The Character Bible keeps
 project cast, aliases, and story notes separate from engine-owned versions and
 reference-image state. Project shows the chapter when available and repeats the filmstrip's
-page status cues in the page tree. Activating a page in Project or Page Filmstrip opens its XCF and
-raises the already-open page display when the plug-in created it earlier in the session.
+page status cues in the page tree. **Add page** asks for dimensions (defaulting to the
+first existing page), creates a white XCF, records it atomically, and opens it. Activating
+a page in Project or Page Filmstrip opens its XCF and raises the already-open page display
+when the plug-in created it earlier in the session.
 For container projects it also copies newly rendered, refined, and inpainted images into
 unique files under `takes/`, adds a new take id, and advances `active_take`; a legacy
 image used from `panels/` is first imported as an immutable take. Opened page images and

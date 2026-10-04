@@ -43,11 +43,13 @@ from gi.repository import Gimp  # noqa: E402
 from gi.repository import Gio, GLib, GObject  # noqa: E402
 
 try:
-    from project_store import ProjectFileError, load_project, record_take, save_project
+    from project_store import (ProjectFileError, load_project, new_id, record_take,
+                               save_project)
     from panel_ui import build_docks, character_row_id, rgb_png
 except ImportError:  # Keep older single-file plug-in installs usable for legacy projects.
     ProjectFileError = ValueError
     load_project = record_take = save_project = None
+    new_id = None
     build_docks = None
     character_row_id = None
     rgb_png = None
@@ -690,6 +692,12 @@ def regenerate_panel(procedure, run_mode, image, drawables, config, data):
     _, _, fw, fh = _frame_box(image, layer)
     body = {"project_dir": str(root), "seq": seq, "frame_width": fw, "frame_height": fh,
             "seed": seed}
+    if config.get_property("keep-composition"):
+        # Keep this take's layout and poses (ControlNet on its edges); the edited
+        # script decides the details. Works with a new or the same seed.
+        body["guide"] = str(source)
+        if config.get_property("composition-strength") > 0:
+            body["guide_strength"] = config.get_property("composition-strength")
     try:
         result = _run_job(config.get_property("engine-url").rstrip("/"), "/jobs", body,
                           f"Regenerating panel {seq:03d} (script page {spec['page']}, "
@@ -1341,6 +1349,76 @@ def _show_project_page(root, manifest, page_id):
     _PAGE_DISPLAYS[key] = display
 
 
+def _default_page_size(root, manifest):
+    for page in manifest["pages"]:
+        relative = page.get("file")
+        path = Path(root) / relative if relative else None
+        if path is None or not path.is_file():
+            continue
+        try:
+            image = Gimp.file_load(Gimp.RunMode.NONINTERACTIVE,
+                                   Gio.File.new_for_path(str(path)))
+            try:
+                return image.get_width(), image.get_height()
+            finally:
+                image.delete()
+        except Exception:
+            continue
+    return 1600, 2400
+
+
+def _create_project_page(root, manifest, width, height):
+    if width < 1 or height < 1:
+        raise ValueError("Page width and height must be positive")
+    if width > 20000 or height > 20000:
+        raise ValueError("Page width and height cannot exceed 20000 pixels")
+
+    used_numbers = []
+    for page in manifest["pages"]:
+        match = re.fullmatch(r"Page\s+(\d+)", page.get("label", ""), re.IGNORECASE)
+        if match:
+            used_numbers.append(int(match.group(1)))
+    number = max(used_numbers, default=0) + 1
+    folder = Path(root) / "pages"
+    folder.mkdir(parents=True, exist_ok=True)
+    relative = f"pages/page-{number:03d}.xcf"
+    while (Path(root) / relative).exists():
+        number += 1
+        relative = f"pages/page-{number:03d}.xcf"
+    page_id = new_id("pg_")
+    page_label = f"Page {number}"
+    destination = Path(root) / relative
+    temporary = destination.with_name(f".{destination.stem}.{secrets.token_hex(4)}.tmp.xcf")
+
+    image = Gimp.Image.new(width, height, Gimp.ImageBaseType.RGB)
+    try:
+        image.set_name(page_label)
+        background = Gimp.Layer.new(
+            image, "Background", width, height, Gimp.ImageType.RGB_IMAGE, 100,
+            Gimp.LayerMode.NORMAL)
+        image.insert_layer(background, None, 0)
+        background.fill(Gimp.FillType.WHITE)
+        project_ref = {"project": manifest["project"]["id"], "page": page_id}
+        image.attach_parasite(Gimp.Parasite.new(
+            PROJECT_PARASITE, Gimp.PARASITE_PERSISTENT,
+            list(json.dumps(project_ref, separators=(",", ":")).encode())))
+        Gimp.file_save(Gimp.RunMode.NONINTERACTIVE, image,
+                       Gio.File.new_for_path(str(temporary)), None)
+        os.replace(temporary, destination)
+
+        manifest["pages"].append({"id": page_id, "label": page_label, "file": relative})
+        manifest["project"]["modified"] = datetime.now().astimezone().isoformat(
+            timespec="seconds")
+        save_project(root, manifest)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        destination.unlink(missing_ok=True)
+        raise
+    finally:
+        image.delete()
+    return page_id
+
+
 def _dock_action(procedure, config, data):
     try:
         if data == "open-page":
@@ -1349,6 +1427,20 @@ def _dock_action(procedure, config, data):
             panel = next((p for p in manifest["panels"] if p["id"] == selected), None)
             page_id = selected if any(page["id"] == selected for page in manifest["pages"]) \
                 else (panel.get("placement") or {}).get("page") if panel else None
+            _show_project_page(_DOCK_CONTEXT["root"], manifest, page_id)
+        elif data == "add-page":
+            manifest = load_project(_DOCK_CONTEXT["root"])
+            width, height = _default_page_size(_DOCK_CONTEXT["root"], manifest)
+            config.set_property("width", width)
+            config.set_property("height", height)
+            if not _dialog(procedure, config, DOCK_ACTIONS[DOCK_PROJECT]):
+                return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
+            page_id = _create_project_page(
+                _DOCK_CONTEXT["root"], manifest,
+                config.get_property("width"), config.get_property("height"))
+            _DOCK_CONTEXT["selected_id"] = page_id
+            _refresh_project_docks()
+            manifest = load_project(_DOCK_CONTEXT["root"])
             _show_project_page(_DOCK_CONTEXT["root"], manifest, page_id)
         elif data == "match-panel":
             _match_selected_panel()
@@ -1387,7 +1479,7 @@ def _dock_item_action(procedure, config, data):
 
 def _add_dock_callbacks(plugin):
     callbacks = [
-        (DOCK_ACTIONS[DOCK_PROJECT], _dock_action, "refresh", False),
+        (DOCK_ACTIONS[DOCK_PROJECT], _dock_action, "add-page", False),
         (DOCK_ACTIONS[DOCK_INSPECTOR], _dock_action, "refresh", False),
         (DOCK_ACTIONS[DOCK_FILMSTRIP], _dock_action, "open-page", False),
         (DOCK_ITEMS[DOCK_PROJECT], _dock_item_action, DOCK_PROJECT, True),
@@ -1404,6 +1496,11 @@ def _add_dock_callbacks(plugin):
         if takes_item:
             procedure.add_string_argument("item", "Item id", "Stable project row id",
                                           "", GObject.ParamFlags.READWRITE)
+        if name == DOCK_ACTIONS[DOCK_PROJECT]:
+            procedure.add_int_argument("width", "Page _width", "New page width in pixels",
+                                       1, 20000, 1600, GObject.ParamFlags.READWRITE)
+            procedure.add_int_argument("height", "Page _height", "New page height in pixels",
+                                       1, 20000, 2400, GObject.ParamFlags.READWRITE)
         procedure.set_documentation("Handle an Imanganation dock action",
                                     "Called by the host-rendered Imanganation docks.", name)
         procedure.set_attribution("imanganation", "imanganation", "2026")
@@ -1417,7 +1514,7 @@ def _register_project_docks(plugin):
         _project_page_thumbnails(_DOCK_CONTEXT["root"], manifest))
     rows = [
         (DOCK_PROJECT, "Project", "tree", contents["project"],
-         contents["project_selected"], "Refresh", DOCK_ACTIONS[DOCK_PROJECT],
+         contents["project_selected"], "Add page", DOCK_ACTIONS[DOCK_PROJECT],
          DOCK_ITEMS[DOCK_PROJECT]),
         (DOCK_INSPECTOR, "Inspector", "properties", contents["inspector"],
          "", "Refresh", DOCK_ACTIONS[DOCK_INSPECTOR], ""),
@@ -1590,6 +1687,15 @@ class Imanganation(Gimp.PlugIn):
                 "same-seed", "Same _seed",
                 "Reuse this take's seed (keep the composition, apply script edits); "
                 "off = a new random take", False, GObject.ParamFlags.READWRITE)
+            proc.add_boolean_argument(
+                "keep-composition", "_Keep composition",
+                "Keep this take's layout and poses (ControlNet on its edges) while the "
+                "edited script changes details such as an expression or outfit",
+                False, GObject.ParamFlags.READWRITE)
+            proc.add_double_argument(
+                "composition-strength", "Composition s_trength",
+                "How strictly to keep the layout; 0 = engine default (settings.yaml)",
+                0.0, 2.0, 0.0, GObject.ParamFlags.READWRITE)
             proc.add_string_argument(
                 "engine-url", "_Engine URL", "imanganation engine (manganation serve)",
                 ENGINE_URL, GObject.ParamFlags.READWRITE)
