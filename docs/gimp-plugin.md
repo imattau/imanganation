@@ -40,9 +40,11 @@ GIMP also gives three things for free that a custom web UI would have to build:
 
 ## Built so far
 
-`gimp/imanganation/imanganation.py` is installed by symlink into
-`~/.config/GIMP/3.2/plug-ins/imanganation`. It adds eight commands under *Filters →
-imanganation*:
+`gimp/imanganation/imanganation.py` and its stdlib-only sibling
+`gimp/imanganation/project_store.py` are installed together in
+`~/.config/GIMP/3.2/plug-ins/imanganation`. The store reads and atomically updates
+`project.json` while preserving unknown keys. It validates format/version, stable IDs,
+and project-relative paths. It adds eight commands under *Filters → imanganation*:
 
 - **Render Panel into Frame…** (the main flow): needs a selection, which is the target
   frame. It sends the next panel's `seq` and the frame's size to the engine, which

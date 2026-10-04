@@ -28,6 +28,7 @@ import random
 import re
 import sys
 import time
+from datetime import datetime
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -37,6 +38,12 @@ import gi
 gi.require_version("Gimp", "3.0")
 from gi.repository import Gimp  # noqa: E402
 from gi.repository import Gio, GLib, GObject  # noqa: E402
+
+try:
+    from project_store import ProjectFileError, load_project, save_project
+except ImportError:  # Keep older single-file plug-in installs usable for legacy projects.
+    ProjectFileError = ValueError
+    load_project = save_project = None
 
 PROC_RENDER = "plug-in-imanganation-render-panel"
 PROC_NEXT = "plug-in-imanganation-place-next-panel"
@@ -193,19 +200,56 @@ def _place(image, panel_file, spec, seq=None, render=None):
 
 
 def _load_project(config):
-    """-> (root, panels, seq, explicit) or raises ValueError with a user message."""
+    """-> (root, legacy specs, seq, explicit, manifest) or raises ValueError.
+
+    The container is authoritative for project identity and cursor. The current engine
+    render API still consumes panels.json by sequence, so a container project also
+    needs that compatibility projection until the engine accepts inline specs.
+    """
     project = config.get_property("project-dir")
     if project is None:
-        raise ValueError("Choose the project folder (the one with panels.json).")
+        raise ValueError("Choose a project folder (with project.json and panels.json).")
     root = Path(project.get_path())
+    manifest = None
+    manifest_path = root / "project.json"
+    if manifest_path.exists():
+        if load_project is None:
+            raise ValueError("This plug-in install is missing project_store.py")
+        try:
+            manifest = load_project(root)
+        except ProjectFileError as exc:
+            raise ValueError(str(exc)) from exc
     try:
         panels = json.loads((root / "panels.json").read_text())["panels"]
     except (OSError, ValueError, KeyError) as exc:
-        raise ValueError(f"Cannot read {root / 'panels.json'}: {exc}") from exc
+        hint = ("The container is valid, but this engine version still requires the "
+                "panels.json compatibility projection. " if manifest else "")
+        raise ValueError(f"{hint}Cannot read {root / 'panels.json'}: {exc}") from exc
+
+    if manifest is not None:
+        container_panels = manifest["panels"]
+        if len(container_panels) != len(panels):
+            raise ValueError("project.json and panels.json contain different panel counts; "
+                             "reconcile the script before rendering")
+        for index, (container_panel, engine_panel) in enumerate(zip(container_panels, panels), 1):
+            label = container_panel.get("label", {})
+            if (label.get("page"), label.get("panel")) != (
+                    engine_panel.get("page"), engine_panel.get("panel")):
+                raise ValueError(f"project.json and panels.json disagree at panel {index}; "
+                                 "reconcile the script before rendering")
 
     explicit = config.get_property("panel-number")
     if explicit:
         seq = explicit
+    elif manifest is not None:
+        next_id = manifest["cursor"].get("next_panel")
+        ids = [panel["id"] for panel in manifest["panels"]]
+        if next_id is None:
+            seq = len(ids) + 1
+        elif next_id in ids:
+            seq = ids.index(next_id) + 1
+        else:
+            raise ValueError(f"project cursor points at unknown panel {next_id}")
     else:
         try:
             seq = json.loads((root / CURSOR_FILE).read_text())["next"]
@@ -214,12 +258,22 @@ def _load_project(config):
     if not 1 <= seq <= len(panels):
         raise ValueError(f"All {len(panels)} panels placed. "
                          "Set a panel number to place one again.")
-    return root, panels, seq, explicit
+    return root, panels, seq, explicit, manifest
 
 
-def _advance(root, panels, seq, explicit, spec):
+def _advance(root, panels, seq, explicit, spec, manifest=None):
     if not explicit:
-        (root / CURSOR_FILE).write_text(json.dumps({"next": seq + 1}))
+        if manifest is not None:
+            manifest["cursor"]["next_panel"] = (
+                manifest["panels"][seq]["id"] if seq < len(panels) else None)
+            manifest["project"]["modified"] = datetime.now().astimezone().isoformat(
+                timespec="seconds")
+            try:
+                save_project(root, manifest)
+            except ProjectFileError as exc:
+                Gimp.message(f"Panel placed, but project cursor could not be saved: {exc}")
+        else:
+            (root / CURSOR_FILE).write_text(json.dumps({"next": seq + 1}))
     nxt = panels[seq] if seq < len(panels) else None
     msg = (f"Placed {seq:03d}/{len(panels):03d} (script page {spec['page']}, "
            f"panel {spec['panel']}).")
@@ -264,7 +318,7 @@ def render_panel(procedure, run_mode, image, drawables, config, data):
         return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
 
     try:
-        root, panels, seq, explicit = _load_project(config)
+        root, panels, seq, explicit, manifest = _load_project(config)
     except ValueError as exc:
         return _error(procedure, str(exc))
     spec = panels[seq - 1]
@@ -295,7 +349,7 @@ def render_panel(procedure, run_mode, image, drawables, config, data):
     finally:
         image.remove_channel(frame)
 
-    _advance(root, panels, seq, explicit, spec)
+    _advance(root, panels, seq, explicit, spec, manifest)
     return _success(procedure, layer)
 
 
@@ -778,7 +832,7 @@ def place_next_panel(procedure, run_mode, image, drawables, config, data):
         return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
 
     try:
-        root, panels, seq, explicit = _load_project(config)
+        root, panels, seq, explicit, manifest = _load_project(config)
     except ValueError as exc:
         return _error(procedure, str(exc))
     spec = panels[seq - 1]
@@ -790,7 +844,7 @@ def place_next_panel(procedure, run_mode, image, drawables, config, data):
                                  f"panels/{seq:03d}*.png. Use Render Panel into Frame.")
 
     layer = _place(image, Gio.File.new_for_path(str(newest)), spec, seq)
-    _advance(root, panels, seq, explicit, spec)
+    _advance(root, panels, seq, explicit, spec, manifest)
     return _success(procedure, layer)
 
 
@@ -817,7 +871,7 @@ def place_panel(procedure, run_mode, image, drawables, config, data):
 
 def _add_project_args(proc):
     proc.add_file_argument(
-        "project-dir", "_Project folder", "imanganation project (has panels.json)",
+        "project-dir", "_Project folder", "imanganation project folder",
         Gimp.FileChooserAction.SELECT_FOLDER, False, None, GObject.ParamFlags.READWRITE)
     proc.add_int_argument(
         "panel-number", "Panel _number", "Use this panel (1-based, in script order) "
@@ -961,8 +1015,8 @@ class Imanganation(Gimp.PlugIn):
             proc.set_menu_label("Place _Next Panel...")
             proc.set_documentation(
                 "Place the next imanganation panel",
-                "Take the next already-rendered panel from the project's panels.json "
-                "(reading order) and fit it into the selected frame, with its dialogue "
+                "Take the next already-rendered panel in project reading order and fit it "
+                "into the selected frame, with its dialogue "
                 "as hidden text layers.",
                 name)
             _add_project_args(proc)
