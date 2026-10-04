@@ -212,6 +212,14 @@ page and selects its stable panel group, falling back to the active-take layer f
 XCFs without a panel-group reference.
 Inspector's Refresh action also syncs the dock selection from a selected take layer in the
 current canvas image back to that panel's stable project identity.
+The Panel dock's **Set frame** action turns the active image selection into a persistent
+canvas object for the selected script panel: it creates a tagged panel group, stores the
+selection as the group's mask in the XCF, and atomically writes `placement.page` plus the
+selection's bounding rectangle to the manifest. The panel becomes the next render target;
+rendering can populate that empty group with immutable take layers. Save the XCF after
+setting the frame so the group and its mask persist with the manifest placement. This
+first slice requires a page image opened from the project and does not yet reshape an
+existing panel group.
 For container projects it also copies newly rendered, refined, and inpainted images into
 unique files under `takes/`, adds a new take id, and advances `active_take`; a legacy
 image used from `panels/` is first imported as an immutable take. Opened page images and

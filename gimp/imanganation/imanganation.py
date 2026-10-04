@@ -180,6 +180,31 @@ def _tag_panel_group(group, take_ref):
         list(json.dumps(panel_ref, separators=(",", ":")).encode())))
 
 
+def _find_panel_group(image, reference, empty_only=False):
+    if not reference:
+        return None
+
+    def walk(layers):
+        for layer in layers:
+            if layer.is_group():
+                parasite = layer.get_parasite(PANEL_PARASITE)
+                if parasite is not None:
+                    try:
+                        stored = json.loads(bytes(parasite.get_data()))
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        stored = {}
+                    if (stored.get("project") == reference.get("project")
+                            and stored.get("panel") == reference.get("panel")
+                            and (not empty_only or not layer.get_children())):
+                        return layer
+                found = walk(layer.get_children())
+                if found is not None:
+                    return found
+        return None
+
+    return walk(image.get_layers())
+
+
 def _place(image, panel_file, spec, seq=None, render=None, take_ref=None):
     """Load a panel as a layer in its own group, fitted to the selection if any."""
     label = f"Panel {spec.get('page', '?')}.{spec.get('panel', '?')}"
@@ -188,19 +213,21 @@ def _place(image, panel_file, spec, seq=None, render=None, take_ref=None):
 
     image.undo_group_start()
 
-    # Directly beneath the template's frame lines, if there is a template.
+    # Reuse a previously defined empty semantic panel group, if present.
     template = _find_template(image)
-    group = Gimp.GroupLayer.new(image, label)
-    if template is not None:
-        # An opaque white-page template would hide panels beneath it; Multiply keeps
-        # the black frame lines and lets white show the panel through.
-        if template.get_mode() == Gimp.LayerMode.NORMAL:
-            template.set_mode(Gimp.LayerMode.MULTIPLY)
-        image.insert_layer(group, template.get_parent(),
-                           image.get_item_position(template) + 1)
-    else:
-        image.insert_layer(group, None, 0)
-    _tag_panel_group(group, take_ref)
+    group = _find_panel_group(image, take_ref, empty_only=True)
+    if group is None:
+        group = Gimp.GroupLayer.new(image, label)
+        if template is not None:
+            # An opaque white-page template would hide panels beneath it; Multiply keeps
+            # the black frame lines and lets the panel show through.
+            if template.get_mode() == Gimp.LayerMode.NORMAL:
+                template.set_mode(Gimp.LayerMode.MULTIPLY)
+            image.insert_layer(group, template.get_parent(),
+                               image.get_item_position(template) + 1)
+        else:
+            image.insert_layer(group, None, 0)
+        _tag_panel_group(group, take_ref)
 
     layer = Gimp.file_load_layer(Gimp.RunMode.NONINTERACTIVE, image, panel_file)
     layer.set_name(f"{label} render")
@@ -1373,6 +1400,69 @@ def _match_selected_panel():
                  f"kept {len(merged['takes'])} take(s) and its placement.")
 
 
+def _set_panel_frame_from_selection():
+    root = _DOCK_CONTEXT["root"]
+    manifest = load_project(root)
+    panel_id = _DOCK_CONTEXT.get("selected_id")
+    panel = next((item for item in manifest["panels"] if item["id"] == panel_id), None)
+    if panel is None or panel.get("status") == "orphaned":
+        raise ValueError("Select a current script panel before setting its frame")
+
+    image = Gimp.context_get_image()
+    if image is None:
+        raise ValueError("Open the target page and select its frame area first")
+    parasite = image.get_parasite(PROJECT_PARASITE)
+    if parasite is None:
+        raise ValueError("Open the page from Project or Page Filmstrip to link it to this project")
+    page_ref = json.loads(bytes(parasite.get_data()))
+    if page_ref.get("project") != manifest["project"]["id"]:
+        raise ValueError("The active image belongs to a different project")
+    page_id = page_ref.get("page")
+    if not any(page["id"] == page_id for page in manifest["pages"]):
+        raise ValueError("The active image references a page that is missing from this project")
+
+    _, non_empty, x1, y1, x2, y2 = Gimp.Selection.bounds(image)
+    if not non_empty or x2 <= x1 or y2 <= y1:
+        raise ValueError("Select a panel-shaped region first")
+    panel_ref = {"project": manifest["project"]["id"], "panel": panel_id}
+    if _find_panel_group(image, panel_ref) is not None:
+        raise ValueError("This panel already has a canvas group; editing an existing frame is not supported yet")
+
+    label = panel.get("label", {})
+    group_name = f"Panel {label.get('page', '?')}.{label.get('panel', '?')}"
+    template = _find_template(image)
+    group = Gimp.GroupLayer.new(image, group_name)
+    image.undo_group_start()
+    try:
+        if template is not None:
+            image.insert_layer(group, template.get_parent(),
+                               image.get_item_position(template) + 1)
+        else:
+            image.insert_layer(group, None, 0)
+        _tag_panel_group(group, panel_ref)
+        group.add_mask(group.create_mask(Gimp.AddMaskType.SELECTION))
+
+        panel["placement"] = {"page": page_id, "frame": [x1, y1, x2 - x1, y2 - y1]}
+        panel["status"] = "placed"
+        manifest["cursor"]["next_panel"] = panel_id
+        manifest["project"]["modified"] = datetime.now().astimezone().isoformat(
+            timespec="seconds")
+        save_project(root, manifest)
+    except Exception:
+        if group.get_image() is image:
+            image.remove_layer(group)
+        raise
+    finally:
+        image.undo_group_end()
+
+    image.set_selected_layers([group])
+    _DOCK_CONTEXT["selected_id"] = panel_id
+    _refresh_project_docks()
+    Gimp.displays_flush()
+    Gimp.message(f"Set the frame for panel {label.get('page', '?')}."
+                 f"{label.get('panel', '?')} from the current selection. Save the page XCF.")
+
+
 def _show_project_page(root, manifest, page_id):
     page = next((candidate for candidate in manifest["pages"]
                  if candidate["id"] == page_id), None)
@@ -1549,6 +1639,8 @@ def _dock_action(procedure, config, data):
         elif data == "match-panel":
             _match_selected_panel()
             _refresh_project_docks()
+        elif data == "set-panel-frame":
+            _set_panel_frame_from_selection()
         elif data == "refresh-canvas":
             _refresh_project_docks(sync_canvas=True)
         else:
@@ -1599,7 +1691,7 @@ def _add_dock_callbacks(plugin):
         (DOCK_ITEMS[DOCK_SCRIPT], _dock_item_action, DOCK_SCRIPT, True),
         (DOCK_ACTIONS[DOCK_CHARACTERS], _dock_action, "refresh", False),
         (DOCK_ITEMS[DOCK_CHARACTERS], _dock_item_action, DOCK_CHARACTERS, True),
-        (DOCK_ACTIONS[DOCK_PANEL], _dock_action, "refresh", False),
+        (DOCK_ACTIONS[DOCK_PANEL], _dock_action, "set-panel-frame", False),
     ]
     for name, callback, data, takes_item in callbacks:
         procedure = Gimp.Procedure.new(plugin, name, Gimp.PDBProcType.TEMPORARY,
@@ -1639,7 +1731,7 @@ def _register_project_docks(plugin):
          contents["character_selected"], "Refresh", DOCK_ACTIONS[DOCK_CHARACTERS],
          DOCK_ITEMS[DOCK_CHARACTERS]),
         (DOCK_PANEL, "Panel", "properties", contents["panel"],
-         contents["panel_selected"], "Refresh", DOCK_ACTIONS[DOCK_PANEL], ""),
+         contents["panel_selected"], "Set frame", DOCK_ACTIONS[DOCK_PANEL], ""),
     ]
     for identifier, title, presentation, content, selected, action_label, action, item in rows:
         _dock_pdb_call("gimp-extension-panel-register", {
