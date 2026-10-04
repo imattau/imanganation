@@ -93,11 +93,27 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
             count = len(panel.get("takes", []))
             project_rows.append(
                 f"{panel['id']}\t{_panel_label(panel)} · {count} take{'s' if count != 1 else ''}")
-    if cast:
-        project_rows.append("# Cast")
-        project_rows.extend(
-            f"\t{character_row_id(character['name'])}\t{_label(character.get('name'))}"
-            for character in cast)
+    locations = manifest.get("locations", [])
+    props = manifest.get("props", [])
+    if cast or locations or props:
+        project_rows.append("# Assets")
+        if cast:
+            project_rows.append("\t# Characters")
+            project_rows.extend(
+                f"\t\t{character_row_id(character['name'])}\t"
+                f"{_label(character.get('name'))}"
+                for character in cast)
+        for section, assets in (("Locations", locations), ("Props", props)):
+            if not assets:
+                continue
+            project_rows.append(f"\t# {section}")
+            for asset in assets:
+                name = _label(asset.get("name")) or section[:-1]
+                notes = _label(asset.get("notes"))
+                summary = f"{name} · {notes}" if notes else name
+                if len(summary) > 140:
+                    summary = summary[:137].rstrip() + "…"
+                project_rows.append(f"\t\t# {summary}")
 
     page_counts = {page["id"]: 0 for page in pages}
     for panel in panels:

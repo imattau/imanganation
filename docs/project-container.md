@@ -190,7 +190,8 @@ The Python plug-in now reads the container cursor by panel id and writes it atom
 The persistent Python **Open Project Docks…** command renders Project, Script, Inspector,
 and Page Filmstrip from the manifest; panel, page, and cast rows send stable keys over
 the PDB. Script rows follow panel reading order and select the same panel in the other
-docks.
+docks. Cast, locations, and props are grouped under Assets; location and prop notes are
+shown as non-activating summaries because those manifest entries do not yet have IDs.
 For container projects it also copies newly rendered, refined, and inpainted images into
 unique files under `takes/`, adds a new take id, and advances `active_take`; a legacy
 image used from `panels/` is first imported as an immutable take. The currently shipped

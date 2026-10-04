@@ -101,3 +101,15 @@ def test_rgb_thumbnail_png_encoding_and_filmstrip_reference():
     assert docks["filmstrip"].splitlines()[0].endswith("\t" + preview_path)
     assert png is not None and png.startswith(b"\x89PNG\r\n\x1a\n")
     assert rgb_png(2, 1, b"\xff\x00\x00") is None
+
+
+def test_project_tree_groups_story_assets_and_shows_notes_without_fake_ids():
+    manifest = copy.deepcopy(EXAMPLE)
+
+    project_tree = build_docks(manifest)["project"]
+
+    assert "# Assets\n\t# Characters" in project_tree
+    assert "\t# Locations\n\t\t# School rooftop · Chain-link fence, late afternoon light" in project_tree
+    assert "\t# Props\n\t\t# Akira's lunchbox" in project_tree
+    assert "asset:location" not in project_tree
+    assert "asset:prop" not in project_tree
