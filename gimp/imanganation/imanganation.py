@@ -97,6 +97,7 @@ _DOCK_PLUGIN = None
 _DOCK_CONTEXT = {}
 _PAGE_THUMBNAILS = {}
 _PAGE_DISPLAYS = {}
+_PAGE_IMAGES = {}
 
 
 class EngineError(Exception):
@@ -1337,7 +1338,9 @@ def _show_project_page(root, manifest, page_id):
     display = _PAGE_DISPLAYS.get(key)
     if display is not None and display.is_valid():
         display.present()
-        return
+        image = _PAGE_IMAGES.get(key)
+        if image is not None:
+            return image
 
     image = Gimp.file_load(Gimp.RunMode.NONINTERACTIVE,
                            Gio.File.new_for_path(str(page_path)))
@@ -1347,6 +1350,40 @@ def _show_project_page(root, manifest, page_id):
         list(json.dumps(project_ref, separators=(",", ":")).encode())))
     display = Gimp.Display.new(image)
     _PAGE_DISPLAYS[key] = display
+    _PAGE_IMAGES[key] = image
+    return image
+
+
+def _focus_panel_on_canvas(root, manifest, panel):
+    page_id = (panel.get("placement") or {}).get("page")
+    if not page_id or not panel.get("active_take"):
+        return
+    image = _show_project_page(root, manifest, page_id)
+    if image is None:
+        return
+    expected = {"project": manifest["project"]["id"], "panel": panel["id"],
+                "take": panel.get("active_take")}
+
+    def find_take(layers):
+        for layer in layers:
+            parasite = layer.get_parasite(TAKE_PARASITE)
+            if parasite is not None:
+                try:
+                    reference = json.loads(bytes(parasite.get_data()))
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    reference = {}
+                if all(reference.get(key) == value for key, value in expected.items()):
+                    return layer
+            if layer.is_group():
+                match = find_take(layer.get_children())
+                if match is not None:
+                    return match
+        return None
+
+    layer = find_take(image.get_layers())
+    if layer is not None:
+        image.set_selected_layers([layer])
+        Gimp.displays_flush()
 
 
 def _default_page_size(root, manifest):
@@ -1472,6 +1509,11 @@ def _dock_item_action(procedure, config, data):
         _refresh_project_docks()
         if any(page["id"] == item for page in manifest["pages"]):
             _show_project_page(_DOCK_CONTEXT["root"], manifest, item)
+        else:
+            panel = next((candidate for candidate in manifest["panels"]
+                          if candidate["id"] == item), None)
+            if panel is not None:
+                _focus_panel_on_canvas(_DOCK_CONTEXT["root"], manifest, panel)
         return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
     except Exception as exc:
         return _error(procedure, str(exc))
