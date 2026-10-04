@@ -1844,8 +1844,8 @@ class Imanganation(Gimp.PlugIn):
             # than from an active image.
             proc = Gimp.Procedure.new(
                 self, name, Gimp.PDBProcType.PERSISTENT, _project_docks_run, None)
-            proc.add_menu_path("<Image>/Filters/imanganation")
             proc.set_menu_label("Open Project _Docks...")
+            proc.add_menu_path("<Image>/Filters/imanganation")
             proc.set_documentation(
                 "Open the Imanganation project docks",
                 "Register and keep the Project, Script, Inspector, Panel, Page Filmstrip, "
@@ -1867,6 +1867,9 @@ class Imanganation(Gimp.PlugIn):
             Gimp.ProcedureSensitivityMask.DRAWABLE
             | Gimp.ProcedureSensitivityMask.DRAWABLES
             | Gimp.ProcedureSensitivityMask.NO_DRAWABLES)
+        # GIMP 3.3 requires a menu label before a menu path is added. Each
+        # procedure below replaces this fallback with its user-facing label.
+        proc.set_menu_label("Imanganation")
         proc.add_menu_path("<Image>/Filters/imanganation")
         proc.set_attribution("imanganation", "imanganation", "2026")
         if name == PROC_STATUS:
