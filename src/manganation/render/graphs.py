@@ -309,22 +309,22 @@ def with_regional_ipadapter(
                 "operation": "add",
             },
         }
-        # Feather the region edges so neighbouring characters blend instead of
-        # meeting at a hard seam.
+        # Soften the region's own edges so neighbouring characters blend instead of
+        # meeting at a hard seam. (ComfyUI's FeatherMask can't do this: it fades a mask
+        # towards the *canvas* borders, which left the inner boundary a hard cut.)
         feather = ref.get("feather", 48)
         if feather:
-            feathered_id = f"{mask_id}_feather"
-            graph[feathered_id] = {
-                "class_type": "FeatherMask",
-                "inputs": {
-                    "mask": [placed_id, 0],
-                    "left": feather,
-                    "top": feather,
-                    "right": feather,
-                    "bottom": feather,
-                },
+            as_image, blurred, soft = (f"{mask_id}_img", f"{mask_id}_blur",
+                                       f"{mask_id}_soft")
+            graph[as_image] = {"class_type": "MaskToImage", "inputs": {"mask": [placed_id, 0]}}
+            graph[blurred] = {
+                "class_type": "ImageBlur",
+                "inputs": {"image": [as_image, 0], "blur_radius": max(1, min(31, feather)),
+                           "sigma": min(10.0, max(1.0, feather / 3))},  # node max 10
             }
-            placed_id = feathered_id
+            graph[soft] = {"class_type": "ImageToMask",
+                           "inputs": {"image": [blurred, 0], "channel": "red"}}
+            placed_id = soft
         graph[cond_id] = {
             "class_type": "IPAdapterRegionalConditioning",
             "inputs": {

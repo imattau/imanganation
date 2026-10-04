@@ -99,12 +99,16 @@ def test_two_references_build_regional_graph():
     # two regional conditionings present
     conds = [n for n in g.values() if n["class_type"] == "IPAdapterRegionalConditioning"]
     assert len(conds) == 2
-    # each mask points at a placed MaskComposite (feathered by default)
+    # each mask points at a placed MaskComposite, softened by default
     for c in conds:
         placed = c["inputs"]["mask"][0]
-        assert g[placed]["class_type"] in ("MaskComposite", "FeatherMask")
-    # at least one feather node exists when feathering is on
-    assert any(n["class_type"] == "FeatherMask" for n in g.values())
+        assert g[placed]["class_type"] in ("MaskComposite", "ImageToMask")
+    # feathering blurs each region's own edges (FeatherMask only fades at the canvas
+    # border, which left the boundary between characters a hard seam)
+    assert not any(n["class_type"] == "FeatherMask" for n in g.values())
+    blurs = [n for n in g.values() if n["class_type"] == "ImageBlur"]
+    assert len(blurs) == 2 and all(b["inputs"]["blur_radius"] <= 31 for b in blurs)
+    assert all(b["inputs"]["sigma"] <= 10 for b in blurs)  # ComfyUI ImageBlur limit
 
 
 def test_regional_conditioning_binds_text_to_regions():
@@ -141,3 +145,86 @@ def test_regional_graph_does_not_mutate_input():
         ipadapter="ipa", clip_vision="clip",
     )
     assert set(base.keys()) == before
+
+
+def test_upload_names_never_collide(tmp_path, monkeypatch):
+    """Every character's reference is 'base.png'; uploads must not overwrite each other
+    (a two-shot had both regions guided by the second character's face)."""
+    from PIL import Image
+
+    from manganation.render import comfy_client
+
+    sent = []
+
+    class Resp:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"name": sent[-1]}
+
+    def fake_post(url, files=None, data=None, timeout=None):
+        sent.append(files["image"][0])
+        return Resp()
+
+    monkeypatch.setattr(comfy_client.httpx, "post", fake_post)
+    client = comfy_client.ComfyClient()
+    paths = []
+    for who, colour in (("yuki", "white"), ("akira", "brown")):
+        (tmp_path / who).mkdir()
+        Image.new("RGB", (8, 8), colour).save(tmp_path / who / "base.png")
+        paths.append(tmp_path / who / "base.png")
+    names = [client.upload_image(str(p))["name"] for p in paths]
+    assert names[0] != names[1] and all(n.startswith("base-") for n in names)
+    assert client.upload_image(str(paths[0]))["name"] == names[0]  # same content, same name
+
+
+def _two_shot_graph(tmp_path, monkeypatch, regional_text):
+    from PIL import Image
+
+    from manganation.characters.registry import CharacterRegistry
+    from manganation.config import load_settings
+    from manganation.render import panel as P
+
+    settings = load_settings().model_copy(deep=True)
+    settings.defaults.ipadapter.regional_text = regional_text
+    monkeypatch.setattr(P, "load_settings", lambda: settings)
+    reg = CharacterRegistry.from_path(tmp_path / "cast")
+    for who in ("Yuki", "Akira"):
+        Image.new("RGB", (8, 8)).save(tmp_path / f"{who}.png")
+        reg.add_user_reference(who, str(tmp_path / f"{who}.png"), "base")
+
+    class Fake:
+        graphs = []
+
+        def is_up(self):
+            return True
+
+        def upload_image(self, path):
+            return {"name": path}
+
+        def run(self, graph):
+            self.graphs.append(graph)
+            return [b"x"]
+
+    fake = Fake()
+    panel = {"id": "pnl_abc123", "characters": [{"name": "Yuki"}, {"name": "Akira"}],
+             "action": "two-shot"}
+    P.render_inline(panel, "prj_test01", 1024, 1024, seed=1, client=fake,
+                    identity=tmp_path / "cast", outputs=tmp_path / "out")
+    return fake.graphs[0]
+
+
+def test_two_shots_skip_text_bands_by_default(tmp_path, monkeypatch):
+    g = _two_shot_graph(tmp_path, monkeypatch, 0.0)
+    kinds = [n["class_type"] for n in g.values()]
+    assert "IPAdapterFromParams" in kinds  # each face bound by its own reference
+    assert "ConditioningSetAreaPercentage" not in kinds
+    images = {n["inputs"]["image"] for n in g.values() if n["class_type"] == "LoadImage"}
+    assert len(images) == 2  # two distinct references, one per character
+
+
+def test_text_bands_are_opt_in_with_strength(tmp_path, monkeypatch):
+    g = _two_shot_graph(tmp_path, monkeypatch, 0.4)
+    areas = [n for n in g.values() if n["class_type"] == "ConditioningSetAreaPercentage"]
+    assert len(areas) == 2 and all(a["inputs"]["strength"] == 0.4 for a in areas)

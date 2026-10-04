@@ -80,9 +80,22 @@ class ComfyClient:
         return images
 
     def upload_image(self, path: str, subfolder: str = "", overwrite: bool = True) -> dict:
-        """Upload a local image into ComfyUI's input store; returns its descriptor."""
+        """Upload a local image into ComfyUI's input store; returns its descriptor.
+
+        Stored as ``<stem>-<content hash><ext>``: ComfyUI's input store is flat, and
+        different files with the same name overwrite each other. Registry references
+        are all named by version (``characters/yuki/base.png``,
+        ``characters/akira/base.png``), so in a two-shot the second upload replaced
+        the first and both regions were guided by Akira's face. A content-derived name
+        never collides, and identical images still share one file."""
+        import hashlib
+        from pathlib import Path
+
+        p = Path(path)
+        digest = hashlib.sha256(p.read_bytes()).hexdigest()[:12]
+        name = f"{p.stem}-{digest}{p.suffix or '.png'}"
         with open(path, "rb") as fh:
-            files = {"image": (path.split("/")[-1], fh, "image/png")}
+            files = {"image": (name, fh, "image/png")}
             data = {"overwrite": "true" if overwrite else "false"}
             if subfolder:
                 data["subfolder"] = subfolder

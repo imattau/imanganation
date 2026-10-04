@@ -45,6 +45,7 @@ defaults:
     weight_single: 0.45  # NoobAI Mark 1: 0.3 = light, 0.6+ = reference background bleeds in
     weight_regional: 0.5
     feather: 48         # regional mask feather (px)
+    regional_text: 0.0  # per-character text bands; 0 = off (bands split two-shots)
   # Two-pass hi-res fix of a finished panel; see docs/phase6a.md.
   refiner:
     enabled: true

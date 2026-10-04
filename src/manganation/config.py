@@ -63,6 +63,12 @@ class IPAdapterDefaults(BaseModel):
     weight_single: float = 0.45
     weight_regional: float = 0.5
     feather: int = 48  # mask feather in pixels for regional blending
+    # Per-character text in hard canvas bands (ConditioningSetAreaPercentage). 0 = off
+    # (default): live, the bands split two-shots into side-by-side pictures (even a
+    # divider line) and at 0.4 still put a skirt on Akira; without them the scene is one
+    # composition and each face is held by its own regional reference. Raise it to trade
+    # composition for fine per-character traits (e.g. Akira's blue hair tips).
+    regional_text: float = 0.0
 
 
 class RefinerDefaults(BaseModel):

@@ -302,8 +302,11 @@ def _render(
             )
             text = ", ".join(tags_by_char.get(name, [])) or name
             region_text.append({"text": text, "box": (region.x, region.y, region.w, region.h)})
-        # Place each character's tokens in their own band so SDXL does not stack them.
-        graph = graphs.with_regional_conditioning(graph, regions=region_text)
+        # Optional per-character text bands (off by default: they split two-shots into
+        # side-by-side pictures; the regional references hold each face instead).
+        if ipa.regional_text > 0:
+            graph = graphs.with_regional_conditioning(
+                graph, regions=[{**r, "strength": ipa.regional_text} for r in region_text])
         graph = graphs.with_regional_ipadapter(
             graph, references=references, ipadapter=ipa_file, clip_vision=clip_file,
         )

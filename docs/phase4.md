@@ -68,3 +68,40 @@ in early tests.
 - **Region prompt text** uses each character's design-sheet tags; per-panel action text
   is not yet split per character.
 - **3+ characters** work but each band narrows; consider img2img refinement.
+
+## Two-shot identity bleed: root cause and fix (2026-10-04)
+
+**Symptom:** in two-shots, Yuki came out with Akira's brown hair and face (3 of 4
+seeds; `docs/quality/2026-10-04_twoshot_bleed_before.png`).
+
+**Root cause: an upload name collision, not tuning.** Registry references are named by
+version, so both characters' references are `base.png`. The engine uploaded images to
+ComfyUI's flat input store by file name with overwrite on: the second upload (Akira)
+replaced the first, and *both* regional IP-Adapter regions loaded Akira's face. ComfyUI's
+`input/base.png` was byte-identical to Akira's reference. Found by switching mechanisms
+off: without IP-Adapter Yuki was correct every time; with regional IP-Adapter alone both
+characters were brunettes.
+
+**Fixes**
+
+1. `ComfyClient.upload_image` stores `<stem>-<content hash><ext>`: different images can
+   never overwrite each other (identical ones share a file). This covers every upload
+   path (renders, inpaint references, refine sources).
+2. Region masks are softened with `MaskToImage → ImageBlur → ImageToMask`. ComfyUI's
+   `FeatherMask` fades a mask towards the *canvas* borders, which left the boundary
+   between the two characters a hard seam. (`ImageBlur` caps `sigma` at 10.)
+3. **Per-character text bands are off by default** (`defaults.ipadapter.regional_text:
+   0.0`). Same seeds (`twoshot_bleed_experiments.py`):
+   - **A**, bands on (strength 1): identities right after fix 1, but side-by-side
+     "split-screen" compositions, one with a black divider line.
+   - **F**, bands off: one coherent scene with the characters interacting; Yuki right in
+     4/4, Akira in 4/4 (`2026-10-04_twoshot_default_F.png`). Minor: Akira's blue tips
+     fade, and Yuki's snowflake pin sometimes lands on his blazer.
+   - **G**, bands at 0.4: blue tips return, but compositions drift back to side by
+     side, and one seed put a skirt on Akira (`2026-10-04_twoshot_text_bands_04.png`).
+
+   F is the default; raise `regional_text` to trade composition for fine traits.
+
+**Known residue:** fine accessories can swap between characters; where the two soft
+region masks overlap, a limb can look semi-transparent.
+
