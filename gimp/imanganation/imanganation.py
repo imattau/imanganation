@@ -1845,6 +1845,9 @@ class Imanganation(Gimp.PlugIn):
             proc = Gimp.Procedure.new(
                 self, name, Gimp.PDBProcType.PERSISTENT, _project_docks_run, None)
             proc.set_menu_label("Open Project _Docks...")
+            proc.add_enum_argument(
+                "run-mode", "Run mode", "How to run the project dock command",
+                Gimp.RunMode, Gimp.RunMode.INTERACTIVE, GObject.ParamFlags.READWRITE)
             proc.add_menu_path("<Image>/Filters/imanganation")
             proc.set_documentation(
                 "Open the Imanganation project docks",
