@@ -1218,6 +1218,19 @@ def _refresh_project_docks():
     canvas_rows = _canvas_take_rows(manifest)
     if canvas_rows:
         contents["inspector"] += "\n" + "\n".join(canvas_rows)
+    orphan_id = _DOCK_CONTEXT.get("orphan_id")
+    candidate_id = _DOCK_CONTEXT.get("candidate_id")
+    if orphan_id or candidate_id:
+        by_id = {panel["id"]: panel for panel in manifest["panels"]}
+        contents["script"] += "\n# Match selection"
+        old = by_id.get(orphan_id)
+        new = by_id.get(candidate_id)
+        if old is not None:
+            contents["script"] += (f"\nOrphan\t{_panel_label(old)} · "
+                                   f"{len(old.get('takes', []))} retained takes · "
+                                   f"active {old.get('active_take') or 'None'}")
+        if new is not None:
+            contents["script"] += f"\nCandidate\t{_panel_label(new)}"
     if selected_id in {panel["id"] for panel in manifest["panels"]}:
         references = _engine_reference_rows(root, manifest, selected_id)
         if references:
@@ -1247,6 +1260,59 @@ def _notify_project_docks(root):
             _refresh_project_docks()
         except Exception as exc:
             Gimp.message(f"Could not refresh project docks: {exc}")
+
+
+def _match_selected_panel():
+    root = _DOCK_CONTEXT["root"]
+    manifest = load_project(root)
+    orphan_id = _DOCK_CONTEXT.get("orphan_id")
+    candidate_id = _DOCK_CONTEXT.get("candidate_id")
+    by_id = {panel["id"]: panel for panel in manifest["panels"]}
+    orphan = by_id.get(orphan_id)
+    candidate = by_id.get(candidate_id)
+    if orphan is None or orphan.get("status") != "orphaned":
+        raise ValueError("Select an orphaned panel in Script first")
+    if candidate is None or candidate.get("status") != "unplaced":
+        raise ValueError("Select a current script panel as the match candidate")
+    if orphan_id == candidate_id:
+        raise ValueError("The orphan and candidate must be different panels")
+    if candidate.get("takes") or candidate.get("active_take") or candidate.get("placement"):
+        raise ValueError("The candidate already has production work; choose an untouched panel")
+
+    candidate_position = next(i for i, panel in enumerate(manifest["panels"])
+                              if panel["id"] == candidate_id)
+    before_candidate = sum(
+        1 for panel in manifest["panels"][:candidate_position]
+        if panel["id"] != orphan_id)
+
+    # The newly parsed panel supplies the updated script text. Existing project-side
+    # annotations and production references remain attached to the original identity.
+    merged = dict(orphan)
+    merged.update(candidate)
+    for key in ("location", "camera", "characters", "expressions", "aspect_ratio",
+                "seed", "notes"):
+        if orphan.get(key):
+            merged[key] = orphan[key]
+    merged["id"] = orphan_id
+    merged["takes"] = list(orphan.get("takes", []))
+    merged["active_take"] = orphan.get("active_take")
+    merged["placement"] = orphan.get("placement")
+    merged["status"] = "placed" if merged["placement"] else "unplaced"
+
+    remaining = [panel for panel in manifest["panels"]
+                 if panel["id"] not in {orphan_id, candidate_id}]
+    remaining.insert(before_candidate, merged)
+    manifest["panels"] = remaining
+    if manifest.get("cursor", {}).get("next_panel") == candidate_id:
+        manifest["cursor"]["next_panel"] = orphan_id
+    manifest["project"]["modified"] = datetime.now().astimezone().isoformat(
+        timespec="seconds")
+    save_project(root, manifest)
+    _DOCK_CONTEXT["selected_id"] = orphan_id
+    _DOCK_CONTEXT["orphan_id"] = None
+    _DOCK_CONTEXT["candidate_id"] = None
+    Gimp.message(f"Matched retained panel {orphan_id} to the selected script entry; "
+                 f"kept {len(merged['takes'])} take(s) and its placement.")
 
 
 def _show_project_page(root, manifest, page_id):
@@ -1284,6 +1350,9 @@ def _dock_action(procedure, config, data):
             page_id = selected if any(page["id"] == selected for page in manifest["pages"]) \
                 else (panel.get("placement") or {}).get("page") if panel else None
             _show_project_page(_DOCK_CONTEXT["root"], manifest, page_id)
+        elif data == "match-panel":
+            _match_selected_panel()
+            _refresh_project_docks()
         else:
             _refresh_project_docks()
         return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
@@ -1300,6 +1369,13 @@ def _dock_item_action(procedure, config, data):
         valid.update(character_row_id(c["name"]) for c in manifest["cast"])
         if item not in valid:
             raise ValueError(f"Unknown project item id: {item}")
+        if data == DOCK_SCRIPT:
+            panel = next((candidate for candidate in manifest["panels"]
+                          if candidate["id"] == item), None)
+            if panel and panel.get("status") == "orphaned":
+                _DOCK_CONTEXT["orphan_id"] = item
+            elif panel:
+                _DOCK_CONTEXT["candidate_id"] = item
         _DOCK_CONTEXT["selected_id"] = item
         _refresh_project_docks()
         if any(page["id"] == item for page in manifest["pages"]):
@@ -1316,7 +1392,7 @@ def _add_dock_callbacks(plugin):
         (DOCK_ACTIONS[DOCK_FILMSTRIP], _dock_action, "open-page", False),
         (DOCK_ITEMS[DOCK_PROJECT], _dock_item_action, DOCK_PROJECT, True),
         (DOCK_ITEMS[DOCK_FILMSTRIP], _dock_item_action, DOCK_FILMSTRIP, True),
-        (DOCK_ACTIONS[DOCK_SCRIPT], _dock_action, "refresh", False),
+        (DOCK_ACTIONS[DOCK_SCRIPT], _dock_action, "match-panel", False),
         (DOCK_ITEMS[DOCK_SCRIPT], _dock_item_action, DOCK_SCRIPT, True),
         (DOCK_ACTIONS[DOCK_CHARACTERS], _dock_action, "refresh", False),
         (DOCK_ITEMS[DOCK_CHARACTERS], _dock_item_action, DOCK_CHARACTERS, True),
@@ -1349,7 +1425,7 @@ def _register_project_docks(plugin):
          contents["filmstrip_selected"], "Open page", DOCK_ACTIONS[DOCK_FILMSTRIP],
          DOCK_ITEMS[DOCK_FILMSTRIP]),
         (DOCK_SCRIPT, "Script", "list", contents["script"],
-         contents["script_selected"], "Refresh", DOCK_ACTIONS[DOCK_SCRIPT],
+         contents["script_selected"], "Match selected", DOCK_ACTIONS[DOCK_SCRIPT],
          DOCK_ITEMS[DOCK_SCRIPT]),
         (DOCK_CHARACTERS, "Character Bible", "tree", contents["characters"],
          contents["character_selected"], "Refresh", DOCK_ACTIONS[DOCK_CHARACTERS],
@@ -1385,7 +1461,8 @@ def _project_docks_run(procedure, run_mode, image, drawables, config, data):
             selected = next((panel["id"] for panel in manifest["panels"]), None)
         if not selected and manifest["pages"]:
             selected = manifest["pages"][0]["id"]
-        _DOCK_CONTEXT.update(root=root, selected_id=selected)
+        _DOCK_CONTEXT.update(root=root, selected_id=selected,
+                             orphan_id=None, candidate_id=None)
         _add_dock_callbacks(_DOCK_PLUGIN)
         _register_project_docks(_DOCK_PLUGIN)
     except Exception as exc:

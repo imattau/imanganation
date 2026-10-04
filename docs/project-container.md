@@ -191,7 +191,10 @@ The persistent Python **Open Project Docks…** command renders Project, Script,
 Panel, Page Filmstrip, and Character Bible from the manifest; panel, page, and cast rows
 send stable keys over the PDB. Script rows follow panel reading order, show placement and
 take counts, and group orphaned work under Needs matching; selecting a row synchronizes
-the same panel in the other docks. Panel presents the selected script panel as a production brief:
+the same panel in the other docks. **Match selected** matches one orphan to one untouched
+current panel after showing the old take count and active take; the original panel id,
+placement, and take history remain attached to the updated script entry. Panel presents
+the selected script panel as a production brief:
 action, cast/version, location, shot, dialogue, sound effects, and status. Cast, locations,
 and props are grouped under Assets; location and prop notes are shown as non-activating
 summaries because those manifest entries do not yet have IDs. The Character Bible keeps
