@@ -87,7 +87,7 @@ DOCK_IDS = (DOCK_PROJECT, DOCK_INSPECTOR, DOCK_FILMSTRIP, DOCK_SCRIPT,
 DOCK_ACTIONS = {
     DOCK_PROJECT: "plug-in-imanganation-dock-project-action",
     DOCK_INSPECTOR: "plug-in-imanganation-dock-inspector-generate",
-    DOCK_FILMSTRIP: "plug-in-imanganation-dock-filmstrip-open-page",
+    DOCK_FILMSTRIP: "plug-in-imanganation-dock-filmstrip-add-page",
     DOCK_SCRIPT: "plug-in-imanganation-dock-script-refresh",
     DOCK_CHARACTERS: "plug-in-imanganation-dock-characters-refresh",
     DOCK_PANEL: "plug-in-imanganation-dock-panel-refresh",
@@ -97,7 +97,7 @@ DOCK_OPEN_PROJECT = "plug-in-imanganation-dock-open-project"
 DOCK_SHOW = {dock: f"plug-in-imanganation-show-dock-{dock}" for dock in DOCK_IDS}
 DOCK_MENU_LABELS = {
     DOCK_PROJECT: "_Project", DOCK_INSPECTOR: "_Context",
-    DOCK_FILMSTRIP: "Page _Filmstrip", DOCK_SCRIPT: "_Script",
+    DOCK_FILMSTRIP: "P_ages", DOCK_SCRIPT: "_Script",
     DOCK_CHARACTERS: "_Character Bible", DOCK_PANEL: "P_anel",
 }
 DOCK_ITEMS = {
@@ -1576,44 +1576,83 @@ def _selected_canvas_panel_id(manifest):
     return None
 
 
+PAGE_THUMBNAIL_SIZE = 160  # px, longest side; the page strip shows them at 96
+
+
+def _write_page_thumbnail(image, destination):
+    """Flattened, scaled-down PNG of ``image`` (left untouched) at ``destination``."""
+    copy = image.duplicate()
+    try:
+        copy.flatten()
+        width, height = copy.get_width(), copy.get_height()
+        scale = PAGE_THUMBNAIL_SIZE / max(width, height)
+        if scale < 1:
+            copy.scale(max(1, round(width * scale)), max(1, round(height * scale)))
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temporary = destination.with_name(destination.stem + ".tmp.png")
+        Gimp.file_save(Gimp.RunMode.NONINTERACTIVE, copy,
+                       Gio.File.new_for_path(str(temporary)), None)
+        os.replace(temporary, destination)
+    finally:
+        copy.delete()
+
+
+def _embedded_page_thumbnail(source, destination):
+    """The XCF's own thumbnail (written only by interactive saves) as a PNG, or False."""
+    procedure = Gimp.get_pdb().lookup_procedure("gimp-file-load-thumbnail")
+    if procedure is None:
+        return False
+    config = procedure.create_config()
+    config.set_property("file", Gio.File.new_for_path(str(source)))
+    result = procedure.run(config)
+    if result.index(0) != Gimp.PDBStatusType.SUCCESS:
+        return False
+    # GIMP 3's GimpValueArray.index() already returns the plain values
+    width, height, thumbnail = result.index(1), result.index(2), result.index(3)
+    pixels = thumbnail.get_data() if hasattr(thumbnail, "get_data") else bytes(thumbnail)
+    png = rgb_png(width, height, bytes(pixels))
+    if png is None:
+        return False
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_name(destination.stem + ".tmp.png")
+    temporary.write_bytes(png)
+    os.replace(temporary, destination)
+    return True
+
+
 def _page_thumbnail(root, manifest, page):
+    """A PNG preview of a page for the page strip, or None.
+
+    A page open in GIMP is drawn from the open image, so unsaved work shows. A closed
+    page uses its XCF's embedded thumbnail, else is loaded once; both are cached by the
+    file's size and modification time."""
     relative = page.get("file")
     if not relative:
         return None
     source = root / relative
+    destination = (Path(Gimp.cache_directory()) / "imanganation" / "page-thumbnails"
+                   / f"{manifest['project']['id']}-{page['id']}.png")
     try:
+        open_image = next((image for image in Gimp.get_images()
+                           if _project_page_id_for_image(image, manifest) == page["id"]),
+                          None)
+        if open_image is not None:
+            _write_page_thumbnail(open_image, destination)
+            _PAGE_THUMBNAILS.pop(page["id"], None)  # the file may change before saving
+            return str(destination)
+
         stat = source.stat()
-    except OSError:
-        return None
-    key = (str(source), stat.st_size, stat.st_mtime_ns)
-    cached = _PAGE_THUMBNAILS.get(page["id"])
-    if cached and cached[0] == key and Path(cached[1]).is_file():
-        return cached[1]
-
-    try:
-        procedure = Gimp.get_pdb().lookup_procedure("gimp-file-load-thumbnail")
-        if procedure is None:
-            return None
-        config = procedure.create_config()
-        config.set_property("file", Gio.File.new_for_path(str(source)))
-        result = procedure.run(config)
-        if result.index(0) != Gimp.PDBStatusType.SUCCESS:
-            return None
-        width = result.index(1).get_int()
-        height = result.index(2).get_int()
-        thumbnail = result.index(3).get_boxed()
-        pixels = (thumbnail.get_data() if hasattr(thumbnail, "get_data")
-                  else bytes(thumbnail))
-        png = rgb_png(width, height, bytes(pixels))
-        if png is None:
-            return None
-
-        folder = Path(Gimp.cache_directory()) / "imanganation" / "page-thumbnails"
-        folder.mkdir(parents=True, exist_ok=True)
-        destination = folder / f"{manifest['project']['id']}-{page['id']}.png"
-        temporary = destination.with_suffix(".png.tmp")
-        temporary.write_bytes(png)
-        os.replace(temporary, destination)
+        key = (str(source), stat.st_size, stat.st_mtime_ns)
+        cached = _PAGE_THUMBNAILS.get(page["id"])
+        if cached and cached[0] == key and Path(cached[1]).is_file():
+            return cached[1]
+        if not _embedded_page_thumbnail(source, destination):
+            image = Gimp.file_load(Gimp.RunMode.NONINTERACTIVE,
+                                   Gio.File.new_for_path(str(source)))
+            try:
+                _write_page_thumbnail(image, destination)
+            finally:
+                image.delete()
         _PAGE_THUMBNAILS[page["id"]] = (key, str(destination))
         return str(destination)
     except Exception:
@@ -2092,7 +2131,8 @@ def _add_dock_callbacks(plugin):
         (DOCK_ACTIONS[DOCK_PROJECT], _dock_action, "project-action", False),
         (DOCK_OPEN_PROJECT, _dock_action, "open-project", False),
         (DOCK_ACTIONS[DOCK_INSPECTOR], _dock_action, "generate", False),
-        (DOCK_ACTIONS[DOCK_FILMSTRIP], _dock_action, "open-page", False),
+        # Page strip: clicking a page opens it; the button adds one (as in Project)
+        (DOCK_ACTIONS[DOCK_FILMSTRIP], _dock_action, "project-action", False),
         (DOCK_ITEMS[DOCK_PROJECT], _dock_item_action, DOCK_PROJECT, True),
         (DOCK_ITEMS[DOCK_FILMSTRIP], _dock_item_action, DOCK_FILMSTRIP, True),
         (DOCK_ACTIONS[DOCK_SCRIPT], _dock_action, "match-panel", False),
@@ -2129,7 +2169,7 @@ def _register_project_docks(plugin):
              "Open project…", DOCK_OPEN_PROJECT, ""),
             (DOCK_INSPECTOR, "Context", "properties", contents["inspector"],
              "", "", "", ""),
-            (DOCK_FILMSTRIP, "Page Filmstrip", "tiles", contents["filmstrip"],
+            (DOCK_FILMSTRIP, "Pages", "strip", contents["filmstrip"],
              "", "", "", ""),
             (DOCK_SCRIPT, "Script", "list", contents["script"],
              "", "", "", ""),
@@ -2149,8 +2189,8 @@ def _register_project_docks(plugin):
              DOCK_ITEMS[DOCK_PROJECT]),
             (DOCK_INSPECTOR, "Context", "properties", contents["inspector"],
              "", "Generate", DOCK_ACTIONS[DOCK_INSPECTOR], ""),
-            (DOCK_FILMSTRIP, "Page Filmstrip", "tiles", contents["filmstrip"],
-             contents["filmstrip_selected"], "Open page", DOCK_ACTIONS[DOCK_FILMSTRIP],
+            (DOCK_FILMSTRIP, "Pages", "strip", contents["filmstrip"],
+             contents["filmstrip_selected"], "Add page", DOCK_ACTIONS[DOCK_FILMSTRIP],
              DOCK_ITEMS[DOCK_FILMSTRIP]),
             (DOCK_SCRIPT, "Script", "list", contents["script"],
              contents["script_selected"], "Match selected", DOCK_ACTIONS[DOCK_SCRIPT],

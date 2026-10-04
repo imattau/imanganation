@@ -342,7 +342,7 @@ def build_welcome_docks() -> dict[str, str]:
         "project_selected": "",
         "inspector": "# Context\nProject\tNot open\n\nChoose or create an Imanganation project.",
         "inspector_selected": "",
-        "filmstrip": "# Pages\nOpen a project to see its pages here.",
+        "filmstrip": "Open a project to see its pages here.",  # tiles: no headings
         "filmstrip_selected": "",
         "script": "# Script\nOpen a project to see its reading order.",
         "script_selected": "",

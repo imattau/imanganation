@@ -52,8 +52,10 @@ rendered panels fail to load).
 and project-relative paths. A zero-argument persistent workspace extension starts with
 GIMP and registers the workspace docks. In the fork's default layout the **Project**
 navigator (pages, script panels, assets) sits left of a compact toolbox; on the right,
-**Context** shows whatever is selected (project, page, panel or character), with
-**Script** and **Page Filmstrip** as tabs beside it, above GIMP's Layers. With a panel
+**Context** shows whatever is selected (project, page, panel or character), with a
+**Script** tab beside it, above GIMP's Layers; **Pages**, the page strip, runs along the
+bottom: one thumbnail per page (drawn from the open page when it is open, so unsaved
+work shows), click to open a page, **Add page** to add one. With a panel
 selected (in a dock or on the canvas), Context's **Generate** renders it through *Render
 Panel into Frame*: into its saved frame, or the selection on an open project page. Panel
 and Character Bible are folded into Context and open only from *Windows → Imanganation*.
