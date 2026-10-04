@@ -20,10 +20,15 @@ The container **names** characters (and the version to use per panel). It never 
 their traits or reference images: those live in the engine, keyed by `project.id`.
 Docks that show character details fetch them from the engine (`GET /characters`).
 
+The downstream GIMP C changes stay project-agnostic: they provide host-rendered dock
+widgets and an IPC/PDB boundary. The Python plug-in is the owner of `project.json`,
+schema-aware loading/saving, and dock content. It registers its own PDB procedures for
+dock actions and item activation; the host sends row ids to those procedures.
+
 ## On disk
 
 ```
-rooftop.imanga/            any folder name; the manifest marks it as a project
+rooftop.imanga/            recommended project folder suffix
   project.json             the manifest (this schema)
   script/rooftop.md        the source script, as given
   pages/page-001.xcf       the artist's pages (one image per page)
@@ -31,6 +36,9 @@ rooftop.imanga/            any folder name; the manifest marks it as a project
   masks/                   inpaint masks, kept for provenance
 ```
 
+- `.imanga` is the recommended folder suffix. It is a directory containing
+  `project.json`, not a single-file archive; tools should still identify a project
+  by its valid manifest so users can rename folders freely.
 - All paths in the manifest are **relative to the project folder**, using `/`.
 - **Take files are immutable.** A new image always gets a new file and a new take id.
   Overwriting the file under a take silently changes what layers and derived takes
@@ -47,9 +55,20 @@ including dock row activation. Script numbers (`page 2, panel 1`) are **labels o
 They are not unique: the rooftop script legitimately has two "page 2, panel 1" entries
 (after `CUT TO:`). The array order of `panels` is the script/reading order.
 
-> Fork note: the extension-panel API currently returns the activated row's *rendered
-> text*. Rows should carry a hidden id (e.g. `id<TAB>label`) that is returned on
-> activation instead, so a dock can name a panel unambiguously.
+> Fork note: extension-panel list, tile, and tree rows use `id<TAB>label`. The host
+> renders the label and returns the stable id for selection and activation. Label-only
+> rows remain supported for simple panels.
+
+### Re-parsing and orphaned panels
+
+Keep orphaned panels in a visible **Needs matching** group, with the original script
+label, first line of action text, page placement, and take count. Offer an explicit
+**Match to…** command that lists newly parsed panels with their page/panel labels and
+short action text; show the take count and active take before confirming. Permit
+multiple old panels to remain unmatched. Do not silently map by label or position:
+labels may repeat and script edits can shift positions. Matching changes the script
+association while retaining panel ids, immutable take files, and take history. An
+ambiguous suggestion may be highlighted, but requires an explicit artist choice.
 
 ## Manifest sections
 
