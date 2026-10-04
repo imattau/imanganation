@@ -85,6 +85,20 @@ new design version if it has one. In the Project tree, right-click **Characters*
 **New character…** (name, aliases and a description, designed straight away if you
 like), or a character for **Design character**. The engine has ComfyUI unload its models before an LLM
 step and unloads the LLM before a render, so both fit on 16 GB.
+**Speech bubbles.** A placed panel's Context lists its dialogue and SFX lines, each with
+a **Bubble…** button. It opens the bubble picker on the tab for the line's kind (speech,
+thought, shout, whisper, narration, SFX) with the line's text ready to edit, and inserts
+the bubble into the panel's frame, in reading order, its tail aimed at the speaker's
+`placement:` layer if there is one. The button then reads **Select bubble**. Bubbles
+go into a **Speech bubbles** group at the top of the page (created once, reused); each
+is a group of an editable vector shape (Paths tool: move the tail) and a text layer
+(Text tool). Select a bubble on the canvas and Context shows its text as a field
+(Enter rewraps and resizes the bubble) and **Fit bubble to text**. The **Bubbles** dock
+(a tab beside Context) is the whole library, about 110 generated templates in
+categories: click one to add it to the open page, inside the selection if there is one.
+A page's Context also has a free **Bubble…**. Lettering uses Comic Neue / Bangers when
+installed, else a bold sans; the size follows the page (1/64 of its height).
+
 On first launch, the Project dock offers **Open project…**; the
 chosen project folder is remembered in GIMP's user settings and its docks are restored on
 later launches. The **Open / Switch Project…** command remains available under

@@ -54,6 +54,8 @@ from gi.repository import (  # noqa: E402
 )
 
 try:
+    import bubbles as bubble_templates
+    import lettering
     from layouts import frame_rings, layout_preview_rgb, page_layout_availability
     from panel_ui import build_docks, build_welcome_docks, character_row_id, rgb_png
     from project_store import (
@@ -72,6 +74,7 @@ try:
 except ImportError:  # Keep older single-file plug-in installs usable for legacy projects.
     ProjectFileError = ValueError
     project_from_script = parse_script_text = script_looks_canonical = None
+    lettering = bubble_templates = None
     load_project = record_take = save_project = apply_field_edit = None
     new_id = None
     build_docks = None
@@ -98,8 +101,9 @@ DOCK_FILMSTRIP = "filmstrip"
 DOCK_SCRIPT = "script"
 DOCK_CHARACTERS = "characters"
 DOCK_PANEL = "panel"
+DOCK_BUBBLES = "bubbles"  # the bubble library: click a bubble to add it to the page
 DOCK_IDS = (DOCK_PROJECT, DOCK_INSPECTOR, DOCK_FILMSTRIP, DOCK_SCRIPT,
-            DOCK_CHARACTERS, DOCK_PANEL)
+            DOCK_CHARACTERS, DOCK_PANEL, DOCK_BUBBLES)
 DOCK_ACTIONS = {
     DOCK_PROJECT: "plug-in-imanganation-dock-project-action",
     DOCK_INSPECTOR: "plug-in-imanganation-dock-inspector-generate",
@@ -119,10 +123,16 @@ DOCK_DESIGN_CHARACTER_ITEM = "plug-in-imanganation-dock-design-character-item"
 DOCK_DELETE_PAGE = "plug-in-imanganation-dock-delete-page"
 DOCK_REORDER_PAGES = "plug-in-imanganation-dock-reorder-pages"
 DOCK_GENERATE_LAYOUT = "plug-in-imanganation-dock-generate-page-layout"
+# Speech bubbles: a script line's Bubble… (item "<panel id>:<line>"), a page's free
+# Bubble…, a Bubbles dock tile (item: template id), Fit bubble to text
+DOCK_BUBBLE_LINE = "plug-in-imanganation-dock-bubble-line"
+DOCK_NEW_BUBBLE = "plug-in-imanganation-dock-new-bubble"
+DOCK_BUBBLE_ITEM = "plug-in-imanganation-dock-bubbles-item"
+DOCK_FIT_BUBBLE = "plug-in-imanganation-dock-fit-bubble"
 # Windows > Imanganation: reopen a closed dock (the host keeps closed docks closed).
 DOCK_SHOW = {dock: f"plug-in-imanganation-show-dock-{dock}" for dock in DOCK_IDS}
 DOCK_MENU_LABELS = {
-    DOCK_PROJECT: "_Project", DOCK_INSPECTOR: "_Context",
+    DOCK_PROJECT: "_Project", DOCK_INSPECTOR: "_Context", DOCK_BUBBLES: "_Bubbles",
     DOCK_FILMSTRIP: "P_ages", DOCK_SCRIPT: "_Script",
     DOCK_CHARACTERS: "_Character Bible", DOCK_PANEL: "P_anel",
 }
@@ -1053,6 +1063,7 @@ def inpaint_selection(procedure, run_mode, image, drawables, config, data):
                    fit="layer", take_ref=_take_reference(root, seq, path))
     Gimp.message(f"Inpainted panel {seq:03d} ({Path(result['path']).name}); outside the "
                  f"selection the take is unchanged. Previous take kept, hidden.")
+    manifest = _manifest_for(root)
     if manifest is not None:
         _save_project_page(image, root, manifest)
     return _success(procedure, new)
@@ -1877,14 +1888,14 @@ def _refresh_project_docks(sync_canvas=False):
         selected_id = _selected_canvas_panel_id(manifest) or selected_id
     contents = build_docks(
         manifest, selected_id, root, _project_page_thumbnails(root, manifest),
-        DOCK_OPEN_PAGE, DOCK_GENERATE_LAYOUT, design_action=DOCK_DESIGN_CHARACTER,
-        new_character_action=DOCK_NEW_CHARACTER,
-        design_character_menu=DOCK_DESIGN_CHARACTER_ITEM,
-        delete_page_action=DOCK_DELETE_PAGE, reorder_pages_action=DOCK_REORDER_PAGES)
+        DOCK_OPEN_PAGE, DOCK_GENERATE_LAYOUT, **_dock_actions(root, manifest))
     _DOCK_CONTEXT["selected_id"] = contents["selected_id"]
     canvas_rows = _canvas_take_rows(manifest)
     if canvas_rows:
         contents["inspector"] += "\n" + "\n".join(canvas_rows)
+    bubble_rows = _canvas_bubble_rows()
+    if bubble_rows:  # a bubble selected on the canvas comes first
+        contents["inspector"] = "\n".join(bubble_rows) + "\n" + contents["inspector"]
     orphan_id = _DOCK_CONTEXT.get("orphan_id")
     candidate_id = _DOCK_CONTEXT.get("candidate_id")
     if orphan_id or candidate_id:
@@ -2685,10 +2696,239 @@ def _new_project_run(procedure, config, data):
     return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
 
 
+_BUBBLE_PREVIEWS = {}
+
+
+def _bubble_previews():
+    if not _BUBBLE_PREVIEWS and lettering is not None:
+        _BUBBLE_PREVIEWS.update(lettering.preview_paths(Path(Gimp.directory()) / "imanganation"))
+    return _BUBBLE_PREVIEWS
+
+
+def _bubble_library():
+    return lettering.library_rows(_bubble_previews()) if lettering else "# Bubbles\nUnavailable"
+
+
+def _open_page_images(manifest):
+    """Page images the workspace has open: {page id: image}."""
+    found = {}
+    for (project_id, page_id), image in list(_PAGE_IMAGES.items()):
+        if project_id == manifest["project"]["id"] and image is not None and image.is_valid():
+            found[page_id] = image
+    return found
+
+
+def _dock_actions(root, manifest):
+    """build_docks' action procedures, plus which script lines already have bubbles
+    on an open page."""
+    bubbled = set()
+    if lettering is not None:
+        for image in _open_page_images(manifest).values():
+            bubbled.update(f"{r.get('panel')}:{r.get('line')}"
+                           for _g, r in lettering.find_bubbles(image) if r.get("panel"))
+    return {"design_action": DOCK_DESIGN_CHARACTER,
+            "new_character_action": DOCK_NEW_CHARACTER,
+            "design_character_menu": DOCK_DESIGN_CHARACTER_ITEM,
+            "delete_page_action": DOCK_DELETE_PAGE,
+            "reorder_pages_action": DOCK_REORDER_PAGES,
+            "bubble_line_action": DOCK_BUBBLE_LINE, "bubbled": frozenset(bubbled),
+            "new_bubble_action": DOCK_NEW_BUBBLE}
+
+
+def _selected_bubble(image=None):
+    """The bubble group selected on the canvas (the group or one of its layers)."""
+    if lettering is None:
+        return None
+    try:
+        image = image or Gimp.context_get_image()
+        if image is None:
+            return None
+        for layer in image.get_selected_layers():
+            for candidate in (layer, layer.get_parent()):
+                if (candidate is not None
+                        and candidate.get_parasite(lettering.BUBBLE_PARASITE) is not None):
+                    return candidate
+    except Exception:
+        return None
+    return None
+
+
+def _canvas_bubble_rows():
+    group = _selected_bubble()
+    if group is None:
+        return []
+    record = lettering._parasite(group, lettering.BUBBLE_PARASITE) or {}
+    _shape, text = lettering.bubble_parts(group)
+    template = bubble_templates.template_by_id(record.get("template", ""))
+    value = " ".join((text.get_text() or "").split()) if text else ""
+    return ["# Bubble",
+            f"@bubble:{group.get_id()}.text\tText\t{value}",
+            f"Style\t{template.label if template else record.get('template', '?')}",
+            f"!{DOCK_FIT_BUBBLE}\tFit bubble to text"]
+
+
+def _bubble_tail_tip(image, speaker, bubble_center, frame):
+    """Where a script line's tail points: the speaker's placement blob (its upper
+    part, where the head is), or else into the frame below the bubble."""
+    import placement
+
+    layer = next((found for name, found in placement.placement_layers(image).items()
+                  if name.casefold() == (speaker or "").casefold()), None)
+    if layer is not None:
+        saved = Gimp.Selection.save(image)
+        try:
+            image.select_item(Gimp.ChannelOps.REPLACE, layer)
+            _, painted, x1, y1, x2, y2 = Gimp.Selection.bounds(image)
+        finally:
+            image.select_item(Gimp.ChannelOps.REPLACE, saved)
+            image.remove_channel(saved)
+        if painted:
+            return ((x1 + x2) / 2, y1 + (y2 - y1) * 0.18)
+    fx, fy, fw, fh = frame
+    toward = 1 if bubble_center[0] < fx + fw / 2 else -1
+    return (bubble_center[0] + toward * fw * 0.08, bubble_center[1] + fh * 0.22)
+
+
+def _next_bubble_center(image, panel_id, frame, reading_order):
+    """Two columns of slots in the frame, in reading order (right first for rtl)."""
+    count = sum(r.get("panel") == panel_id for _g, r in lettering.find_bubbles(image))
+    column, row = count % 2, count // 2
+    first, second = (0.7, 0.3) if reading_order == "rtl" else (0.3, 0.7)
+    fx, fy, fw, fh = frame
+    return (fx + fw * (first if column == 0 else second),
+            fy + fh * min(0.82, 0.18 + 0.26 * row))
+
+
+def _bubble_target_image():
+    image = Gimp.context_get_image()
+    if image is None or not image.is_valid():
+        raise ValueError("Open a page to add a bubble to")
+    return image
+
+
+def _selection_box(image):
+    _, nonempty, x1, y1, x2, y2 = Gimp.Selection.bounds(image)
+    if nonempty and (x2 - x1) > 20 and (y2 - y1) > 20:
+        return (x1, y1, x2 - x1, y2 - y1)
+    return None
+
+
+def _dock_bubble(procedure, config, data):
+    """Bubble…: a script line's (line), a page's (new), a Bubbles dock tile
+    (template), and Fit bubble to text (fit)."""
+    try:
+        if data == "fit":
+            group = _selected_bubble()
+            if group is None:
+                raise ValueError("Select a bubble on the page first")
+            lettering.fit_bubble(group.get_image(), group)
+        elif data == "template":
+            template = bubble_templates.template_by_id(config.get_property("item"))
+            image = _bubble_target_image()
+            box = _selection_box(image)
+            if box:
+                Gimp.Selection.none(image)
+            lettering.insert_bubble(image, template, "Text", box=box,
+                                    center=None if box else (image.get_width() / 2,
+                                                             image.get_height() / 2))
+        elif data == "new":
+            root = _DOCK_CONTEXT["root"]
+            manifest = load_project(root)
+            page_id = _DOCK_CONTEXT.get("selected_id")
+            image = (_show_project_page(root, manifest, page_id)
+                     if any(p["id"] == page_id for p in manifest["pages"])
+                     else _bubble_target_image())
+            chosen = lettering.choose_bubble("speech", "", _bubble_previews(),
+                                             size=lettering.default_size(image))
+            if chosen is None:
+                return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
+            template, text, vertical, size = chosen
+            box = _selection_box(image)
+            if box:
+                Gimp.Selection.none(image)
+            lettering.insert_bubble(image, template, text or "Text", box=box,
+                                    center=None if box else (image.get_width() / 2,
+                                                             image.get_height() / 2),
+                                    size=size, vertical=vertical)
+        else:  # a script line
+            panel_id, _, line = config.get_property("item").rpartition(":")
+            root = _DOCK_CONTEXT["root"]
+            manifest = load_project(root)
+            panel = next((p for p in manifest["panels"] if p["id"] == panel_id), None)
+            if panel is None:
+                raise ValueError("That panel is no longer in the project")
+            page_id = (panel.get("placement") or {}).get("page")
+            if not page_id:
+                raise ValueError("Place this panel on a page first: its bubbles go in "
+                                 "its frame")
+            image = _show_project_page(root, manifest, page_id)
+            existing = lettering.find_line_bubble(image, panel_id, line)
+            if existing is not None:  # Select bubble
+                image.set_selected_layers([existing])
+                Gimp.displays_flush()
+                _refresh_project_docks()
+                return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+            if line.startswith("sfx"):
+                speaker, text, kind = "SFX", panel.get("sfx", [])[int(line[3:])], "sfx"
+            else:
+                entry = panel.get("dialogue", [])[int(line)]
+                speaker, text, kind = (entry.get("speaker", ""), entry.get("text", ""),
+                                       entry.get("kind", "speech"))
+            chosen = lettering.choose_bubble(
+                bubble_templates.KIND_CATEGORY.get(kind, "speech"), text, _bubble_previews(),
+                title=f"Bubble for {speaker}", size=lettering.default_size(image))
+            if chosen is None:
+                return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
+            template, text, vertical, size = chosen
+            frame = (panel.get("placement") or {}).get("frame") or [
+                0, 0, image.get_width(), image.get_height()]
+            center = _next_bubble_center(image, panel_id, frame,
+                                         manifest["project"].get("reading_order", "rtl"))
+            tip = (_bubble_tail_tip(image, speaker, center, frame)
+                   if template.tail != "none" else None)
+            lettering.insert_bubble(image, template, text, center=center, tail_tip=tip,
+                                    size=size, vertical=vertical,
+                                    source={"panel": panel_id, "line": line},
+                                    name=f"{speaker}: {text}"[:60])
+        _refresh_project_docks()
+    except Exception as exc:
+        return _error(procedure, str(exc))
+    return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+
+
+_CANVAS_SELECTION = {"key": None}
+
+
+def _watch_canvas_selection():
+    """Refresh Context when the canvas selection moves onto or off a bubble."""
+    try:
+        image = Gimp.context_get_image()
+        key = None
+        if image is not None and image.is_valid():
+            bubble = _selected_bubble(image)
+            key = bubble.get_id() if bubble is not None else None
+        if key != _CANVAS_SELECTION["key"]:
+            _CANVAS_SELECTION["key"] = key
+            if _DOCK_CONTEXT.get("root") is not None:
+                _refresh_project_docks()
+    except Exception:
+        pass
+    return GLib.SOURCE_CONTINUE
+
+
 def _dock_field_edit(procedure, config, data):
     """A Context field was edited: write it to the manifest, then redraw the docks."""
     try:
         key, _, value = config.get_property("item").partition("\t")
+        if key.startswith("bubble:"):  # a bubble's text: set it, refit the bubble
+            group = Gimp.Item.get_by_id(int(key.split(":", 1)[1].split(".", 1)[0]))
+            if group is None or not group.is_valid():
+                raise ValueError("That bubble is no longer on the page")
+            _shape, text = lettering.bubble_parts(group)
+            text.set_text(value)
+            lettering.fit_bubble(group.get_image(), group)
+            _refresh_project_docks()
+            return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
         root = _DOCK_CONTEXT["root"]
         manifest = load_project(root)
         apply_field_edit(manifest, key, value, character_row_id)
@@ -2742,6 +2982,10 @@ def _add_dock_callbacks(plugin):
         (DOCK_DESIGN_CHARACTER_ITEM, _dock_character_menu, "design", True),
         (DOCK_DELETE_PAGE, _dock_page_menu, "delete", True),
         (DOCK_REORDER_PAGES, _dock_page_menu, "reorder", True),
+        (DOCK_BUBBLE_LINE, _dock_bubble, "line", True),
+        (DOCK_BUBBLE_ITEM, _dock_bubble, "template", True),
+        (DOCK_NEW_BUBBLE, _dock_bubble, "new", False),
+        (DOCK_FIT_BUBBLE, _dock_bubble, "fit", False),
         (DOCK_GENERATE_LAYOUT, _dock_action, "generate-layout", False),
         # Page strip: clicking a page opens it; the button adds one (as in Project)
         (DOCK_ACTIONS[DOCK_FILMSTRIP], _dock_action, "project-action", False),
@@ -2790,16 +3034,15 @@ def _register_project_docks(plugin):
              "", "", "", ""),
             (DOCK_PANEL, "Panel", "properties", contents["panel"],
              "", "", "", ""),
+            (DOCK_BUBBLES, "Bubbles", "tiles", _bubble_library(), "", "", "",
+             DOCK_BUBBLE_ITEM),
         ]
     else:
         manifest = load_project(root)
         contents = build_docks(
             manifest, _DOCK_CONTEXT.get("selected_id"), root,
             _project_page_thumbnails(root, manifest), DOCK_OPEN_PAGE,
-            DOCK_GENERATE_LAYOUT, design_action=DOCK_DESIGN_CHARACTER,
-        new_character_action=DOCK_NEW_CHARACTER,
-        design_character_menu=DOCK_DESIGN_CHARACTER_ITEM,
-        delete_page_action=DOCK_DELETE_PAGE, reorder_pages_action=DOCK_REORDER_PAGES)
+            DOCK_GENERATE_LAYOUT, **_dock_actions(root, manifest))
         rows = [
             (DOCK_PROJECT, "Project", "tree", contents["project"],
              contents["project_selected"], "Add page", DOCK_ACTIONS[DOCK_PROJECT],
@@ -2817,6 +3060,8 @@ def _register_project_docks(plugin):
              DOCK_ITEMS[DOCK_CHARACTERS]),
             (DOCK_PANEL, "Panel", "properties", contents["panel"],
              "", "Set frame", DOCK_ACTIONS[DOCK_PANEL], ""),
+            (DOCK_BUBBLES, "Bubbles", "tiles", _bubble_library(), "", "", "",
+             DOCK_BUBBLE_ITEM),
         ]
     for identifier, title, presentation, content, selected, action_label, action, item in rows:
         _dock_pdb_call("gimp-extension-panel-register", {
@@ -2886,6 +3131,7 @@ def _autostart_run(procedure, config, data):
                                  orphan_id=None, candidate_id=None)
         _add_dock_callbacks(_DOCK_PLUGIN)
         _start_engine_services()
+        GLib.timeout_add(1000, _watch_canvas_selection)
         _register_project_docks(_DOCK_PLUGIN)
     except Exception as exc:
         Gimp.message(f"Could not start Imanganation workspace: {exc}")

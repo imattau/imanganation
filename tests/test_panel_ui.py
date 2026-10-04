@@ -207,3 +207,18 @@ def test_pages_carry_a_delete_menu_and_the_strip_can_be_reordered():
     assert "\t!del:Delete page…" in docks["project"]
     plain = build_docks(manifest)
     assert "!!reorder" not in plain["filmstrip"] and "Delete page" not in plain["project"]
+
+
+def test_dialogue_lines_get_bubble_buttons_in_context():
+    manifest = copy.deepcopy(EXAMPLE)
+    panel = next(p for p in manifest["panels"] if p.get("dialogue"))
+    panel["sfx"] = ["BANG"]
+    pid = panel["id"]
+    inspector = build_docks(manifest, pid, bubble_line_action="bub",
+                            bubbled=frozenset({f"{pid}:0"}))["inspector"]
+    first = panel["dialogue"][0]
+    assert "# Dialogue" in inspector
+    assert f"\t{first['text']}\t!bub:{pid}:0:Select bubble" in inspector
+    assert f"SFX\tBANG\t!bub:{pid}:sfx0:Bubble…" in inspector
+    page = build_docks(manifest, "pg_a1b2c3", new_bubble_action="new")["inspector"]
+    assert "!new\tBubble…" in page

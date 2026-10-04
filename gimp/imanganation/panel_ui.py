@@ -81,7 +81,9 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
                 generate_layout_action: str = "",
                 design_action: str = "", new_character_action: str = "",
                 design_character_menu: str = "", delete_page_action: str = "",
-                reorder_pages_action: str = "") -> dict[str, str]:
+                reorder_pages_action: str = "", bubble_line_action: str = "",
+                bubbled: frozenset = frozenset(),
+                new_bubble_action: str = "") -> dict[str, str]:
     """Build generic host content and stable selections from a project manifest.
 
     The Context (inspector) rows are editable fields; ``open_page_action``, a dock
@@ -93,7 +95,11 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
     right-click menu, and ``design_character_menu`` puts "Design character" on each
     character's (both one-string dock procedures). ``delete_page_action`` puts
     "Delete page…" on page rows and tiles, and ``reorder_pages_action`` lets the page
-    strip's tiles be dragged (it gets "dragged id\ttarget id")."""
+    strip's tiles be dragged (it gets "dragged id\ttarget id"). ``bubble_line_action``
+    gives each of a panel's dialogue and SFX lines a button in Context (item
+    "<panel id>:<line>", line an index or "sfx<index>"): "Select bubble" for the lines
+    in ``bubbled``, else "Bubble…". ``new_bubble_action`` adds a free "Bubble…" button
+    to a page's Context."""
     panels = manifest.get("panels", [])
     pages = manifest.get("pages", [])
     page_by_id = {page["id"]: page for page in pages}
@@ -294,6 +300,18 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
         ])
         if open_page_action and (panel.get("placement") or {}).get("page") in page_by_id:
             inspector_rows.append(f"!{open_page_action}\tOpen page")
+        lines = [(str(i), _label(d.get("speaker")) or "—", _label(d.get("text")))
+                 for i, d in enumerate(panel.get("dialogue", []))]
+        lines += [(f"sfx{i}", "SFX", _label(sfx)) for i, sfx in enumerate(panel.get("sfx", []))]
+        if lines:
+            inspector_rows.append("# Dialogue")
+            for line, speaker, text in lines:
+                button = ""
+                if bubble_line_action:
+                    key = f"{pid}:{line}"
+                    label = "Select bubble" if key in bubbled else "Bubble…"
+                    button = f"\t!{bubble_line_action}:{key}:{label}"
+                inspector_rows.append(f"{speaker}\t{text}{button}")
         inspector_rows.extend([
             "# Production",
             f"ID\t{panel['id']}",
@@ -352,6 +370,8 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
                 inspector_rows.append(f"!{generate_layout_action}\tChoose layout…")
         if open_page_action:
             inspector_rows.append(f"!{open_page_action}\tOpen page")
+        if new_bubble_action:
+            inspector_rows.append(f"!{new_bubble_action}\tBubble…")
         if panels_on_page:
             inspector_rows.append("# On this page")
             for panel in panels_on_page:
