@@ -142,17 +142,10 @@ def refine_panel(
     source: Path | None = None, scale: float | None = None, denoise: float | None = None,
     seed: int | None = None, client: ComfyClient | None = None,
 ) -> RefineResult:
-    """Hi-res-fix panel ``seq`` (or an explicit ``source`` image) at ``scale``×."""
+    """Hi-res-fix panel ``seq`` (or an explicit ``source`` image) at ``scale``×.
+
+    Legacy form: the original render and its prompt are found by walking sidecars."""
     project = Path(project)
-    settings = load_settings()
-    models = load_models()
-    r = settings.defaults.refiner
-    if not r.enabled and scale is None and denoise is None:
-        raise RefineError("refiner is disabled in settings.yaml (defaults.refiner.enabled)")
-
-    scale = r.scale if scale is None else scale
-    denoise = r.denoise if denoise is None else denoise
-
     if source is None:
         # Prefer the newest existing take (e.g. a _hires rebuild, or the base render).
         src = _newest_panel(project, seq)
@@ -163,31 +156,86 @@ def refine_panel(
         if not src.exists():
             raise RefineError(f"source image not found: {src}")
 
-    with Image.open(src) as im:
-        width, height = im.size
-
     # Scale is relative to the *original render*, never to an already-enlarged take
     # (a hi-res, or an inpaint made on one): otherwise refining it again compounds,
     # e.g. 2x of a 2x gave 3840x4352 from a 960x1088 render. Derived edits are kept:
     # the chosen take is what gets enlarged, just only up to render x scale.
     origin = render_origin(src)
     with Image.open(origin) as im:
-        base_w, base_h = im.size
+        origin_size = im.size
+    # The panel prompt lives with the render; a derived take's sidecar has none (refine)
+    # or only the artist's short patch prompt (inpaint), which must not steer the polish.
+    prompt, negative = _panel_prompts(origin)
+    result = refine_image(
+        src, origin_size=origin_size, origin_label=origin.name, prompt=prompt,
+        negative=negative, out=take_path(project, seq), scale=scale, denoise=denoise,
+        seed=seed, client=client, prefix=f"imanganation_{seq:03d}_hires",
+    )
+    result.seq, result.origin = seq, str(origin)
+    take_path_json = Path(result.path).with_suffix(".json")
+    take_path_json.write_text(json.dumps(asdict(result), indent=2))
+    return result
+
+
+def refine_inline(
+    project_id: str, source: Path, *, origin_width: int, origin_height: int,
+    prompt: str | None = None, scale: float | None = None, denoise: float | None = None,
+    seed: int | None = None, client: ComfyClient | None = None,
+    outputs: Path | None = None,
+) -> RefineResult:
+    """Container form (docs/engine-api.md): the take's history lives in the project,
+    so the caller sends the origin take's size and its render prompt. Output goes to
+    the engine's ``outputs/<project>/`` cache; the plug-in records it as a take."""
+    import uuid
+
+    from manganation.config import REPO_ROOT
+
+    source = Path(source)
+    if not source.is_file():
+        raise RefineError(f"source image not found: {source}")
+    if origin_width <= 0 or origin_height <= 0:
+        raise RefineError("origin size must be positive")
+    style_prompt, negative = _style_prompts()
+    out_dir = (outputs if outputs is not None else REPO_ROOT / "outputs") / project_id
+    out = out_dir / f"{source.stem}-hires-{uuid.uuid4().hex[:12]}.png"
+    result = refine_image(
+        source, origin_size=(origin_width, origin_height),
+        origin_label=f"{origin_width}x{origin_height} origin", prompt=prompt or style_prompt,
+        negative=negative, out=out, scale=scale, denoise=denoise, seed=seed, client=client,
+        prefix="imanganation_inline_hires",
+    )
+    result.origin = f"{origin_width}x{origin_height}"
+    out.with_suffix(".json").write_text(json.dumps(asdict(result), indent=2))
+    return result
+
+
+def refine_image(
+    src: Path, *, origin_size: tuple[int, int], origin_label: str, prompt: str,
+    negative: str, out: Path, scale: float | None, denoise: float | None,
+    seed: int | None, client: ComfyClient | None, prefix: str,
+) -> RefineResult:
+    """The hi-res fix itself: enlarge ``src`` to ``origin_size`` x ``scale``."""
+    settings = load_settings()
+    models = load_models()
+    r = settings.defaults.refiner
+    if not r.enabled and scale is None and denoise is None:
+        raise RefineError("refiner is disabled in settings.yaml (defaults.refiner.enabled)")
+    scale = r.scale if scale is None else scale
+    denoise = r.denoise if denoise is None else denoise
+
+    with Image.open(src) as im:
+        width, height = im.size
+    base_w, base_h = origin_size
     tw, th = fit_target_width(base_w, base_h, scale, max_pixels=r.max_pixels)
     if tw <= width and th <= height:
         raise RefineError(
             f"{src.name} is already {width}x{height}, at or beyond {scale:g}x its render "
-            f"({origin.name}, {base_w}x{base_h}); nothing to do. Use a larger scale to "
+            f"({origin_label}, {base_w}x{base_h}); nothing to do. Use a larger scale to "
             f"go further")
 
     client = client or ComfyClient(settings.comfyui.base_url)
     if not client.is_up():
         raise RefineError(f"ComfyUI is not reachable at {settings.comfyui.base_url}")
-
-    # Reuse the panel's own prompt so the polish stays on-model (sidecar, if present).
-    # The panel prompt lives with the render; a derived take's sidecar has none (refine)
-    # or only the artist's short patch prompt (inpaint), which must not steer the polish.
-    prompt, negative = _panel_prompts(origin)
     seed = seed if seed is not None else 0
 
     uploaded = client.upload_image(str(src))
@@ -198,7 +246,7 @@ def refine_panel(
     graph = graphs.upscale_refine(
         ckpt=models["checkpoints"]["primary"]["id"],
         image=uploaded["name"], prompt=prompt, negative=negative,
-        width=tw, height=th, seed=seed, prefix=f"imanganation_{seq:03d}_hires",
+        width=tw, height=th, seed=seed, prefix=prefix,
         upscale_model=upscaler, denoise=denoise,
         polish_width=polish_w, polish_height=polish_h,
         sampling=graphs.Sampling(r.steps, r.cfg),
@@ -207,15 +255,12 @@ def refine_panel(
     if not blobs:
         raise RefineError("ComfyUI returned no image")
 
-    out = take_path(project, seq)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(blobs[0])
-    result = RefineResult(
-        path=str(out), seq=seq, source=str(src), width=tw, height=th,
-        upscaler=r.upscaler, denoise=denoise, seed=seed, origin=str(origin),
+    return RefineResult(
+        path=str(out), seq=None, source=str(src), width=tw, height=th,
+        upscaler=r.upscaler, denoise=denoise, seed=seed, origin="",
     )
-    out.with_suffix(".json").write_text(json.dumps(asdict(result), indent=2))
-    return result
 
 
 def _newest_panel(project: Path, seq: int) -> Path | None:
@@ -234,17 +279,24 @@ def _newest_panel(project: Path, seq: int) -> Path | None:
 
 def _panel_prompts(src: Path) -> tuple[str, str]:
     """Read the sidecar prompt for the source panel; fall back to a bare prompt."""
-    from manganation.render.panel import build_negative, load_style
+    from manganation.render.panel import load_style
 
-    style = load_style()
     sidecar = src.with_suffix(".json")
     if sidecar.exists():
         try:
             data = json.loads(sidecar.read_text())
             if data.get("prompt"):
-                return data["prompt"], style.get("negative", "")
+                return data["prompt"], load_style().get("negative", "")
         except (OSError, ValueError):
             pass
+    return _style_prompts()
+
+
+def _style_prompts() -> tuple[str, str]:
+    """The colour style's bare prompt and negative, when no panel prompt is known."""
+    from manganation.render.panel import build_negative, load_style
+
+    style = load_style()
     return style.get("prompt_prefix", "").strip().rstrip(","), build_negative(
         _blank_spec(), style
     )

@@ -57,31 +57,80 @@ class RenderRequest(BaseModel):
 
 
 class RefineRequest(BaseModel):
-    project_dir: str
-    seq: int = Field(ge=1)
+    """Container form: ``project`` + ``source`` + the origin take's size (and its
+    render ``prompt``), from the project's take history. Legacy: ``project_dir`` +
+    ``seq`` (origin and prompt found from sidecars)."""
+
+    project_dir: str | None = None
+    seq: int | None = Field(default=None, ge=1)
+    project: str | None = Field(default=None, pattern=r"^prj_[a-z0-9]{6,}$")
     # The exact take to refine (e.g. what a GIMP layer shows); default: newest render.
     source: str | None = None
+    origin_width: int | None = Field(default=None, gt=0)
+    origin_height: int | None = Field(default=None, gt=0)
+    prompt: str | None = None
     scale: float | None = Field(default=None, gt=0)
     denoise: float | None = Field(default=None, ge=0, le=1)
     seed: int | None = None
 
+    @model_validator(mode="after")
+    def _one_form(self):
+        inline, legacy = self.project is not None, self.project_dir is not None
+        if inline == legacy:
+            raise ValueError("send either project (container id) or project_dir, not both")
+        if legacy and self.seq is None:
+            raise ValueError("the project_dir form needs seq")
+        if inline and self.source is None:
+            raise ValueError("the project form needs the exact source take")
+        return self
+
+    @model_validator(mode="after")
+    def _origin(self):
+        if self.project is not None and (self.origin_width is None or
+                                         self.origin_height is None):
+            raise ValueError("the project form needs origin_width and origin_height "
+                             "(the origin take's size), so scales never compound")
+        return self
+
 
 class ReferenceRequest(BaseModel):
-    project_dir: str
+    project_dir: str | None = None
+    project: str | None = Field(default=None, pattern=r"^prj_[a-z0-9]{6,}$")
     name: str = Field(min_length=1, description="An existing character (name or alias)")
     image_path: str = Field(description="PNG inside the project, e.g. exported by GIMP")
     version_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{1,40}$")
 
+    @model_validator(mode="after")
+    def _one_form(self):
+        if (self.project is None) == (self.project_dir is None):
+            raise ValueError("send either project (container id) or project_dir")
+        return self
+
 
 class InpaintRequest(BaseModel):
-    project_dir: str
-    seq: int = Field(ge=1)
+    """Container form: ``project`` + exact ``source`` + ``mask`` (absolute paths).
+    Legacy: ``project_dir`` + ``seq``, paths inside that folder."""
+
+    project_dir: str | None = None
+    seq: int | None = Field(default=None, ge=1)
+    project: str | None = Field(default=None, pattern=r"^prj_[a-z0-9]{6,}$")
     mask: str = Field(description="Mask image inside the project (alpha or black/white)")
     prompt: str = Field(min_length=1, description="What to paint in the region")
     source: str | None = Field(default=None, description="Init image (default: newest take)")
     denoise: float | None = Field(default=None, gt=0, le=1)
     grow_mask_by: int | None = Field(default=None, ge=0, le=256)
     seed: int | None = None
+
+    @model_validator(mode="after")
+    def _one_form(self):
+        inline, legacy = self.project is not None, self.project_dir is not None
+        if inline == legacy:
+            raise ValueError("send either project (container id) or project_dir, not both")
+        if legacy and self.seq is None:
+            raise ValueError("the project_dir form needs seq")
+        if inline and self.source is None:
+            raise ValueError("the project form needs the exact source take")
+        return self
 
 
 class Job(BaseModel):
@@ -156,6 +205,9 @@ def create_app(
     comfy_stats=None,
     models_check=None,
     render_inline=panel_render.render_inline,
+    refine_inline=refiner_render.refine_inline,
+    inpaint_inline=inpaint_render.inpaint_inline,
+    outputs: Path | None = None,
 ) -> FastAPI:
     app = FastAPI(title="imanganation engine")
     jobs: dict[str, Job] = {}
@@ -183,6 +235,31 @@ def create_app(
         finally:
             with lock:
                 job.finished = time.time()
+
+    def _engine_file(raw: str, what: str) -> Path:
+        """A container-form image: an existing file under the projects root (where
+        containers live) or the engine's outputs/ cache (a take not yet copied in)."""
+        from manganation.config import REPO_ROOT
+
+        roots = [(root or projects_root()).resolve(),
+                 (outputs or REPO_ROOT / "outputs").resolve()]
+        path = Path(raw).resolve()
+        if not any(r in path.parents for r in roots):
+            raise HTTPException(400, f"{what} must be under {roots[0]} or {roots[1]}")
+        if not path.is_file():
+            raise HTTPException(404, f"{what} not found: {path}")
+        return path
+
+    def _registry(project_dir: str | None, project: str | None):
+        from manganation.characters.registry import CharacterRegistry
+        from manganation.identity import IdentityError, identity_root
+
+        if project is not None:
+            try:
+                return CharacterRegistry.from_path(identity_root(project, root=root))
+            except IdentityError as exc:
+                raise HTTPException(400, str(exc)) from exc
+        return CharacterRegistry.from_path(resolve_project(project_dir, root))
 
     @app.get("/health")
     def health() -> dict:
@@ -262,6 +339,14 @@ def create_app(
 
     @app.post("/refine", status_code=202)
     def submit_refine(req: RefineRequest) -> Job:
+        if req.project is not None:
+            src = _engine_file(req.source, "source")
+            return submit_job(
+                "refine", req.model_dump(exclude_none=True),
+                lambda: refine_inline(req.project, src, origin_width=req.origin_width,
+                                      origin_height=req.origin_height, prompt=req.prompt,
+                                      scale=req.scale, denoise=req.denoise, seed=req.seed),
+            )
         project = resolve_project(req.project_dir, root)
         req.project_dir = str(project)
         source = None
@@ -290,6 +375,14 @@ def create_app(
 
     @app.post("/inpaint", status_code=202)
     def submit_inpaint(req: InpaintRequest) -> Job:
+        if req.project is not None:
+            src, mask = _engine_file(req.source, "source"), _engine_file(req.mask, "mask")
+            return submit_job(
+                "inpaint", req.model_dump(exclude_none=True),
+                lambda: inpaint_inline(req.project, src, mask, prompt=req.prompt,
+                                       denoise=req.denoise, grow_mask_by=req.grow_mask_by,
+                                       seed=req.seed),
+            )
         project = resolve_project(req.project_dir, root)
         req.project_dir = str(project)
         mask = _inside(project, req.mask, "mask", required=True)
@@ -304,10 +397,10 @@ def create_app(
         )
 
     @app.get("/characters")
-    def characters(project_dir: str) -> list[dict]:
-        from manganation.characters.registry import CharacterRegistry
-
-        reg = CharacterRegistry.from_path(resolve_project(project_dir, root))
+    def characters(project_dir: str | None = None, project: str | None = None) -> list[dict]:
+        if (project is None) == (project_dir is None):
+            raise HTTPException(422, "send either project (container id) or project_dir")
+        reg = _registry(project_dir, project)
         return [
             {"name": c.name, "aliases": c.aliases, "default_version": c.default_version,
              "versions": [v.id for v in c.versions],
@@ -321,21 +414,22 @@ def create_app(
         earlier versions are kept). Synchronous: a file copy, no GPU."""
         from PIL import Image, UnidentifiedImageError
 
-        from manganation.characters.registry import CharacterRegistry
-
-        project = resolve_project(req.project_dir, root)
-        image = Path(req.image_path).resolve()
-        if project not in image.parents:
-            raise HTTPException(400, f"image must be inside the project ({project})")
-        if not image.is_file():
-            raise HTTPException(404, f"image not found: {image}")
+        if req.project is not None:
+            image = _engine_file(req.image_path, "image")
+        else:
+            project = resolve_project(req.project_dir, root)
+            image = Path(req.image_path).resolve()
+            if project not in image.parents:
+                raise HTTPException(400, f"image must be inside the project ({project})")
+            if not image.is_file():
+                raise HTTPException(404, f"image not found: {image}")
         try:
             with Image.open(image) as im:
                 im.verify()
         except (UnidentifiedImageError, OSError) as exc:
             raise HTTPException(400, f"not a readable image: {exc}") from exc
 
-        reg = CharacterRegistry.from_path(project)
+        reg = _registry(req.project_dir, req.project)
         character = reg.get(req.name)
         if character is None:
             known = ", ".join(c.name for c in reg.cast.characters) or "none"

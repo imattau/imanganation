@@ -40,7 +40,7 @@ class InpaintError(RuntimeError):
 @dataclass
 class InpaintResult:
     path: str
-    seq: int
+    seq: int | None
     source: str
     mask: str
     prompt: str
@@ -146,14 +146,8 @@ def inpaint_panel(
     negative: str | None = None, client: ComfyClient | None = None,
 ) -> InpaintResult:
     """Repaint the masked region of panel ``seq`` (or an explicit ``source``) from
-    ``prompt``. ``mask`` and ``source`` must live inside ``project``."""
+    ``prompt``. ``mask`` and ``source`` must live inside ``project``. Legacy form."""
     project = Path(project)
-    settings = load_settings()
-    models = load_models()
-    d = settings.defaults.inpaint
-    denoise = d.denoise if denoise is None else denoise
-    grow_mask_by = d.grow_mask_by if grow_mask_by is None else grow_mask_by
-
     if source is None:
         src = _newest_panel(project, seq)
         if src is None:
@@ -161,6 +155,52 @@ def inpaint_panel(
     else:
         src = _resolve(source, project, "source")
     mask_path = _resolve(mask, project, "mask")
+    result = inpaint_image(
+        src, mask_path, prompt=prompt, out=output_path(project, seq), denoise=denoise,
+        grow_mask_by=grow_mask_by, seed=seed, negative=negative, client=client,
+        tag=f"{project.name}_{seq:03d}",
+    )
+    result.seq = seq
+    Path(result.path).with_suffix(".json").write_text(json.dumps(asdict(result), indent=2))
+    return result
+
+
+def inpaint_inline(
+    project_id: str, source: Path, mask: Path, *, prompt: str,
+    denoise: float | None = None, grow_mask_by: int | None = None, seed: int | None = None,
+    client: ComfyClient | None = None, outputs: Path | None = None,
+) -> InpaintResult:
+    """Container form (docs/engine-api.md): ``source`` is the exact take, ``mask`` the
+    selection export. Output goes to the engine's ``outputs/<project>/`` cache; the
+    plug-in records it as a take (kind ``inpaint``, parent = the source take)."""
+    import uuid
+
+    from manganation.config import REPO_ROOT
+
+    source, mask = Path(source), Path(mask)
+    for path, what in ((source, "source"), (mask, "mask")):
+        if not path.is_file():
+            raise InpaintError(f"{what} not found: {path}")
+    out_dir = (outputs if outputs is not None else REPO_ROOT / "outputs") / project_id
+    out = out_dir / f"{source.stem}-inpaint-{uuid.uuid4().hex[:12]}.png"
+    result = inpaint_image(source, mask, prompt=prompt, out=out, denoise=denoise,
+                           grow_mask_by=grow_mask_by, seed=seed, client=client,
+                           tag=project_id)
+    out.with_suffix(".json").write_text(json.dumps(asdict(result), indent=2))
+    return result
+
+
+def inpaint_image(
+    src: Path, mask_path: Path, *, prompt: str, out: Path, denoise: float | None = None,
+    grow_mask_by: int | None = None, seed: int | None = None, negative: str | None = None,
+    client: ComfyClient | None = None, tag: str = "panel",
+) -> InpaintResult:
+    """Crop-and-stitch repaint of ``src`` inside ``mask_path``, saved to ``out``."""
+    settings = load_settings()
+    models = load_models()
+    d = settings.defaults.inpaint
+    denoise = d.denoise if denoise is None else denoise
+    grow_mask_by = d.grow_mask_by if grow_mask_by is None else grow_mask_by
 
     if not (0.0 < denoise <= 1.0):
         raise InpaintError("denoise must be in (0, 1]")
@@ -193,7 +233,7 @@ def inpaint_panel(
     positive = _with_style(prompt)
     seed = seed if seed is not None else random.randrange(2**32)
     with tempfile.TemporaryDirectory() as tmp:
-        stem = f"{project.name}_{seq:03d}_inpaint"
+        stem = f"{tag}_inpaint"
         crop_path, cmask_path = Path(tmp) / f"{stem}_crop.png", Path(tmp) / f"{stem}_mask.png"
         source_im.crop(box).resize((work_w, work_h), Image.LANCZOS).save(crop_path)
         mask_im.crop(box).resize((work_w, work_h), Image.LANCZOS).save(cmask_path)
@@ -203,7 +243,7 @@ def inpaint_panel(
         ckpt=models["checkpoints"]["primary"]["id"],
         image=source_up["name"], mask=mask_up["name"],
         prompt=positive, negative=neg, seed=seed,
-        prefix=f"imanganation_{seq:03d}_inpaint",
+        prefix=f"imanganation_{tag}_inpaint",
         denoise=denoise, grow_mask_by=max(1, round(grow_mask_by * scale)),
         mask_channel="red",  # normalised: opaque greyscale, white = repaint
         sampling=graphs.Sampling(d.steps, d.cfg),
@@ -218,16 +258,13 @@ def inpaint_panel(
     stitched = source_im.copy()
     stitched.paste(patch, box[:2], blend_mask(mask_im.crop(box), grow_mask_by))
 
-    out = output_path(project, seq)
     out.parent.mkdir(parents=True, exist_ok=True)
     stitched.save(out)
-    result = InpaintResult(
-        path=str(out), seq=seq, source=str(src), mask=str(mask_path), prompt=prompt,
+    return InpaintResult(
+        path=str(out), seq=None, source=str(src), mask=str(mask_path), prompt=prompt,
         width=width, height=height, denoise=denoise, grow_mask_by=grow_mask_by, seed=seed,
         positive=positive, crop=list(box), work_size=[work_w, work_h],
     )
-    out.with_suffix(".json").write_text(json.dumps(asdict(result), indent=2))
-    return result
 
 
 def _with_style(prompt: str) -> str:

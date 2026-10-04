@@ -56,18 +56,62 @@ the plug-in moves to containers.
 Malformed requests (neither form, both, half of the inline form, a bad project id,
 an invalid panel spec) are rejected with 422 before anything is queued.
 
+## Refine: `POST /refine`
+
+Container form. The take's history is in the project, so the caller sends it:
+
+```json
+{"project": "prj_…", "source": "/abs/…/takes/pnl_…-tk_….png",
+ "origin_width": 1344, "origin_height": 832, "prompt": "<the origin render's prompt>",
+ "scale": 2.0, "denoise": 0.25, "seed": 0}
+```
+
+- `origin_width/height` is the take's `origin` take size (`project.json`). The target
+  is origin × scale, so refining an already-enlarged take at the same scale is refused
+  ("already … at or beyond 2× its render"); scales never compound.
+- `prompt` is the origin render's `engine.prompt` (an inpaint's patch prompt must not
+  steer the polish). Omitted: the bare style prompt.
+- Output: `outputs/<project>/<source stem>-hires-<random>.png`; record it as a
+  `refine` take with `parent` = the source take.
+
+Legacy: `project_dir` + `seq` (+ optional `source`); origin and prompt come from
+sidecars (`docs/phase6a.md`).
+
+## Inpaint: `POST /inpaint`
+
+```json
+{"project": "prj_…", "source": "/abs/…/takes/….png", "mask": "/abs/…/masks/….png",
+ "prompt": "lunchbox", "denoise": 0.85, "grow_mask_by": 8}
+```
+
+Crop-and-stitch, with outside-mask pixels kept exactly (`docs/inpaint.md`). Output:
+`outputs/<project>/<source stem>-inpaint-<random>.png`; record it as an `inpaint` take
+(`parent` = source, `engine.mask` = the mask copied into `masks/`).
+**Known gap:** inpaint carries no character identity (no character tags, no
+IP-Adapter), so repainting a face can drift off-model. It's fine for props and hands.
+
+## Characters
+
+`GET /characters?project=prj_…` lists the project's cast from its identity store.
+`POST /characters/reference` takes `project` instead of `project_dir`. Both accept
+`project_dir` too (legacy). An unmapped project id has an empty cast.
+
+## Paths in container forms
+
+`source`, `mask` and `image_path` must be existing files under the projects root
+(where containers live) or the engine's `outputs/` (a fresh result not yet copied into
+`takes/`). Anything else is a 400 (outside) or 404 (missing).
+
 ## Other endpoints
 
 | Endpoint | Purpose |
 |---|---|
 | `GET /jobs/{id}` | Job status: `queued` / `running` / `done` / `error`, with `result` or `error` |
-| `POST /refine` | Hi-res fix (`docs/phase6a.md`); `source` = exact take; scale relative to the original render |
-| `POST /inpaint` | Masked repaint with crop-and-stitch (`docs/inpaint.md`) |
-| `GET /characters?project_dir=` | The cast (legacy, by folder) |
+| `POST /refine`, `POST /inpaint` | Above |
+| `GET /characters` | The cast, by `project` or legacy `project_dir` |
 | `POST /characters/reference` | Register an image as a character's new active reference version |
 | `GET /status` | ComfyUI/GPU health, running/queued/recent jobs (by project + panel id), missing models |
 | `GET /health` | Liveness |
 
-Not yet migrated to project ids: `/refine` and `/inpaint` (still `project_dir` +
-`seq`, with paths inside it) and the character endpoints (`project_dir`). Next step:
-accept `project` + source/mask paths in the engine's `outputs/` or a container.
+Every endpoint now accepts a project id. The legacy `project_dir` forms remain until
+the plug-in has moved to containers.
