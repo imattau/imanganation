@@ -12,9 +12,11 @@ that frame's proportions; the plug-in drops it in, clipped to the frame, below t
 template's frame lines. Then the next frame, and so on. The plug-in never lays out
 a page.
 
-Panels are identified by their 1-based position in panels.json (``seq``), not
+Panels are identified by their 1-based position in the script (``seq``), not
 page/panel, because scripts can repeat panel numbers within a page (e.g. after
-``CUT TO:``). Rendered images live at ``panels/{seq:03d}*.png``.
+``CUT TO:``). A project container (``project.json``) renders through the engine's
+inline form (project id + panel object); a legacy folder through ``panels.json`` +
+``seq``, with images at ``panels/{seq:03d}*.png``.
 
 Template convention: a layer whose name starts with "template" holds the frame
 lines. New panels go directly beneath it (a Normal-mode template is switched to
@@ -298,12 +300,27 @@ def _place(image, panel_file, spec, seq=None, render=None, take_ref=None, frame=
     return layer
 
 
-def _load_project(config):
-    """-> (root, legacy specs, seq, explicit, manifest) or raises ValueError.
+def _container_spec(panel):
+    """A container panel as the spec dict the placement and cursor code read
+    (``page``/``panel`` from its script label; characters, dialogue, sfx as is)."""
+    label = panel.get("label", {})
+    return dict(panel, page=label.get("page"), panel=label.get("panel"))
 
-    The container is authoritative for project identity and cursor. The current engine
-    render API still consumes panels.json by sequence, so a container project also
-    needs that compatibility projection until the engine accepts inline specs.
+
+def _render_body(root, manifest, seq):
+    """Engine /jobs body naming the panel: inline for a container (the engine needs no
+    panels.json), legacy project_dir + seq otherwise. Frame size is added by callers."""
+    if manifest is None:
+        return {"project_dir": str(root), "seq": seq}
+    return {"project": manifest["project"]["id"], "panel": manifest["panels"][seq - 1],
+            "reading_order": manifest["project"].get("reading_order", "rtl")}
+
+
+def _load_project(config):
+    """-> (root, panel specs, seq, explicit, manifest) or raises ValueError.
+
+    The container is authoritative for the script, project identity and cursor; a
+    folder without project.json is a legacy project read from panels.json.
     """
     project = config.get_property("project-dir")
     if project is None:
@@ -318,24 +335,13 @@ def _load_project(config):
             manifest = load_project(root)
         except ProjectFileError as exc:
             raise ValueError(str(exc)) from exc
-    try:
-        panels = json.loads((root / "panels.json").read_text())["panels"]
-    except (OSError, ValueError, KeyError) as exc:
-        hint = ("The container is valid, but this engine version still requires the "
-                "panels.json compatibility projection. " if manifest else "")
-        raise ValueError(f"{hint}Cannot read {root / 'panels.json'}: {exc}") from exc
-
     if manifest is not None:
-        container_panels = manifest["panels"]
-        if len(container_panels) != len(panels):
-            raise ValueError("project.json and panels.json contain different panel counts; "
-                             "reconcile the script before rendering")
-        for index, (container_panel, engine_panel) in enumerate(zip(container_panels, panels), 1):
-            label = container_panel.get("label", {})
-            if (label.get("page"), label.get("panel")) != (
-                    engine_panel.get("page"), engine_panel.get("panel")):
-                raise ValueError(f"project.json and panels.json disagree at panel {index}; "
-                                 "reconcile the script before rendering")
+        panels = [_container_spec(panel) for panel in manifest["panels"]]
+    else:
+        try:
+            panels = json.loads((root / "panels.json").read_text())["panels"]
+        except (OSError, ValueError, KeyError) as exc:
+            raise ValueError(f"Cannot read {root / 'panels.json'}: {exc}") from exc
 
     explicit = config.get_property("panel-number")
     if explicit:
@@ -559,7 +565,7 @@ def render_panel(procedure, run_mode, image, drawables, config, data):
     frame.set_name(f"imanganation frame {seq:03d}")
     try:
         engine = config.get_property("engine-url").rstrip("/")
-        body = {"project_dir": str(root), "seq": seq,
+        body = {**_render_body(root, manifest, seq),
                 "frame_width": x2 - x1, "frame_height": y2 - y1}
         if config.get_property("seed") >= 0:
             body["seed"] = config.get_property("seed")
@@ -777,10 +783,14 @@ def regenerate_panel(procedure, run_mode, image, drawables, config, data):
 
     root = source.parent.parent
     try:
-        panels = json.loads((root / "panels.json").read_text())["panels"]
-        spec = panels[seq - 1]  # the script as it is *now*: edits apply
+        manifest = _manifest_for(root)
+        if manifest is not None:
+            spec = _container_spec(manifest["panels"][seq - 1])
+        else:
+            spec = json.loads((root / "panels.json").read_text())["panels"][seq - 1]
+        # the script as it is *now*: edits apply
     except (OSError, ValueError, KeyError, IndexError) as exc:
-        return _error(procedure, f"Panel {seq:03d} not found in {root / 'panels.json'}: {exc}")
+        return _error(procedure, f"Panel {seq:03d} not found in the project at {root}: {exc}")
 
     if config.get_property("same-seed"):
         seed = _recorded_seed(meta, source)
@@ -791,7 +801,7 @@ def regenerate_panel(procedure, run_mode, image, drawables, config, data):
         seed = random.randrange(2**31)
 
     _, _, fw, fh = _frame_box(image, layer)
-    body = {"project_dir": str(root), "seq": seq, "frame_width": fw, "frame_height": fh,
+    body = {**_render_body(root, manifest, seq), "frame_width": fw, "frame_height": fh,
             "seed": seed}
     if config.get_property("keep-composition"):
         # Keep this take's layout and poses (ControlNet on its edges); the edited
@@ -807,7 +817,6 @@ def regenerate_panel(procedure, run_mode, image, drawables, config, data):
         return _error(procedure, str(exc))
 
     try:
-        manifest = _manifest_for(root)
         path, _take = _record_take(
             root, manifest, seq, result["path"], "render", result["width"],
             result["height"], engine={k: result.get(k) for k in

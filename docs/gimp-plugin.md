@@ -41,6 +41,11 @@ GIMP also gives three things for free that a custom web UI would have to build:
 ## Built so far
 
 `gimp/imanganation/imanganation.py` and its stdlib-only siblings
+To run the imanganation-gimp fork's uninstalled build with the plug-in, use
+`scripts/gimp-dev.sh`: it sets the library, data, menu and default-layout paths and points
+GIMP at the build's own plug-ins (without them it cannot open PNG or JPEG files, so
+rendered panels fail to load).
+
 `gimp/imanganation/project_store.py` and `gimp/imanganation/panel_ui.py` are installed together in
 `~/.config/GIMP/3.2/plug-ins/imanganation`. The store reads and atomically updates
 `project.json` while preserving unknown keys. It validates format/version, stable IDs,

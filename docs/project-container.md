@@ -191,6 +191,10 @@ A one-shot importer can do this. The rooftop example file was hand-converted thi
 ### Current plug-in transition
 
 The Python plug-in now reads the container cursor by panel id and writes it atomically.
+Render Panel into Frame, Regenerate Panel and Context's Generate render a container's
+panels through the engine's inline form (project id + panel object + reading order), so
+a container needs no `panels.json`; Refine, Inpaint and the character lookups still send
+the legacy `project_dir` form.
 The zero-argument persistent Python workspace extension starts with GIMP, restores the
 last selected project, and registers Project, Script, Inspector, Panel, Page Filmstrip,
 and Character Bible by default. On first launch its Project dock offers **Open project…**;
