@@ -53,8 +53,12 @@ page placement metadata are still being migrated. It adds nine commands under
 
 - **Open Project Docks…**: choose a folder containing `project.json` to open the
   persistent Project, Inspector, and Page Filmstrip docks. Select project rows to
-  inspect panels or pages; the filmstrip's **Next page** action cycles the selection.
-  GIMP restores dock placement and visibility through its normal session state.
+  inspect panels or pages; page tiles show placed-panel counts and basic progress,
+  and **Open page** opens the selected page's XCF (or the selected panel's page).
+  The Inspector shows panel placement, scene details, lettering counts, and take
+  lineage. Cast rows select a character context with project notes and engine-owned
+  versions/reference availability. GIMP restores dock placement and visibility through
+  its normal session state.
 
 - **Render Panel into Frame…** (the main flow): needs a selection, which is the target
   frame. It sends the next panel's `seq` and the frame's size to the engine, which

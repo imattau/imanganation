@@ -43,11 +43,12 @@ from gi.repository import Gio, GLib, GObject  # noqa: E402
 
 try:
     from project_store import ProjectFileError, load_project, record_take, save_project
-    from panel_ui import build_docks
+    from panel_ui import build_docks, character_row_id
 except ImportError:  # Keep older single-file plug-in installs usable for legacy projects.
     ProjectFileError = ValueError
     load_project = record_take = save_project = None
     build_docks = None
+    character_row_id = None
 
 PROC_RENDER = "plug-in-imanganation-render-panel"
 PROC_NEXT = "plug-in-imanganation-place-next-panel"
@@ -65,7 +66,7 @@ DOCK_IDS = (DOCK_PROJECT, DOCK_INSPECTOR, DOCK_FILMSTRIP)
 DOCK_ACTIONS = {
     DOCK_PROJECT: "plug-in-imanganation-dock-project-refresh",
     DOCK_INSPECTOR: "plug-in-imanganation-dock-inspector-refresh",
-    DOCK_FILMSTRIP: "plug-in-imanganation-dock-filmstrip-next",
+    DOCK_FILMSTRIP: "plug-in-imanganation-dock-filmstrip-open-page",
 }
 DOCK_ITEMS = {
     DOCK_PROJECT: "plug-in-imanganation-dock-project-item",
@@ -1044,18 +1045,43 @@ def _engine_reference_rows(root, manifest, selected_id):
     return rows
 
 
+def _engine_character_rows(root, character_name):
+    query = urllib.parse.urlencode({"project_dir": str(root)})
+    try:
+        characters = _http("GET", f"{ENGINE_URL}/characters?{query}", timeout=3)
+    except EngineError as exc:
+        return ["# Engine character record", f"Status\tUnavailable ({exc})"]
+    character = next((c for c in characters
+                      if c.get("name", "").casefold() == character_name.casefold()), None)
+    if character is None:
+        return ["# Engine character record", "Status\tNot found in engine"]
+    versions = character.get("versions", [])
+    reference = "Available" if character.get("reference") else "Not set"
+    return [
+        "# Engine character record",
+        f"Default version\t{character.get('default_version') or 'None'}",
+        f"Versions\t{', '.join(versions) or 'None'}",
+        f"Reference image\t{reference}",
+    ]
+
+
 def _refresh_project_docks():
     if not _DOCK_CONTEXT or build_docks is None:
         return
     root = _DOCK_CONTEXT["root"]
     manifest = load_project(root)
     selected_id = _DOCK_CONTEXT.get("selected_id")
-    contents = build_docks(manifest, selected_id)
+    contents = build_docks(manifest, selected_id, root)
     _DOCK_CONTEXT["selected_id"] = contents["selected_id"]
     if selected_id in {panel["id"] for panel in manifest["panels"]}:
         references = _engine_reference_rows(root, manifest, selected_id)
         if references:
             contents["inspector"] += "\n" + "\n".join(references)
+    elif selected_id in {character_row_id(c["name"]) for c in manifest["cast"]}:
+        character = next(c for c in manifest["cast"]
+                         if character_row_id(c["name"]) == selected_id)
+        contents["inspector"] += "\n" + "\n".join(
+            _engine_character_rows(root, character["name"]))
 
     for identifier, content_key, selection_key in (
             (DOCK_PROJECT, "project", "project_selected"),
@@ -1076,15 +1102,24 @@ def _notify_project_docks(root):
 
 def _dock_action(procedure, config, data):
     try:
-        if data == "next-page":
+        if data == "open-page":
             manifest = load_project(_DOCK_CONTEXT["root"])
-            pages = manifest["pages"]
-            if pages:
-                selected = _DOCK_CONTEXT.get("selected_id")
-                current = next((i for i, page in enumerate(pages)
-                                if page["id"] == selected), -1)
-                _DOCK_CONTEXT["selected_id"] = pages[(current + 1) % len(pages)]["id"]
-        _refresh_project_docks()
+            selected = _DOCK_CONTEXT.get("selected_id")
+            panel = next((p for p in manifest["panels"] if p["id"] == selected), None)
+            page_id = selected if any(page["id"] == selected for page in manifest["pages"]) \
+                else (panel.get("placement") or {}).get("page") if panel else None
+            page = next((p for p in manifest["pages"] if p["id"] == page_id), None)
+            if page is None:
+                raise ValueError("Select a page or a placed panel before opening a page")
+            relative = page.get("file")
+            page_path = (_DOCK_CONTEXT["root"] / relative) if relative else None
+            if page_path is None or not page_path.is_file():
+                raise ValueError(f"Page document is missing: {relative or page_id}")
+            image = Gimp.file_load(Gimp.RunMode.NONINTERACTIVE,
+                                   Gio.File.new_for_path(str(page_path)))
+            Gimp.Display.new(image)
+        else:
+            _refresh_project_docks()
         return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
     except Exception as exc:
         return _error(procedure, str(exc))
@@ -1096,6 +1131,7 @@ def _dock_item_action(procedure, config, data):
         manifest = load_project(_DOCK_CONTEXT["root"])
         valid = {p["id"] for p in manifest["panels"]}
         valid.update(page["id"] for page in manifest["pages"])
+        valid.update(character_row_id(c["name"]) for c in manifest["cast"])
         if item not in valid:
             raise ValueError(f"Unknown project item id: {item}")
         _DOCK_CONTEXT["selected_id"] = item
@@ -1135,7 +1171,7 @@ def _register_project_docks(plugin):
         (DOCK_INSPECTOR, "Inspector", "properties", contents["inspector"],
          "", "Refresh", DOCK_ACTIONS[DOCK_INSPECTOR], ""),
         (DOCK_FILMSTRIP, "Page Filmstrip", "tiles", contents["filmstrip"],
-         contents["filmstrip_selected"], "Next page", DOCK_ACTIONS[DOCK_FILMSTRIP],
+         contents["filmstrip_selected"], "Open page", DOCK_ACTIONS[DOCK_FILMSTRIP],
          DOCK_ITEMS[DOCK_FILMSTRIP]),
     ]
     for identifier, title, presentation, content, selected, action_label, action, item in rows:

@@ -6,7 +6,7 @@ import copy
 import json
 from pathlib import Path
 
-from gimp.imanganation.panel_ui import build_docks
+from gimp.imanganation.panel_ui import build_docks, character_row_id
 
 
 EXAMPLE = json.loads((Path(__file__).resolve().parents[1] /
@@ -40,3 +40,39 @@ def test_filmstrip_selects_page_id_and_orphans_remain_separate():
     assert "# Needs matching" in docks["project"]
     assert manifest["panels"][0]["id"] in docks["project"]
     assert "Page 1 · Panel 1" not in docks["project"].split("# Needs matching")[0]
+
+
+def test_filmstrip_shows_placed_count_and_missing_document(tmp_path):
+    manifest = copy.deepcopy(EXAMPLE)
+
+    docks = build_docks(manifest, manifest["pages"][0]["id"], tmp_path)
+
+    tile = next(row for row in docks["filmstrip"].splitlines()
+                if row.startswith(manifest["pages"][0]["id"] + "\t"))
+    assert "2 panels" in tile
+    assert "! XCF missing" in tile
+    assert "XCF missing" in docks["inspector"]
+
+
+def test_panel_inspector_shows_take_lineage_and_lettering_summary():
+    manifest = copy.deepcopy(EXAMPLE)
+    panel = manifest["panels"][0]
+
+    inspector = build_docks(manifest, panel["id"])["inspector"]
+
+    assert "Frame size\t522 × 498" in inspector
+    assert "Dialogue lines\t1" in inspector
+    assert "tk_000003 · active" in inspector
+    assert "from tk_000001" in inspector
+
+
+def test_cast_rows_select_a_character_context_by_engine_name():
+    manifest = copy.deepcopy(EXAMPLE)
+    character = manifest["cast"][0]
+    selected = character_row_id(character["name"])
+
+    docks = build_docks(manifest, selected)
+
+    assert f"{selected}\t{character['name']}" in docks["project"]
+    assert docks["project_selected"] == selected
+    assert f"Name\t{character['name']}" in docks["inspector"]
