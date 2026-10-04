@@ -57,6 +57,17 @@ record `placements` (character → mask file). In a multi-character panel every
 reference stays masked, even when only one character has a reference, so it can't
 pull the others' faces.
 
+### Keep composition: `guide`
+
+`"guide": "/abs/…/takes/….png"` (+ optional `"guide_strength"`, default
+`defaults.controlnet.strength` 0.7) makes the render keep that take's layout and poses:
+its edges (ComfyUI's built-in `Canny`) steer the first 70% of steps through NoobAI's
+canny ControlNet (`models.yaml → controlnets.canny`), and the prompt decides the
+details. Typical use: Regenerate a panel you like with an edited expression or
+outfit. It composes with placements and regional IP-Adapter, and results record
+`guide`. Edges carry structure, not colour: pair it with the same seed to keep colours
+too. A strong face change still wants Inpaint (the face's edges are kept).
+
 ### Legacy: `project_dir` + `seq`
 
 ```json

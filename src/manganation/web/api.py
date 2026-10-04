@@ -45,6 +45,10 @@ class RenderRequest(BaseModel):
     # character -> mask image (the artist's placement layer, frame-shaped; white or
     # opaque = where that character goes). Replaces the default reading-order bands.
     placements: dict[str, str] | None = None
+    # Keep composition: an existing take whose layout and poses the render keeps
+    # (ControlNet on its edges); the prompt decides the details.
+    guide: str | None = None
+    guide_strength: float | None = Field(default=None, ge=0, le=2)
 
     @model_validator(mode="after")
     def _one_form(self) -> RenderRequest:
@@ -181,6 +185,11 @@ def required_models(settings, models: dict, models_root: Path) -> list[dict]:
         add("clip vision", "ipadapter", enc)
     except (RenderError, KeyError) as exc:
         add(f"ip-adapter ({adapter})", "ipadapter", None, str(exc))
+    cn = getattr(settings.defaults, "controlnet", None)
+    if cn is not None:
+        entry = models.get("controlnets", {}).get(cn.model)
+        add(f"controlnet ({cn.model})", (entry or {}).get("subdir", "controlnet"),
+            (entry or {}).get("id"), "" if entry else "not in models.yaml")
     up = settings.defaults.refiner.upscaler
     entry = models.get("upscalers", {}).get(up)
     add(f"upscaler ({up})", (entry or {}).get("subdir", "upscale_models"),
@@ -336,6 +345,10 @@ def create_app(
         if req.placements:
             extra["placements"] = {name: _engine_file(path, f"placement for {name}")
                                    for name, path in req.placements.items()}
+        if req.guide:
+            extra["guide"] = _engine_file(req.guide, "guide")
+            if req.guide_strength is not None:
+                extra["guide_strength"] = req.guide_strength
         if req.panel is not None:
             from manganation.project_container import panel_to_spec
 

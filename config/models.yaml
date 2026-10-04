@@ -64,3 +64,12 @@ upscalers:
 
 # Roles in models.yaml -> upscalers; the active one is settings.yaml -> defaults.refiner.upscaler.
 
+# ControlNets guide a render with the structure of an image the engine already made
+# ("keep composition"). Active role: settings.yaml -> defaults.controlnet.model.
+controlnets:
+  canny:
+    id: noob_sdxl_controlnet_canny.fp16.safetensors
+    display: NoobAI-XL ControlNet canny (fp16), edges from ComfyUI's built-in Canny node
+    source: https://huggingface.co/Eugeoter/noob-sdxl-controlnet-canny (sha256 e37bcdb2…fba0)
+    subdir: controlnet
+

@@ -43,6 +43,7 @@ class RenderResult:
     panel_id: str | None = None  # container panel id, for inline renders
     references: dict[str, str] = field(default_factory=dict)  # character -> version used
     placements: dict[str, str] = field(default_factory=dict)  # character -> mask file used
+    guide: str | None = None  # the take whose composition this render kept (ControlNet)
 
 
 def fit_resolution(
@@ -191,7 +192,8 @@ def output_path(project: Path, seq: int) -> Path:
 def render_panel(
     project: Path, seq: int, frame_w: float, frame_h: float, *,
     seed: int | None = None, client: ComfyClient | None = None,
-    placements: dict[str, Path] | None = None,
+    placements: dict[str, Path] | None = None, guide: Path | None = None,
+    guide_strength: float | None = None,
 ) -> RenderResult:
     """Legacy form: panel ``seq`` of ``project/panels.json``, written to its panels/."""
     project = Path(project)
@@ -205,6 +207,7 @@ def render_panel(
         script.panels[seq - 1], project, frame_w, frame_h,
         reading_order=script.reading_order, seed=seed, client=client,
         out=output_path(project, seq), seq=seq, placements=placements,
+        guide=guide, guide_strength=guide_strength,
     )
 
 
@@ -213,6 +216,7 @@ def render_inline(
     reading_order: str = "rtl", seed: int | None = None,
     client: ComfyClient | None = None, identity: Path | None = None,
     outputs: Path | None = None, placements: dict[str, Path] | None = None,
+    guide: Path | None = None, guide_strength: float | None = None,
 ) -> RenderResult:
     """Container form: the panel spec travels in the request (docs/engine-api.md).
 
@@ -243,7 +247,8 @@ def render_inline(
     out_dir = (outputs if outputs is not None else REPO_ROOT / "outputs") / project_id
     out = out_dir / f"{panel.get('id', 'panel')}-{uuid.uuid4().hex[:12]}.png"
     result = _render(spec, root, frame_w, frame_h, reading_order=ReadingOrder(reading_order),
-                     seed=seed, client=client, out=out, seq=None, placements=placements)
+                     seed=seed, client=client, out=out, seq=None, placements=placements,
+                     guide=guide, guide_strength=guide_strength)
     result.panel_id = panel.get("id")
     result.references = {**{n: "active" for n in spec.characters}, **used}
     out.with_suffix(".json").write_text(json.dumps(asdict(result), indent=2))
@@ -289,16 +294,51 @@ def _upload_placement(client, path: Path, width: int, height: int):
     return name, (x0 / width, y0 / height, (x1 - x0) / width, (y1 - y0) / height)
 
 
+def controlnet_file(models: dict, role: str) -> str:
+    """The file for a models.yaml ``controlnets`` role."""
+    roles = models.get("controlnets", {})
+    if role not in roles:
+        raise RenderError(f"unknown ControlNet {role!r}; models.yaml has {sorted(roles)}")
+    return roles[role]["id"]
+
+
+def _with_guide(graph, client, settings, models, guide: Path, width: int, height: int,
+                strength: float | None):
+    """Resize the guide take to the canvas, upload it, and add the ControlNet."""
+    import tempfile
+
+    from PIL import Image
+
+    if not guide.is_file():
+        raise RenderError(f"guide image not found: {guide}")
+    c = settings.defaults.controlnet
+    with Image.open(guide) as im:
+        canvas = im.convert("RGB").resize((width, height), Image.LANCZOS)
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / f"guide-{guide.stem}.png"
+        canvas.save(path)
+        name = client.upload_image(str(path))["name"]
+    return graphs.with_controlnet(
+        graph, image=name, controlnet=controlnet_file(models, c.model),
+        strength=c.strength if strength is None else strength, start=c.start, end=c.end,
+        low_threshold=c.low_threshold, high_threshold=c.high_threshold)
+
+
 def _render(
     spec: PanelSpec, identity: Path, frame_w: float, frame_h: float, *,
     reading_order: ReadingOrder, seed: int | None, client: ComfyClient | None,
     out: Path, seq: int | None, placements: dict[str, Path] | None = None,
+    guide: Path | None = None, guide_strength: float | None = None,
 ) -> RenderResult:
     """Render ``spec`` with characters from ``identity`` (a character registry folder).
 
     ``placements`` maps characters to mask images (the artist's placement layers, any
     size with the frame's proportions; white or opaque = this character). They replace
-    the default reading-order bands as each character's regional reference mask."""
+    the default reading-order bands as each character's regional reference mask.
+
+    ``guide`` is an existing take whose composition (layout, poses) the render keeps:
+    its edges steer the early steps through ControlNet, while the prompt (an edited
+    expression, outfit, …) decides the details."""
     placements = _check_placements(spec, placements)
     settings = load_settings()
     models = load_models()
@@ -364,6 +404,10 @@ def _render(
         )
         ref_used = ",".join(ordered)
 
+    if guide is not None:
+        graph = _with_guide(graph, client, settings, models, Path(guide), width, height,
+                            guide_strength)
+
     blobs = client.run(graph)
     if not blobs:
         raise RenderError("ComfyUI returned no image")
@@ -374,6 +418,7 @@ def _render(
         path=str(out), seq=seq, seed=seed, width=width, height=height,
         prompt=prompt, reference=ref_used,
         placements={n: str(p) for n, p in placements.items()},
+        guide=str(guide) if guide is not None else None,
     )
     out.with_suffix(".json").write_text(json.dumps(asdict(result), indent=2))
     return result

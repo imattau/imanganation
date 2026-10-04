@@ -291,3 +291,15 @@ layers for characters not in the panel, or with no paint in the frame, are ignor
 Live (`gimp/placement_smoke_test.py`, `docs/quality/2026-10-04_placement_layers.png`):
 the same seed put Yuki on the right by default and on the left where her blob was.
 
+## Keep composition (Regenerate)
+
+*Regenerate Panel…* has **Keep composition** (and **Composition strength**, 0 = engine
+default 0.7). It sends the take the layer shows as the render's `guide`: the new take
+keeps that layout and those poses while the edited script changes details (an
+expression, an outfit). Live (`docs/quality/2026-10-04_keep_composition.png`): changing
+Yuki's expression without it turned arms-raised into pointing; with it, the pose and
+background stayed and only the face changed, even on a new seed. Through GIMP
+(`gimp/keep_composition_smoke_test.py`, `…_keep_composition_gimp.png`) a new-seed
+regenerate kept Akira's crouch, box and fence. Edges keep structure, not colour (his
+blazer changed colour), so combine with **Same seed** to keep colours.
+

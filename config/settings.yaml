@@ -70,3 +70,11 @@ defaults:
     ipadapter_weight: 0.45  # identity strength when one character is named in the patch
     steps: 28
     cfg: 6.0
+  # Keep composition: guide a render with an existing take's edges (ControlNet canny).
+  controlnet:
+    model: canny
+    strength: 0.7
+    start: 0.0
+    end: 0.7            # later steps are free to redraw faces/expressions
+    low_threshold: 0.4
+    high_threshold: 0.8

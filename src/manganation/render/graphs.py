@@ -429,6 +429,43 @@ def with_regional_conditioning(
     return graph
 
 
+def with_controlnet(
+    graph: dict,
+    *,
+    image: str,
+    controlnet: str,
+    strength: float = 0.7,
+    start: float = 0.0,
+    end: float = 0.7,
+    low_threshold: float = 0.4,
+    high_threshold: float = 0.8,
+) -> dict:
+    """Guide the render with the edge structure of ``image`` (an uploaded take, already
+    at canvas size): ``LoadImage -> Canny -> ControlNetApplyAdvanced``.
+
+    It wraps whatever positive/negative conditioning the sampler already uses (plain,
+    or a regional chain), so it composes with regional IP-Adapter and placements."""
+    graph = {k: {**v, "inputs": dict(v["inputs"])} for k, v in graph.items()}
+    graph["cn_image"] = {"class_type": "LoadImage", "inputs": {"image": image}}
+    graph["cn_edges"] = {
+        "class_type": "Canny",
+        "inputs": {"image": ["cn_image", 0], "low_threshold": low_threshold,
+                   "high_threshold": high_threshold},
+    }
+    graph["cn_model"] = {"class_type": "ControlNetLoader",
+                         "inputs": {"control_net_name": controlnet}}
+    sampler = graph["5"]["inputs"]
+    graph["cn_apply"] = {
+        "class_type": "ControlNetApplyAdvanced",
+        "inputs": {"positive": sampler["positive"], "negative": sampler["negative"],
+                   "control_net": ["cn_model", 0], "image": ["cn_edges", 0],
+                   "strength": strength, "start_percent": start, "end_percent": end},
+    }
+    sampler["positive"] = ["cn_apply", 0]
+    sampler["negative"] = ["cn_apply", 1]
+    return graph
+
+
 def upscale_refine(
     *,
     ckpt: str,

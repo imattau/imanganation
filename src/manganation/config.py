@@ -124,6 +124,20 @@ class InpaintDefaults(BaseModel):
     cfg: float = 6.0
 
 
+class ControlNetDefaults(BaseModel):
+    """Keep composition: a render guided by the edges of an existing take.
+
+    Strength and the step window trade "same layout and poses" against "free to redraw":
+    ending early lets the last steps change a face or an expression."""
+
+    model: str = "canny"  # models.yaml -> controlnets role
+    strength: float = 0.7
+    start: float = 0.0
+    end: float = 0.7  # fraction of steps the guide applies to
+    low_threshold: float = 0.4  # Canny edge thresholds (0.01-0.99)
+    high_threshold: float = 0.8
+
+
 class Defaults(BaseModel):
     color_mode: str = "color"  # recorded only; engine renders colour (docs/color-policy.md)
     reading_order: str = "rtl"
@@ -132,6 +146,7 @@ class Defaults(BaseModel):
     refiner: RefinerDefaults = RefinerDefaults()
     dataset: DatasetDefaults = DatasetDefaults()
     inpaint: InpaintDefaults = InpaintDefaults()
+    controlnet: ControlNetDefaults = ControlNetDefaults()
 
 
 class Settings(BaseModel):
