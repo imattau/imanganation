@@ -545,6 +545,33 @@ def _project_page_id_for_image(image, manifest):
     return page_ref["page"]
 
 
+def _save_project_page(image, root, manifest):
+    """Persist a successful canvas edit to this project's page XCF."""
+    page_id = _project_page_id_for_image(image, manifest)
+    if page_id is None:
+        return False
+    page = next((item for item in manifest.get("pages", [])
+                 if item.get("id") == page_id), None)
+    relative = page.get("file") if page else None
+    destination = Path(root) / relative if relative else None
+    if destination is None or not destination.is_file():
+        Gimp.message("The panel is on the page, but its project XCF could not be found. "
+                     "Save the page manually.")
+        return False
+    try:
+        result = Gimp.file_save(
+            Gimp.RunMode.NONINTERACTIVE, image,
+            Gio.File.new_for_path(str(destination)), None)
+        if result is False:
+            raise RuntimeError("GIMP did not save the page")
+        Gimp.displays_flush()
+        return True
+    except Exception as exc:
+        Gimp.message(f"The panel is on the page, but the page XCF was not saved: {exc}. "
+                     "Save the page manually.")
+        return False
+
+
 def _placed_frame_for_image(image, manifest, panel):
     """Return this panel's saved frame when the active XCF is its placed page."""
     placement = panel.get("placement") if panel else None
@@ -671,6 +698,8 @@ def render_panel(procedure, run_mode, image, drawables, config, data):
         image.remove_channel(frame)
 
     _advance(root, panels, seq, explicit, spec, manifest)
+    if manifest is not None:
+        _save_project_page(image, root, manifest)
     return _success(procedure, layer)
 
 
@@ -826,6 +855,8 @@ def refine_panel(procedure, run_mode, image, drawables, config, data):
                          source.parent.parent, seq, path))
     Gimp.message(f"Refined panel {seq:03d}: {result['width']}×{result['height']} "
                  f"(previous take kept, hidden).")
+    if manifest is not None:
+        _save_project_page(image, source.parent.parent, manifest)
     return _success(procedure, hires)
 
 
@@ -907,6 +938,8 @@ def regenerate_panel(procedure, run_mode, image, drawables, config, data):
                    take_ref=_take_reference(root, seq, path))
     Gimp.message(f"Regenerated panel {seq:03d} as {Path(result['path']).name} "
                  f"(seed {seed}; previous take kept, hidden).")
+    if manifest is not None:
+        _save_project_page(image, root, manifest)
     return _success(procedure, new)
 
 
@@ -1020,6 +1053,8 @@ def inpaint_selection(procedure, run_mode, image, drawables, config, data):
                    fit="layer", take_ref=_take_reference(root, seq, path))
     Gimp.message(f"Inpainted panel {seq:03d} ({Path(result['path']).name}); outside the "
                  f"selection the take is unchanged. Previous take kept, hidden.")
+    if manifest is not None:
+        _save_project_page(image, root, manifest)
     return _success(procedure, new)
 
 
@@ -1238,6 +1273,8 @@ def place_next_panel(procedure, run_mode, image, drawables, config, data):
                   "panel": manifest["panels"][seq - 1]["id"], "take": take_id}
         if take_id else None, frame=frame)
     _advance(root, panels, seq, explicit, spec, manifest)
+    if manifest is not None:
+        _save_project_page(image, root, manifest)
     return _success(procedure, layer)
 
 
@@ -1486,7 +1523,13 @@ def page_layout(procedure, run_mode, image, drawables, config, data):
     try:
         if load_project is None or frame_rings is None or page_layout_availability is None:
             raise ValueError("This plug-in install is missing project layout support")
-        root = _DOCK_CONTEXT.get("root")
+        # Image procedures run in their own plug-in invocation, so the dock's
+        # module globals are not guaranteed to be present here. Prefer the
+        # project explicitly passed by the dock, then use the persisted project
+        # for direct menu invocation.
+        project_file = config.get_property("project-dir")
+        root = (Path(project_file.get_path()) if project_file is not None else None)
+        root = root or _DOCK_CONTEXT.get("root") or _remembered_project()
         if root is None:
             raise ValueError("Open an Imanganation project first")
         manifest = load_project(root)
@@ -1510,7 +1553,8 @@ def page_layout(procedure, run_mode, image, drawables, config, data):
         Gimp.message(f"Added {layout['name']} with {frame_style['name']} frames to "
                      f"{page.get('label', 'page')}. "
                      "Select inside a frame with Fuzzy Select, render into it, and "
-                     "save the page XCF.")
+                     "the page has been saved.")
+        _save_project_page(image, root, manifest)
         return _success(procedure, layer)
     except Exception as exc:
         return _error(procedure, str(exc))
@@ -2012,7 +2056,8 @@ def _set_panel_frame_from_selection():
     _refresh_project_docks()
     Gimp.displays_flush()
     Gimp.message(f"Set the frame for panel {label.get('page', '?')}."
-                 f"{label.get('panel', '?')} from the current selection. Save the page XCF.")
+                 f"{label.get('panel', '?')} from the current selection.")
+    _save_project_page(image, root, manifest)
 
 
 def _show_project_page(root, manifest, page_id):
@@ -2259,6 +2304,7 @@ def _dock_action(procedure, config, data):
             layout_config = layout_procedure.create_config()
             layout_config.set_property("run-mode", Gimp.RunMode.INTERACTIVE)
             layout_config.set_property("image", image)
+            layout_config.set_property("project-dir", Gio.File.new_for_path(str(root)))
             drawables = image.get_selected_drawables() or image.get_layers()[:1]
             layout_config.set_core_object_array("drawables", drawables)
             result = layout_procedure.run(layout_config)
@@ -2947,6 +2993,10 @@ class Imanganation(Gimp.PlugIn):
             return proc
 
         if name == PROC_PAGE_LAYOUT:
+            proc.add_file_argument(
+                "project-dir", "_Project folder", "Imanganation project containing this page",
+                Gimp.FileChooserAction.SELECT_FOLDER, True, None,
+                GObject.ParamFlags.READWRITE)
             proc.add_layer_return_value(
                 "layer", "Template layer", "The generated page layout layer", False,
                 GObject.ParamFlags.READWRITE)
