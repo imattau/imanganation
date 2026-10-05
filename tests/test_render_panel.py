@@ -62,7 +62,9 @@ def test_build_prompt_uses_appearance_tags_not_just_names():
                      action="Akira looks up", flashback=True)
     prompt = build_prompt(spec, {"prompt_prefix": "manga panel, anime illustration, "},
                           {"Akira": ["1boy", "amber eyes"]})
-    assert prompt.startswith("manga panel, anime illustration, solo, 1boy, amber eyes, close-up")
+    # what happens before who: the action used to trail ~100 tokens of costume
+    assert prompt.startswith("manga panel, anime illustration, solo, male focus, "
+                             "close-up, portrait, Akira looks up, 1boy, amber eyes")
     assert prompt.endswith("flashback, soft focus")
 
 
@@ -84,13 +86,13 @@ def test_multi_character_prompt_leads_with_a_head_count():
     tags = {"Yuki": ["1girl", "silver hair"], "Akira": ["1boy", "brown hair"]}
     prompt = build_prompt(pair, style, tags)
     # one count group, each character's own count dropped, faces beside their owner
-    assert prompt.startswith("manga panel, 1boy, 1girl, silver hair, surprised, "
-                             "brown hair, sighs, talk")
+    assert prompt.startswith("manga panel, 1boy, 1girl, talk, silver hair, surprised, "
+                             "brown hair, sighs")
     girls = PanelSpec(page=1, panel=1, characters=["A", "B"], action="talk")
     assert "2girls" in build_prompt(girls, style, {"A": ["1girl"], "B": ["1girl"]})
     # a character with no count tag: no partial count (it would ask for too few)
     prompt = build_prompt(pair, style, {"Yuki": ["1girl", "silver hair"]})
-    assert prompt.startswith("manga panel, 1girl, silver hair, surprised, Akira sighs")
+    assert prompt.startswith("manga panel, talk, 1girl, silver hair, surprised, Akira sighs")
 
 
 def test_panel_location_wins_over_the_scene_heading():
@@ -119,10 +121,85 @@ def test_shot_is_not_repeated_from_the_action():
     spec = PanelSpec(page=1, panel=1, camera="medium shot",
                      action="Medium shot. Yuki drags Akira by the wrist.")
     prompt = build_prompt(spec, {})
-    assert prompt == "medium shot, Yuki drags Akira by the wrist."
+    assert prompt == "cowboy shot, Yuki drags Akira by the wrist."
     # a shot word inside the sentence is left alone
     spec = PanelSpec(page=1, panel=1, camera="close-up", action="A close-up of the key.")
-    assert build_prompt(spec, {}) == "close-up, A close-up of the key."
+    assert build_prompt(spec, {}) == "close-up, portrait, A close-up of the key."
+
+
+@pytest.mark.parametrize("camera, tags", [
+    ("close-up", "close-up, portrait"),
+    ("Extreme close-up", "close-up, portrait"),     # the longer shot wins
+    ("medium shot", "cowboy shot"),
+    ("low angle wide shot", "wide shot, full body"),  # longest match
+    ("tracking shot", "tracking shot"),             # unknown: as written
+])
+def test_shots_become_framing_tags(camera, tags):
+    from manganation.render.panel import shot_tags
+
+    assert shot_tags(camera) == tags
+
+
+def test_a_lone_boy_is_the_male_focus():
+    # NoobAI drew Akira as a girl in 8 of 9 solo renders with only "1boy".
+    boy = PanelSpec(page=1, panel=1, characters=["Akira"])
+    girl = PanelSpec(page=1, panel=1, characters=["Yuki"])
+    pair = PanelSpec(page=1, panel=1, characters=["Akira", "Yuki"])
+    tags = {"Akira": ["1boy"], "Yuki": ["1girl"]}
+    assert "male focus" in build_prompt(boy, {}, tags)
+    assert "male focus" not in build_prompt(girl, {}, tags)
+    assert "male focus" not in build_prompt(pair, {}, tags)
+
+
+def test_staged_tags_replace_the_prose():
+    from manganation.render.staging import Staging
+
+    solo = PanelSpec(page=1, panel=1, characters=["Akira"], camera="wide shot",
+                     action="Akira sits against the fence.", scene_heading="Roof")
+    staged = Staging(characters={"Akira": {"pose": ["sitting", "against fence"],
+                                           "expression": []}},
+                     shared=["bento"], setting=["rooftop", "outdoors"])
+    prompt = build_prompt(solo, {}, {"Akira": ["1boy", "brown hair"]}, staged)
+    # a lone figure's pose is the action, so it comes first
+    assert prompt == ("solo, male focus, wide shot, full body, sitting, against fence, bento, "
+                      "rooftop, outdoors, 1boy, brown hair")
+
+    pair = PanelSpec(page=1, panel=1, characters=["Yuki", "Akira"], action="…")
+    staged = Staging(characters={"Yuki": {"pose": ["standing"], "expression": []},
+                                 "Akira": {"pose": ["sitting"], "expression": []}},
+                     shared=["looking at another"], setting=[])
+    prompt = build_prompt(pair, {}, {"Yuki": ["1girl", "white hair"],
+                                     "Akira": ["1boy", "brown hair"]}, staged)
+    # in a group each pose stays with its owner
+    assert prompt == ("1boy, 1girl, looking at another, white hair, standing, "
+                      "brown hair, sitting")
+
+
+def test_render_uses_staging_and_its_faces_replace_defaults(tmp_path, monkeypatch):
+    from manganation.render.staging import Staging
+
+    project = _project(tmp_path, characters=["Akira"], action="Akira sighs.")
+    calls = []
+
+    def fake_stage(spec, place, **kwargs):
+        calls.append(spec.action)
+        return Staging(characters={"Akira": {"pose": ["slouching"],
+                                             "expression": ["sigh", "closed eyes"]}},
+                       setting=["rooftop"])
+
+    monkeypatch.setattr("manganation.render.panel.stage", fake_stage)
+    r = render_panel(project, 1, 100, 100, client=FakeComfy())
+    assert calls == ["Akira sighs."]
+    assert "slouching" in r.prompt and "Akira sigh, closed eyes" in r.prompt
+    assert "Akira sighs." not in r.prompt and "rooftop" in r.prompt
+    assert not [w for w in r.warnings if "as written" in w]
+
+
+def test_render_without_the_llm_uses_the_prose_and_says_so(tmp_path):
+    project = _project(tmp_path, action="Akira eats lunch")
+    r = render_panel(project, 1, 100, 100, client=FakeComfy())  # conftest: no LLM
+    assert "Akira eats lunch" in r.prompt
+    assert any("used as written" in w for w in r.warnings)
 
 
 def test_output_path_adds_takes(tmp_path):
@@ -217,7 +294,9 @@ def test_render_warns_about_characters_without_an_appearance(tmp_path):
     # No registry: Akira would render as nobody in particular, and the artist should know.
     project = _project(tmp_path, characters=["Akira"])
     r = render_panel(project, 1, 100, 100, client=FakeComfy())
-    assert len(r.warnings) == 1 and "Akira" in r.warnings[0]
+    assert [w for w in r.warnings if "Akira" in w] == [
+        "Akira has no registered appearance: rendered from the name alone, so they "
+        "won't look like their character"]
     assert json.loads(Path(r.path).with_suffix(".json").read_text())["warnings"] == r.warnings
 
 

@@ -23,6 +23,7 @@ from manganation.config import CONFIG_DIR, load_models, load_settings
 from manganation.layout.regions import assign_regions
 from manganation.render import graphs
 from manganation.render.comfy_client import ComfyClient
+from manganation.render.staging import Staging, stage
 from manganation.script.schema import PanelSpec, ReadingOrder, Script
 
 log = logging.getLogger(__name__)
@@ -103,17 +104,18 @@ def head_count(names: list[str], character_tags: dict[str, list[str]] | None) ->
 
 
 def character_group(spec: PanelSpec, name: str, tags: list[str], *,
-                    counted: bool = False) -> list[str]:
-    """One character's tags with their panel expression right after them, so the face
-    stays with its owner ("Yuki surprised" is a name SDXL can't read, floating loose).
-    ``counted``: the head count already said who is in the panel, so drop their own."""
+                    counted: bool = False, pose: list[str] | None = None) -> list[str]:
+    """One character's tags with their panel expression (and pose) right after them,
+    so each stays with its owner ("Yuki surprised" is a name SDXL can't read, floating
+    loose). ``counted``: the head count already said who is in the panel, so drop
+    their own."""
     if counted and tags and COUNT_TAG.match(tags[0].strip()):
         tags = tags[1:]
     group = list(tags)
     face = spec.expressions.get(name)
     if face:
         group.append(face if tags else f"{name} {face}")
-    return group
+    return group + list(pose or [])
 
 
 # "School rooftop — cont.", "Kitchen (CONT'D)": a script's continuation marker, not a place.
@@ -138,21 +140,73 @@ def action_text(spec: PanelSpec) -> str:
     return action
 
 
+# Script shots -> the Danbooru framing tags NoobAI was trained on ("medium shot" is
+# English it reads loosely; "cowboy shot" is a framing it knows). Longest match wins.
+SHOT_TAGS = {
+    "extreme close-up": "close-up, portrait",
+    "close-up": "close-up, portrait",
+    "medium shot": "cowboy shot",
+    "two-shot": "cowboy shot",
+    "reaction shot": "upper body",
+    "full shot": "full body",
+    "wide shot": "wide shot, full body",
+    "establishing shot": "very wide shot, scenery",
+    "over-the-shoulder": "over shoulder, from behind",
+    "over the shoulder": "over shoulder, from behind",
+    "bird's-eye": "from above",
+    "high angle": "from above",
+    "worm's-eye": "from below",
+    "low angle": "from below",
+    "dutch angle": "dutch angle",
+    "pov": "pov",
+}
+
+
+def shot_tags(camera: str) -> str:
+    """Framing tags for a script shot; an unknown shot is passed on as written."""
+    low = camera.strip().lower()
+    for shot in sorted(SHOT_TAGS, key=len, reverse=True):
+        if shot in low:
+            return SHOT_TAGS[shot]
+    return camera.strip()
+
+
 def build_prompt(
     spec: PanelSpec, style: dict, character_tags: dict[str, list[str]] | None = None,
+    staging: Staging | None = None,
 ) -> str:
+    """The positive prompt. With ``staging`` (render/staging.py) the action and setting
+    are tags; without it, the script's prose."""
     parts = [style.get("prompt_prefix", "").strip().rstrip(",")]
     # Without a head count, wide frames tempt SDXL to add a second copy of the figure,
     # and two-shots to drop or duplicate one.
     if len(spec.characters) == 1:
         parts.append("solo")
+        # NoobAI draws a lone figure as a girl unless told otherwise: "1boy" in the
+        # character's tags wasn't enough (Akira read as 1girl in 8 of 9 solo renders).
+        tags = (character_tags or {}).get(spec.characters[0], [])
+        if tags and tags[0].strip() == "1boy":
+            parts.append("male focus")
     counts = head_count(spec.characters, character_tags) if len(spec.characters) > 1 else []
     parts += counts
+    # What happens and where before who: CLIP reads the prompt in 75-token chunks and
+    # the later ones pull less, so the action used to trail ~100 tokens of costume
+    # and lose (docs/quality/2026-10-05_eval_baseline.md).
+    solo = len(spec.characters) == 1
+    if staging is None:
+        action, place = action_text(spec), setting(spec)
+    else:
+        # A lone figure's pose is the panel's action, so it goes up front; in a group
+        # each pose stays with its owner (below), so the sitter isn't the one standing.
+        poses = staging.pose(spec.characters[0]) if solo else []
+        action = ", ".join([*poses, *staging.shared])
+        place = ", ".join(staging.setting) or setting(spec)
+    parts += [shot_tags(spec.camera), action, place]
     # Names mean nothing to SDXL; their registered appearance tags do.
     for name in spec.characters:
-        parts += character_group(spec, name, (character_tags or {}).get(name, []),
-                                 counted=bool(counts))
-    parts += [spec.camera, action_text(spec), setting(spec)]
+        parts += character_group(
+            spec, name, (character_tags or {}).get(name, []), counted=bool(counts),
+            pose=staging.pose(name) if staging is not None and not solo else None)
     parts += [f"{who} {face}" for who, face in spec.expressions.items()
               if who not in spec.characters]
     if spec.flashback:
@@ -423,13 +477,26 @@ def _render(
         raise RenderError(f"ComfyUI is not reachable at {settings.comfyui.base_url}")
 
     style = load_style()
+    warnings: list[str] = []
+    staging = None
+    if settings.defaults.staging.enabled and (spec.action or spec.characters):
+        try:
+            staging = stage(spec, setting(spec), settings=settings)
+        except Exception as exc:  # noqa: BLE001 - any LLM trouble: the prose still works
+            warnings.append(f"action and setting used as written, not as tags ({exc})")
+    if staging is not None:
+        # The panel's own faces win; the LLM's fill the rest (and so replace a default
+        # grin with the sigh the action asks for).
+        faces = {n: ", ".join(staging.expression(n)) for n in spec.characters
+                 if staging.expression(n)}
+        spec = spec.model_copy(update={"expressions": {**faces, **spec.expressions}})
     tags_by_char = character_tags(identity, spec.characters, spec.expressions)
-    warnings = [f"{name} has no registered appearance: rendered from the name alone, so "
+    warnings += [f"{name} has no registered appearance: rendered from the name alone, so "
                 "they won't look like their character"
                 for name in spec.characters if not tags_by_char.get(name)]
     for warning in warnings:
         log.warning("%s (identity %s)", warning, identity)
-    prompt = build_prompt(spec, style, tags_by_char)
+    prompt = build_prompt(spec, style, tags_by_char, staging)
     width, height = fit_resolution(frame_w, frame_h)
     seed = seed if seed is not None else (spec.seed if spec.seed is not None
                                           else random.randrange(2**32))

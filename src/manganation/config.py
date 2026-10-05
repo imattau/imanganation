@@ -139,6 +139,13 @@ class ControlNetDefaults(BaseModel):
     high_threshold: float = 0.8
 
 
+class StagingDefaults(BaseModel):
+    """Panel prose -> Danbooru tags by the local LLM at render time (render/staging.py).
+    Off: the action and setting go into the prompt as written."""
+
+    enabled: bool = True
+
+
 class Defaults(BaseModel):
     color_mode: str = "color"  # recorded only; engine renders colour (docs/color-policy.md)
     reading_order: str = "rtl"
@@ -148,6 +155,7 @@ class Defaults(BaseModel):
     dataset: DatasetDefaults = DatasetDefaults()
     inpaint: InpaintDefaults = InpaintDefaults()
     controlnet: ControlNetDefaults = ControlNetDefaults()
+    staging: StagingDefaults = StagingDefaults()
 
 
 class Settings(BaseModel):

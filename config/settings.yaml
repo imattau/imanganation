@@ -70,6 +70,10 @@ defaults:
     ipadapter_weight: 0.45  # identity strength when one character is named in the patch
     steps: 28
     cfg: 6.0
+  # Panel prose -> Danbooru tags (pose, expression, setting) by the LLM above, cached per
+  # panel text; see render/staging.py. Off = action and setting as written.
+  staging:
+    enabled: true
   # Keep composition: guide a render with an existing take's edges (ControlNet canny).
   controlnet:
     model: canny
