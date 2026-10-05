@@ -179,7 +179,7 @@ def test_upload_names_never_collide(tmp_path, monkeypatch):
     assert client.upload_image(str(paths[0]))["name"] == names[0]  # same content, same name
 
 
-def _two_shot_graph(tmp_path, monkeypatch, regional_text):
+def _two_shot_graph(tmp_path, monkeypatch, regional_text, with_refs=("Yuki", "Akira")):
     from PIL import Image
 
     from manganation.characters.registry import CharacterRegistry
@@ -190,7 +190,10 @@ def _two_shot_graph(tmp_path, monkeypatch, regional_text):
     settings.defaults.ipadapter.regional_text = regional_text
     monkeypatch.setattr(P, "load_settings", lambda: settings)
     reg = CharacterRegistry.from_path(tmp_path / "cast")
-    for who in ("Yuki", "Akira"):
+    reg.ensure("Yuki")
+    reg.ensure("Akira")
+    reg.save()
+    for who in with_refs:
         Image.new("RGB", (8, 8)).save(tmp_path / f"{who}.png")
         reg.add_user_reference(who, str(tmp_path / f"{who}.png"), "base")
 
@@ -228,3 +231,22 @@ def test_text_bands_are_opt_in_with_strength(tmp_path, monkeypatch):
     g = _two_shot_graph(tmp_path, monkeypatch, 0.4)
     areas = [n for n in g.values() if n["class_type"] == "ConditioningSetAreaPercentage"]
     assert len(areas) == 2 and all(a["inputs"]["strength"] == 0.4 for a in areas)
+
+
+def test_lone_reference_in_a_two_shot_keeps_its_band(tmp_path, monkeypatch):
+    """Only Yuki has a reference: her mask is still her half of the canvas (RTL: the
+    right), not the whole frame, which would pull Akira's face towards hers."""
+    g = _two_shot_graph(tmp_path, monkeypatch, 0.0, with_refs=("Yuki",))
+    conds = [n for n in g.values() if n["class_type"] == "IPAdapterRegionalConditioning"]
+    assert len(conds) == 1
+    solids = [n for n in g.values() if n["class_type"] == "SolidMask"
+              and n["inputs"]["width"] < 1024]
+    assert solids and all(n["inputs"]["width"] <= 512 for n in solids)
+    composite = next(n for n in g.values() if n["class_type"] == "MaskComposite")
+    assert composite["inputs"]["x"] >= 512
+
+
+def test_text_bands_cover_characters_without_references(tmp_path, monkeypatch):
+    g = _two_shot_graph(tmp_path, monkeypatch, 0.4, with_refs=("Yuki",))
+    areas = [n for n in g.values() if n["class_type"] == "ConditioningSetAreaPercentage"]
+    assert len(areas) == 2

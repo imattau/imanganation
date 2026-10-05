@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import random
+import re
 import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -18,7 +19,7 @@ from pathlib import Path
 import yaml
 
 from manganation.config import CONFIG_DIR, load_models, load_settings
-from manganation.layout.regions import assign_regions, regions_for
+from manganation.layout.regions import assign_regions
 from manganation.render import graphs
 from manganation.render.comfy_client import ComfyClient
 from manganation.script.schema import PanelSpec, ReadingOrder, Script
@@ -75,18 +76,59 @@ def load_style() -> dict:
     return yaml.safe_load((CONFIG_DIR / "styles" / "default_color.yaml").read_text())
 
 
+COUNT_TAG = re.compile(r"^(\d+)(girl|boy|other)s?$")
+
+
+def head_count(names: list[str], character_tags: dict[str, list[str]] | None) -> list[str]:
+    """Danbooru head-count tags for a multi-character panel ("1boy, 1girl", "2girls").
+
+    Each character's tags lead with their own count tag; scattered through the prompt
+    ("1girl, silver hair, … 1boy, brown hair, …") they don't add up to "two people",
+    so two-shots came out with one figure, three, or a merged pair. Empty unless every
+    character has a count tag: a partial count would ask for too few figures."""
+    counts: dict[str, int] = {}
+    for name in names:
+        tags = (character_tags or {}).get(name, [])
+        match = COUNT_TAG.match(tags[0].strip()) if tags else None
+        if match is None:
+            return []
+        counts[match.group(2)] = counts.get(match.group(2), 0) + int(match.group(1))
+    return [f"{n}{kind}{'s' if n > 1 else ''}"
+            for kind, n in sorted(counts.items(), key=lambda kv: ("boy", "girl", "other")
+                                  .index(kv[0]))]
+
+
+def character_group(spec: PanelSpec, name: str, tags: list[str], *,
+                    counted: bool = False) -> list[str]:
+    """One character's tags with their panel expression right after them, so the face
+    stays with its owner ("Yuki surprised" is a name SDXL can't read, floating loose).
+    ``counted``: the head count already said who is in the panel, so drop their own."""
+    if counted and tags and COUNT_TAG.match(tags[0].strip()):
+        tags = tags[1:]
+    group = list(tags)
+    face = spec.expressions.get(name)
+    if face:
+        group.append(face if tags else f"{name} {face}")
+    return group
+
+
 def build_prompt(
     spec: PanelSpec, style: dict, character_tags: dict[str, list[str]] | None = None,
 ) -> str:
     parts = [style.get("prompt_prefix", "").strip().rstrip(",")]
-    # Without a head count, wide frames tempt SDXL to add a second copy of the figure.
+    # Without a head count, wide frames tempt SDXL to add a second copy of the figure,
+    # and two-shots to drop or duplicate one.
     if len(spec.characters) == 1:
         parts.append("solo")
+    counts = head_count(spec.characters, character_tags) if len(spec.characters) > 1 else []
+    parts += counts
     # Names mean nothing to SDXL; their registered appearance tags do.
     for name in spec.characters:
-        parts += (character_tags or {}).get(name, [])
+        parts += character_group(spec, name, (character_tags or {}).get(name, []),
+                                 counted=bool(counts))
     parts += [spec.camera, spec.action, spec.scene_heading or spec.location]
-    parts += [f"{who} {face}" for who, face in spec.expressions.items()]
+    parts += [f"{who} {face}" for who, face in spec.expressions.items()
+              if who not in spec.characters]
     if spec.flashback:
         parts.append("flashback, soft focus")
     return ", ".join(p.strip() for p in parts if p and p.strip())
@@ -96,6 +138,9 @@ def build_negative(spec: PanelSpec, style: dict) -> str:
     negative = style.get("negative", "")
     if len(spec.characters) == 1:
         negative += ", multiple views, 2boys, 2girls, multiple boys, multiple girls, clone"
+    elif len(spec.characters) > 1:
+        # Identity bleed shows up as twins; a lone figure means someone was dropped.
+        negative += ", solo, multiple views, clone, twins"
     return negative
 
 
@@ -347,8 +392,8 @@ def _render(
         raise RenderError(f"ComfyUI is not reachable at {settings.comfyui.base_url}")
 
     style = load_style()
-    prompt = build_prompt(spec, style,
-                          character_tags(identity, spec.characters, spec.expressions))
+    tags_by_char = character_tags(identity, spec.characters, spec.expressions)
+    prompt = build_prompt(spec, style, tags_by_char)
     width, height = fit_resolution(frame_w, frame_h)
     seed = seed if seed is not None else (spec.seed if spec.seed is not None
                                           else random.randrange(2**32))
@@ -372,37 +417,41 @@ def _render(
             clip_vision=clip_file, weight=ipa.weight_single,
         )
         ref_used = str(ref)
-    elif refs and (len(refs) > 1 or len(spec.characters) > 1):
-        # Multi-character: every reference stays masked to its character's region,
-        # even when only one character has one (unmasked, it would pull both faces).
-        ordered = [n for n in spec.characters if n in refs]
-        boxes = regions_for(width, height, len(ordered), order=reading_order)
-        tags_by_char = character_tags(identity, ordered, spec.expressions)
-        norm = assign_regions(len(ordered), order=reading_order, margin=0.05)
+    elif len(spec.characters) > 1:
+        # Multi-character: lay out *every* character in reading order, so each keeps
+        # their band whether or not the others have a reference (laid out over only
+        # the referenced ones, a lone reference got the whole canvas and pulled every
+        # face). Each reference stays masked to its character's region, even when
+        # only one character has one.
+        regions = assign_regions(len(spec.characters), order=reading_order, margin=0.05)
         references = []
         region_text = []
-        for name, (x, y, w, h), region in zip(ordered, boxes, norm, strict=False):
-            uploaded = client.upload_image(str(refs[name]))
-            entry = {"image": uploaded["name"], "mask": [x, y, w, h],
-                     "canvas_w": width, "canvas_h": height,
-                     "weight": ipa.weight_regional, "feather": ipa.feather}
+        for name, region in zip(spec.characters, regions, strict=True):
             box = (region.x, region.y, region.w, region.h)
-            if name in placements:
+            mask_name = None
+            if name in placements and (name in refs or ipa.regional_text > 0):
                 mask_name, box = _upload_placement(client, placements[name], width, height)
-                entry["mask_image"] = mask_name
-            references.append(entry)
-            text = ", ".join(tags_by_char.get(name, [])) or name
-            region_text.append({"text": text, "box": box})
+            if name in refs:
+                uploaded = client.upload_image(str(refs[name]))
+                entry = {"image": uploaded["name"], "mask": list(region.scaled(width, height)),
+                         "canvas_w": width, "canvas_h": height,
+                         "weight": ipa.weight_regional, "feather": ipa.feather}
+                if mask_name:
+                    entry["mask_image"] = mask_name
+                references.append(entry)
+            group = character_group(spec, name, tags_by_char.get(name, []))
+            region_text.append({"text": ", ".join(group) or name, "box": box})
         # Optional per-character text bands (off by default: they split two-shots into
         # side-by-side pictures; the regional references hold each face instead).
         if ipa.regional_text > 0:
             graph = graphs.with_regional_conditioning(
                 graph, regions=[{**r, "strength": ipa.regional_text} for r in region_text])
-        graph = graphs.with_regional_ipadapter(
-            graph, references=references, ipadapter=ipa_file, clip_vision=clip_file,
-            force_regional=True,
-        )
-        ref_used = ",".join(ordered)
+        if references:
+            graph = graphs.with_regional_ipadapter(
+                graph, references=references, ipadapter=ipa_file, clip_vision=clip_file,
+                force_regional=True,
+            )
+            ref_used = ",".join(n for n in spec.characters if n in refs)
 
     if guide is not None:
         graph = _with_guide(graph, client, settings, models, Path(guide), width, height,

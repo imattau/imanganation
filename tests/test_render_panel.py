@@ -74,7 +74,23 @@ def test_single_character_panels_forbid_duplicates():
     pair = PanelSpec(page=1, panel=1, characters=["Akira", "Yuki"], action="talk")
     assert "solo" in build_prompt(solo, style) and "solo" not in build_prompt(pair, style)
     assert "2boys" in build_negative(solo, style)
-    assert build_negative(pair, style) == "text"
+    assert build_negative(pair, style) == "text, solo, multiple views, clone, twins"
+
+
+def test_multi_character_prompt_leads_with_a_head_count():
+    style = {"prompt_prefix": "manga panel"}
+    pair = PanelSpec(page=1, panel=1, characters=["Yuki", "Akira"], action="talk",
+                     expressions={"Yuki": "surprised", "Akira": "sighs"})
+    tags = {"Yuki": ["1girl", "silver hair"], "Akira": ["1boy", "brown hair"]}
+    prompt = build_prompt(pair, style, tags)
+    # one count group, each character's own count dropped, faces beside their owner
+    assert prompt.startswith("manga panel, 1boy, 1girl, silver hair, surprised, "
+                             "brown hair, sighs, talk")
+    girls = PanelSpec(page=1, panel=1, characters=["A", "B"], action="talk")
+    assert "2girls" in build_prompt(girls, style, {"A": ["1girl"], "B": ["1girl"]})
+    # a character with no count tag: no partial count (it would ask for too few)
+    prompt = build_prompt(pair, style, {"Yuki": ["1girl", "silver hair"]})
+    assert prompt.startswith("manga panel, 1girl, silver hair, surprised, Akira sighs")
 
 
 def test_output_path_adds_takes(tmp_path):

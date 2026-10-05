@@ -86,7 +86,9 @@ def test_render_uses_the_default_expression_only_when_the_panel_has_none(tmp_pat
     p2 = build_prompt(surprised, style,
                       character_tags(root, ["Yuki"], surprised.expressions))
     assert "wide toothed grin" in p1
-    assert "wide toothed grin" not in p2 and "Yuki surprised, open mouth" in p2
+    assert "wide toothed grin" not in p2 and "snowflake pin on blazer lapel" in p2
+    # the panel's face follows the character's own tags, not a bare name
+    assert "Yuki surprised" not in p2 and "surprised, open mouth" in p2
     assert "energetic stance" not in p1 + p2  # the action decides the pose
 
 
