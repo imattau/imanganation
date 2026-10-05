@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from manganation.config import REPO_ROOT, load_settings
+from manganation.config import projects_root as _projects_root
 
 
 def projects_root() -> Path:
-    return REPO_ROOT / load_settings().paths.projects_dir
+    return _projects_root()
 
 
 def project_dir(name: str) -> Path:

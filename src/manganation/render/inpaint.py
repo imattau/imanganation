@@ -230,13 +230,13 @@ def inpaint_inline(
     plug-in records it as a take (kind ``inpaint``, parent = the source take)."""
     import uuid
 
-    from manganation.config import REPO_ROOT
+    from manganation.config import outputs_root
 
     source, mask = Path(source), Path(mask)
     for path, what in ((source, "source"), (mask, "mask")):
         if not path.is_file():
             raise InpaintError(f"{what} not found: {path}")
-    out_dir = (outputs if outputs is not None else REPO_ROOT / "outputs") / project_id
+    out_dir = (outputs if outputs is not None else outputs_root()) / project_id
     out = out_dir / f"{source.stem}-inpaint-{uuid.uuid4().hex[:12]}.png"
     if characters and identity is None:
         from manganation.identity import identity_root

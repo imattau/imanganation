@@ -358,3 +358,38 @@ def test_the_renderer_counts_towards_the_disk_space_check(tmp_path, monkeypatch)
     client, _ = _renderer_app(tmp_path)
     response = client.post("/setup/download", json={})
     assert response.status_code == 507 and "disk space" in response.json()["detail"]
+
+
+def test_comfyui_starts_right_after_the_renderer_installs(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from manganation.web.api import create_app
+
+    state, started = {}, []
+    runner = ms.SetupRunner(tmp_path / "models", lambda: [], fetch=_fake_fetch,
+                            renderer=lambda log: FakeInstaller(log, state=state),
+                            on_renderer_ready=lambda: started.append(True))
+    client = TestClient(create_app(render=lambda *a, **k: None, root=tmp_path,
+                                   setup_runner=runner))
+    client.post("/setup/download", json={})
+    _wait(client)
+    assert started == [True] and state["ready"]
+
+
+def test_inside_the_flatpak_data_and_projects_leave_the_read_only_app(tmp_path, monkeypatch):
+    from manganation import config
+
+    monkeypatch.delenv("IMANGANATION_DATA", raising=False)
+    monkeypatch.delenv("IMANGANATION_PROJECTS", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / ".var/app/x/data"))
+    monkeypatch.setattr(config, "in_flatpak", lambda: True)
+    data = tmp_path / ".var/app/x/data/imanganation"
+    assert config.data_root() == data
+    assert config.models_root() == data / "models"
+    assert config.outputs_root() == data / "outputs"
+    assert config.comfy_paths_file() == data / "comfyui_extra_model_paths.yaml"
+    assert config.projects_root() == tmp_path / "Imanganation"
+    monkeypatch.setattr(config, "in_flatpak", lambda: False)
+    assert config.data_root() == config.REPO_ROOT  # a checkout: unchanged
+    assert config.projects_root() == config.REPO_ROOT / "projects"

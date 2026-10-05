@@ -1,49 +1,59 @@
 # Imanganation GIMP as a Flatpak
 
-The customised GIMP (`imanganation-gimp`, a GIMP fork) with the Imanganation plug-in
-built in, as one Flatpak that runs on any Linux distribution. Users install a single
-file; no GIMP compiling, no dependency prefix.
+The customised GIMP (`imanganation-gimp`, a GIMP fork) with the Imanganation plug-in,
+engine and ComfyUI built in, as one Flatpak that runs on any Linux distribution. Users
+install a single file and click through **Set Up Models**: no terminal, no clone, no
+GIMP compiling.
 
-## What's inside, and what isn't
+## For users
 
-| In the Flatpak | On the host |
+```bash
+flatpak install --user imanganation-gimp.flatpak   # pulls the GNOME runtime from Flathub
+```
+
+Start GIMP from the desktop menu. **Imanganation → Set Up Models…** opens by itself:
+**Download** installs the renderer (ComfyUI and PyTorch for your GPU, about 5.5 GB on
+disk) and then the models (about 15 GB). Already have the models (a ComfyUI or A1111
+folder)? **Use Files I Have…** links them in without using more disk space. Projects
+go in `~/Imanganation`.
+
+NVIDIA GPUs need Flatpak's NVIDIA driver extension, which Flatpak installs to match the
+driver; after a driver update it may need `flatpak update`. SDXL wants about 12 GB of
+VRAM.
+
+## What's inside, and where things go
+
+| In the Flatpak (read-only) | Where |
 |---|---|
-| GIMP (the fork), babl and GEGL at pinned releases, GIMP's file-format libraries | The engine (`manganation`, this repository) |
-| The Imanganation plug-in (`lib/gimp/3.0/plug-ins/imanganation`) | ComfyUI (`manganation install-comfyui`) and the models (`manganation setup`) |
-| The fork's workspace defaults (`etc/sessionrc`, `etc/toolrc`) | Your projects |
-
-The engine and ComfyUI stay outside the sandbox: they need the GPU, CUDA and many
-gigabytes of models. The plug-in starts them on the host with `flatpak-spawn --host`
-(the manifest grants `org.freedesktop.Flatpak` for that). They stop when GIMP quits.
-GIMP finds the engine through `~/.config/imanganation/engine-home`, which the engine
-writes whenever `manganation serve`, `setup` or `install-comfyui` runs.
-`IMANGANATION_HOME` overrides it (`flatpak override --user --env=IMANGANATION_HOME=…`).
-
-### Moving the engine inside (in progress)
-
-The Flatpak also carries the engine and ComfyUI, so a user won't need the host
-install at all. Verified: CUDA PyTorch runs in the sandbox at full speed (Flatpak's
-NVIDIA driver extension provides `libcuda`), and the bundled engine starts and serves.
-
-| Bundled now | Where |
-|---|---|
-| The engine (`src`, `config`) and a `manganation` launcher | `/app/share/imanganation`, `/app/bin` |
-| Its Python packages, the `uv.lock` versions for the runtime's Python 3.14 | `engine-deps.json` (regenerate with `engine_deps.py` when `uv.lock` changes) |
+| GIMP (the fork), babl and GEGL at pinned releases, GIMP's file-format libraries | `/app` |
+| The Imanganation plug-in and its lettering fonts (Comic Neue, Bangers; SIL OFL) | `/app/lib/gimp/3.0/plug-ins/imanganation`, `/app/share/fonts/imanganation` |
+| The engine (`src`, `config`), a `manganation` launcher, its Python packages | `/app/share/imanganation`, `/app/bin`; packages from `engine-deps.json` |
 | ComfyUI and ComfyUI_IPAdapter_plus at the `config/comfyui.yaml` commits, patched | `/app/share/imanganation/vendor/ComfyUI` |
-| `uv`, to install PyTorch for the user's GPU on first run | `/app/bin/uv` |
-| The lettering fonts (Comic Neue, Bangers; SIL OFL) | `/app/share/fonts/imanganation` |
+| `uv`, to install the renderer on first run | `/app/bin/uv` |
 
-**First run (done):** the bundled engine installs the renderer itself, into the app's
-data folder (`~/.var/app/io.github.imattau.Imanganation/data/imanganation`): a uv-managed
-Python 3.12, PyTorch for the GPU (read from the driver library: the sandbox has no
-`nvidia-smi`), and ComfyUI's packages at the tested versions (about 5.5 GB). ComfyUI runs
-from the read-only bundled code with its user, input, output and temp folders there
-too. `manganation install-comfyui` does this, and Set Up Models shows it as its first
-row (**renderer**), installed before the models. Verified in the sandbox from an
-empty data folder: GPU found, PyTorch cu130, ComfyUI starts with the IP-Adapter nodes.
+| Written at run time | Where |
+|---|---|
+| The renderer: a uv-managed Python 3.12, PyTorch for the GPU, ComfyUI's packages | `~/.var/app/io.github.imattau.Imanganation/data/imanganation/comfyui-venv`, `python/` |
+| Models, render outputs, ComfyUI's user/input/output/temp folders, logs | the same data folder: `models/`, `outputs/`, `comfyui/`, `engine.log`, `comfyui.log` |
+| Projects and their character identity stores | `~/Imanganation` |
 
-Still to do: keep models and outputs in the data folder, and start the bundled engine
-and ComfyUI instead of the host's. Until then the plug-in uses the host install above.
+How it runs: the plug-in starts the bundled engine inside the sandbox
+(`manganation serve --comfyui`), and the engine starts its own ComfyUI as soon as the
+renderer is installed (at launch, or right after Set Up installs it), so the first
+render needs no restart. Both stop when GIMP quits. The sandbox reaches the GPU through
+`--device=all` and Flatpak's NVIDIA driver extension (`libcuda`); the engine reads the
+GPU from that library because the sandbox has no `nvidia-smi`.
+
+Verified in the sandbox, from an empty data folder: the renderer installs (PyTorch
+cu130 on an RTX 5060 Ti), existing models link in, the engine starts its ComfyUI, and
+rooftop's two-shot renders with both character references in 26 s
+(`docs/quality/2026-10-05_flatpak_bundled_render.png`).
+
+**A developer checkout instead:** set `IMANGANATION_HOME` to it
+(`flatpak override --user --env=IMANGANATION_HOME=/path/to/imanganation
+io.github.imattau.Imanganation`); the plug-in then starts that checkout's engine and
+ComfyUI on the host with `flatpak-spawn --host` (the manifest grants
+`org.freedesktop.Flatpak`), as before.
 
 ## Build
 
@@ -52,33 +62,28 @@ packaging/flatpak/build.sh            # -> dist/imanganation-gimp.flatpak
 packaging/flatpak/build.sh --install  # also install it for this user
 ```
 
-Needs `flatpak` and `flatpak-builder`. The first build downloads the GNOME 51 SDK and
-compiles GIMP's dependencies, which takes a long time; later builds reuse the cache in
-`packaging/flatpak/.build/` and recompile only what changed.
+Needs `flatpak`, `flatpak-builder` and `uv`; run it from the repo. The first build
+downloads the GNOME 51 SDK and compiles GIMP's dependencies, which takes a long time;
+later builds reuse the cache in `packaging/flatpak/.build/` and recompile only what
+changed (the engine module always: its sources are directories, which flatpak-builder
+can't checksum, so it comes last).
 
-Run it from the repo (it uses `uv run` to read `config/comfyui.yaml`).
 `make_manifest.py` writes the manifest (`.build/<app id>.json`) from the fork's own
 upstream manifest (`imanganation-gimp/build/linux/flatpak/org.gimp.GIMP-nightly.json`),
 so GIMP's dependency list follows the fork as it merges upstream. It changes:
 
 - **App:** app id `io.github.imattau.Imanganation`, GNOME runtime 51 instead of
   nightly, branch `stable`, the build id.
+- **Meson and CMake modules** install into `lib` (with flatpak-builder 1.4 on this SDK
+  they default to `lib64`, where nothing looks).
 - **babl / GEGL:** pinned to `BABL_0_1_118` / `GEGL_0_4_66`, the releases the fork is
   developed against (upstream builds their git master).
-- **GIMP:** your local `imanganation-gimp` checkout as it is, uncommitted changes
-  included. For a release, build a pushed commit instead:
-  `build.sh --fork-git https://github.com/imattau/imanganation-gimp.git --fork-commit <sha>`.
-- **The plug-in**, as a module after GIMP.
-- **`--talk-name=org.freedesktop.Flatpak`**, so the plug-in can start the engine.
-
-## For users
-
-```bash
-flatpak install --user imanganation-gimp.flatpak   # pulls the GNOME runtime from Flathub
-git clone https://github.com/imattau/imanganation && cd imanganation
-uv sync && uv run manganation install-comfyui && uv run manganation serve
-```
-
-Run `serve` once, so GIMP can find the engine, then stop it and start GIMP from the
-desktop menu. GIMP starts the engine and ComfyUI itself, and **Imanganation → Set Up
-Models…** fetches the models.
+- **GIMP:** the fork at its local checkout's HEAD: committed code only, and cached by
+  commit, so GIMP rebuilds only when the fork changes. `--fork-worktree` builds the
+  checkout as it is, uncommitted changes included (rebuilt every time); for a release,
+  build a pushed commit: `--fork-git https://github.com/imattau/imanganation-gimp.git
+  --fork-commit <sha>`.
+- **The plug-in, engine, ComfyUI and uv** as modules after GIMP. The engine's Python
+  packages are `engine-deps.json`: re-run `engine_deps.py` when `uv.lock` changes.
+  ComfyUI's patch is generated from `comfy_setup.PATCHES` against the pinned file.
+- **`--talk-name=org.freedesktop.Flatpak`**, for the developer-checkout mode.

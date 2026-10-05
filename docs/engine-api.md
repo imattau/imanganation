@@ -185,6 +185,14 @@ renders (downloads don't use the GPU).
 Starting a task also points ComfyUI's `config/comfyui_extra_model_paths.yaml` at the
 models folder; `comfy_paths_changed` then says ComfyUI needs a restart.
 
+`manganation serve --comfyui` (what the Flatpak runs) also runs ComfyUI as the
+engine's child, from its installed renderer, with its folders in the data folder; it
+starts at launch when the renderer is installed and right after a download installs
+it, and stops with the engine. Inside the Flatpak the engine's data (renderer, models,
+outputs, model-paths file, logs) lives in the app's data folder and its projects root
+is `~/Imanganation`; `IMANGANATION_DATA` / `IMANGANATION_PROJECTS` override them, and
+`COMFY_PORT` moves ComfyUI.
+
 ## Paths in container forms
 
 `source`, `mask` and `image_path` must be existing files under the projects root

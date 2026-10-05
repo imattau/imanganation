@@ -264,6 +264,7 @@ def create_app(
     design_character=None,
     parse_script=None,
     setup_runner=None,
+    comfy_process=None,
 ) -> FastAPI:
     app = FastAPI(title="imanganation engine")
     jobs: dict[str, Job] = {}
@@ -295,10 +296,10 @@ def create_app(
     def _engine_file(raw: str, what: str) -> Path:
         """A container-form image: an existing file under the projects root (where
         containers live) or the engine's outputs/ cache (a take not yet copied in)."""
-        from manganation.config import REPO_ROOT
+        from manganation.config import outputs_root
 
         roots = [(root or projects_root()).resolve(),
-                 (outputs or REPO_ROOT / "outputs").resolve()]
+                 (outputs or outputs_root()).resolve()]
         path = Path(raw).resolve()
         if not any(r in path.parents for r in roots):
             raise HTTPException(400, f"{what} must be under {roots[0]} or {roots[1]}")
@@ -326,20 +327,22 @@ def create_app(
         if "runner" not in setup_state:
             from manganation import models_setup
             from manganation.config import (
-                REPO_ROOT,
                 comfy_paths_file,
                 load_models,
                 load_settings,
+                models_root,
             )
 
             settings = load_settings()
             from manganation.comfy_setup import installer_for
 
             setup_state["runner"] = models_setup.SetupRunner(
-                REPO_ROOT / settings.paths.models_dir,
+                models_root(settings),
                 lambda: models_setup.needed(load_settings(), load_models()),
                 comfy_paths=comfy_paths_file(),
-                renderer=lambda log: installer_for(load_settings(), log=log))
+                renderer=lambda log: installer_for(load_settings(), log=log),
+                # the engine's own ComfyUI starts as soon as its renderer is installed
+                on_renderer_ready=comfy_process.start if comfy_process else None)
         return setup_state["runner"]
 
     @app.get("/setup")
@@ -391,7 +394,7 @@ def create_app(
     def status_report() -> dict:
         """Everything an artist needs when something seems stuck or broken: is ComfyUI
         up (GPU, VRAM), what's running/queued, recent failures, missing model files."""
-        from manganation.config import REPO_ROOT, load_models, load_settings
+        from manganation.config import load_models, load_settings, models_root
 
         settings = load_settings()
         try:
@@ -400,7 +403,7 @@ def create_app(
             comfy = {"up": False, "error": str(exc), "gpus": []}
         comfy["url"] = settings.comfyui.base_url
         models = (models_check or (lambda: required_models(
-            settings, load_models(), REPO_ROOT / settings.paths.models_dir)))()
+            settings, load_models(), models_root(settings))))()
 
         now = time.time()
 

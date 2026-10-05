@@ -182,7 +182,9 @@ the top-level *Imanganation* menu:
   while you work, **Pause Download** keeps the partial file, and Download resumes it.
   Its first row is the **renderer** (ComfyUI and PyTorch for your GPU, about 5.5 GB):
   missing on a fresh Flatpak install, it's installed before the models, with each step
-  shown under the progress bar. It opens by itself at startup when the renderer or the
+  shown under the progress bar, and the Flatpak's engine starts ComfyUI as soon as it's
+  in. (In the Flatpak the workspace starts the app's own engine; models and outputs go
+  in its data folder, projects in `~/Imanganation`.) It opens by itself at startup when the renderer or the
   checkpoint is missing (rendering can't work without them). Engine: `GET /setup`,
   `POST /setup/download|link|cancel`; the same modules as `manganation setup` and
   `install-comfyui`.

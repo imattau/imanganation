@@ -36,7 +36,7 @@ def _names(manifest):
 
 
 def test_the_manifest_is_ours_with_pinned_deps_and_the_plugin(tmp_path):
-    out = mm.make(UPSTREAM, fork=tmp_path / "fork", fork_git=None, fork_commit=None)
+    out = mm.make(UPSTREAM, fork=tmp_path / "fork", fork_git=None, fork_commit="abc123")
     assert (out["app-id"], out["branch"], out["runtime-version"]) == (
         "io.github.imattau.Imanganation", "stable", mm.RUNTIME_VERSION)
     assert "desktop-file-name-prefix" not in out and out["tags"] == ["GTK+3"]
@@ -45,8 +45,9 @@ def test_the_manifest_is_ours_with_pinned_deps_and_the_plugin(tmp_path):
     assert modules["babl"]["sources"] == [{"type": "git", **mm.PINNED["babl"]}]
     assert modules["gegl"]["sources"][1] == {"type": "patch", "path": "p.patch"}  # kept
     gimp = modules["gimp"]
-    assert gimp["sources"][0] == {"type": "dir", "path": str((tmp_path / "fork").resolve()),
-                                  "skip": mm.GIT_CHURN}  # git status mustn't force a rebuild
+    # the local checkout at a commit: git sources are cached by commit, dir ones never
+    assert gimp["sources"][0] == {"type": "git", "commit": "abc123",
+                                  "url": f"file://{(tmp_path / 'fork').resolve()}"}
     assert gimp["sources"][1]["type"] == "shell"
     assert gimp["config-opts"] == ["-Dgi-docgen=disabled",
                                    "-Dbuild-id=io.github.imattau.Imanganation"]  # no buildsystem
@@ -73,12 +74,20 @@ def test_meson_and_cmake_modules_install_into_lib_even_nested():
         {"name": "set", "buildsystem": "cmake", "config-opts": ["-DCMAKE_INSTALL_LIBDIR=lib"]},
         {"name": "auto", "config-opts": ["--disable-x"]},
         *UPSTREAM["modules"]]}
-    out = mm.make(upstream, fork=Path("fork"), fork_git=None, fork_commit=None)
+    out = mm.make(upstream, fork=Path("fork"), fork_git=None, fork_commit="abc123")
     gexiv2 = out["modules"][0]
     assert gexiv2["config-opts"] == ["--libdir=lib"]
     assert gexiv2["modules"][0]["config-opts"] == ["-DX=OFF", "-DCMAKE_INSTALL_LIBDIR=lib"]
     assert out["modules"][1]["config-opts"] == ["-DCMAKE_INSTALL_LIBDIR=lib"]  # not twice
     assert out["modules"][2]["config-opts"] == ["--disable-x"]  # autotools: already lib
+
+
+def test_the_worktree_option_builds_uncommitted_changes_as_a_dir(tmp_path):
+    out = mm.make(UPSTREAM, fork=tmp_path / "fork", fork_git=None, fork_commit=None,
+                  worktree=True)
+    gimp = next(m for m in out["modules"] if isinstance(m, dict) and m["name"] == "gimp")
+    assert gimp["sources"][0] == {"type": "dir", "path": str((tmp_path / "fork").resolve()),
+                                  "skip": mm.GIT_CHURN}
 
 
 def test_a_release_builds_the_fork_from_a_pinned_commit(tmp_path):
@@ -95,6 +104,8 @@ def test_the_real_upstream_manifest_still_has_what_we_change():
     upstream = json.loads((ROOT / "imanganation-gimp/build/linux/flatpak/"
                                   "org.gimp.GIMP-nightly.json").read_text())
     out = mm.make(upstream, fork=ROOT / "imanganation-gimp", fork_git=None, fork_commit=None)
+    gimp = next(m for m in out["modules"] if isinstance(m, dict) and m["name"] == "gimp")
+    assert gimp["sources"][0]["type"] == "git" and len(gimp["sources"][0]["commit"]) == 40
     assert {"babl", "gegl", "gimp", "imanganation-plugin"} <= set(_names(out))
 
 

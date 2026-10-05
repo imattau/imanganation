@@ -162,7 +162,12 @@ class Settings(BaseModel):
 def load_settings() -> Settings:
     path = CONFIG_DIR / "settings.yaml"
     data = yaml.safe_load(path.read_text()) or {}
-    return Settings(**data)
+    settings = Settings(**data)
+    if os.environ.get("COMFY_PORT"):  # as the plug-in: run ComfyUI on another port
+        port = int(os.environ["COMFY_PORT"])
+        settings.comfyui.port = port
+        settings.comfyui.base_url = f"http://{settings.comfyui.host}:{port}"
+    return settings
 
 
 def load_models() -> dict:
@@ -185,6 +190,28 @@ def data_root() -> Path:
         base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local/share")
         return Path(base) / "imanganation"
     return REPO_ROOT
+
+
+def projects_root(settings: Settings | None = None) -> Path:
+    """Where projects (and their character identity stores) live: IMANGANATION_PROJECTS;
+    inside the Flatpak ~/Imanganation, a folder you'd look for your work in; otherwise
+    the checkout's projects/. The engine only reads container files under it (and its
+    outputs)."""
+    if os.environ.get("IMANGANATION_PROJECTS"):
+        return Path(os.environ["IMANGANATION_PROJECTS"])
+    if in_flatpak():
+        return Path.home() / "Imanganation"
+    return REPO_ROOT / (settings or load_settings()).paths.projects_dir
+
+
+def models_root(settings: Settings | None = None) -> Path:
+    """The model store: the data folder's models/ (the checkout's, for developers)."""
+    return data_root() / (settings or load_settings()).paths.models_dir
+
+
+def outputs_root() -> Path:
+    """The engine's render cache for container renders (the plug-in copies takes out)."""
+    return data_root() / "outputs"
 
 
 def comfy_paths_file() -> Path:

@@ -56,6 +56,7 @@ from gi.repository import (  # noqa: E402
 try:
     import bubbles as bubble_templates
     import lettering
+    import services as engine_services
     import setup_ui
     from layouts import frame_rings, layout_preview_rgb, page_layout_availability
     from panel_ui import _panel_label as panel_label
@@ -77,7 +78,7 @@ try:
 except ImportError:  # Keep older single-file plug-in installs usable for legacy projects.
     ProjectFileError = ValueError
     project_from_script = parse_script_text = script_looks_canonical = None
-    lettering = bubble_templates = setup_ui = None
+    lettering = bubble_templates = setup_ui = engine_services = None
     load_project = record_take = save_project = apply_field_edit = None
     delete_character = None
     new_id = None
@@ -159,32 +160,14 @@ TAKE_PARASITE = "imanganation-take"
 CURSOR_FILE = "gimp_cursor.json"  # per project: which panel comes next
 ENGINE_URL = "http://127.0.0.1:8790"
 RENDER_TIMEOUT = 600  # seconds
-# Inside the Flatpak build the plug-in is sandboxed; host processes go through
-# flatpak-spawn --host (the manifest grants org.freedesktop.Flatpak).
+# Inside the Flatpak the plug-in is sandboxed: by default it starts the app's own engine
+# (which runs its own ComfyUI); a host checkout is started through flatpak-spawn --host
+# (the manifest grants org.freedesktop.Flatpak). services.py decides which.
 IN_FLATPAK = Path("/.flatpak-info").exists()
-
-
-def _find_engine_home():
-    """The engine checkout the workspace starts the engine and ComfyUI from:
-    IMANGANATION_HOME; else the checkout these plug-in files are symlinked from (a
-    developer install); else where the engine last said it lives (it writes
-    ~/.config/imanganation/engine-home when it runs, which is how a packaged GIMP
-    finds it). None if none of those is an engine checkout."""
-    candidates = [os.environ.get("IMANGANATION_HOME"), Path(__file__).resolve().parents[2]]
-    try:
-        candidates.append((Path.home() / ".config/imanganation/engine-home")
-                          .read_text().strip())
-    except OSError:
-        pass
-    for candidate in candidates:
-        if candidate and (Path(candidate) / "pyproject.toml").is_file():
-            return Path(candidate)
-    return None
-
-
 # IMANGANATION_AUTOSTART=0 stops the workspace starting the engine and ComfyUI.
-ENGINE_FOUND = _find_engine_home()
-ENGINE_HOME = ENGINE_FOUND or Path.home() / "imanganation"
+ENGINE = (engine_services.find_engine(in_flatpak=IN_FLATPAK, plugin_file=Path(__file__))
+          if engine_services is not None else None)
+ENGINE_FOUND = ENGINE is not None and ENGINE.mode != "none"
 COMFY_URL = f"http://127.0.0.1:{os.environ.get('COMFY_PORT', '8188')}"
 
 _DOCK_PLUGIN = None
@@ -1661,8 +1644,8 @@ def _host_command(command, cwd):
     """Run ``command`` on the host, not in the Flatpak sandbox: the engine and ComfyUI
     need the host's GPU, CUDA and Python. --watch-bus ends the host process when
     flatpak-spawn (which dies with GIMP) does."""
-    if not IN_FLATPAK:
-        return command
+    if not IN_FLATPAK or ENGINE is None or ENGINE.mode != "host":
+        return command  # the bundled engine runs in the sandbox, as GIMP does
     return ["flatpak-spawn", "--host", "--watch-bus", f"--directory={cwd}", *command]
 
 
@@ -1679,29 +1662,22 @@ def _start_service(name, command, cwd, log):
 
 
 def _start_engine_services():
-    """Start ComfyUI and the engine with GIMP, unless they are already running. They
-    stop when GIMP quits; anything that was already running is left alone."""
-    import shutil
-
-    home = ENGINE_HOME
-    if os.environ.get("IMANGANATION_AUTOSTART", "1") == "0" or not (
-            home / "pyproject.toml").is_file():
+    """Start the engine (and, for a host checkout, ComfyUI) with GIMP, unless they are
+    already running. They stop when GIMP quits; anything already running is left
+    alone. The bundled engine (the Flatpak) starts its own ComfyUI."""
+    if os.environ.get("IMANGANATION_AUTOSTART", "1") == "0" or not ENGINE_FOUND:
         return
-    comfy_python = home / "vendor/ComfyUI/.venv/bin/python"
-    if comfy_python.is_file() and not _url_up(COMFY_URL + "/system_stats"):
-        _start_service("ComfyUI", [
-            str(comfy_python), "main.py", "--extra-model-paths-config",
-            str(home / "config/comfyui_extra_model_paths.yaml"),
-            "--listen", "127.0.0.1", "--port", COMFY_URL.rsplit(":", 1)[1]],
-            home / "vendor/ComfyUI", home / "comfyui.log")
+    port = COMFY_URL.rsplit(":", 1)[1]
+    comfy = engine_services.comfy_command(ENGINE, port)
+    if comfy is not None and not _url_up(COMFY_URL + "/system_stats"):
+        _start_service("ComfyUI", comfy, ENGINE.home / "vendor/ComfyUI",
+                       ENGINE.home / "comfyui.log")
         if "ComfyUI" in _SERVICES:  # so scripts/comfy.sh status/stop see it
-            (home / ".comfyui.pid").write_text(f"{_SERVICES['ComfyUI'].pid}\n")
-    if not _url_up(ENGINE_URL + "/health"):
-        engine = home / ".venv/bin/manganation"
-        uv = shutil.which("uv") or str(Path.home() / ".local/bin/uv")
-        command = ([str(engine), "serve"] if engine.is_file()
-                   else [uv, "run", "manganation", "serve"])
-        _start_service("engine", command, home, home / "engine.log")
+            (ENGINE.home / ".comfyui.pid").write_text(f"{_SERVICES['ComfyUI'].pid}\n")
+    command = engine_services.engine_command(ENGINE)
+    if command is not None and not _url_up(ENGINE_URL + "/health"):
+        ENGINE.data.mkdir(parents=True, exist_ok=True)
+        _start_service("engine", command, ENGINE.home or ENGINE.data, ENGINE.log)
     if "engine" in _SERVICES:
         _refresh_when_engine_up(time.monotonic() + 180)
 
@@ -1718,7 +1694,7 @@ def _refresh_when_engine_up(deadline):
             return GLib.SOURCE_REMOVE
         if process is not None and process.poll() is not None:
             Gimp.message(f"The imanganation engine exited (code {process.returncode}); "
-                         f"see {ENGINE_HOME / 'engine.log'}")
+                         f"see {ENGINE.log}")
             return GLib.SOURCE_REMOVE
         return GLib.SOURCE_CONTINUE if time.monotonic() < deadline else GLib.SOURCE_REMOVE
 
@@ -2426,7 +2402,9 @@ def _choose_new_project():
     title = Gtk.Entry(activates_default=True, hexpand=True)
     folder = Gtk.FileChooserButton(title="Save the project in",
                                    action=Gtk.FileChooserAction.SELECT_FOLDER)
-    projects = ENGINE_HOME / "projects"
+    projects = ENGINE.projects if ENGINE is not None else Path.home() / "Imanganation"
+    if ENGINE is not None and ENGINE.mode == "bundled":
+        projects.mkdir(exist_ok=True)  # the bundled engine reads projects only from here
     folder.set_current_folder(str(projects if projects.is_dir() else Path.home()))
     width = Gtk.SpinButton.new_with_range(1, 20000, 100)
     height = Gtk.SpinButton.new_with_range(1, 20000, 100)

@@ -318,3 +318,56 @@ def test_an_unpatched_bundle_is_refused(tmp_path):
                              venv=tmp_path / "v", bundled=True)
     with pytest.raises(cs.InstallError, match="isn't patched"):
         installer.install(installer.plan(_gpu("13.0", "12.0")))
+
+
+# --- the engine's own ComfyUI (serve --comfyui) ------------------------------------
+
+
+class FakeProcess:
+    def __init__(self, cmd, **kwargs):
+        self.cmd, self.kwargs, self.code = cmd, kwargs, None
+
+    def poll(self):
+        return self.code
+
+    def terminate(self):
+        self.code = -15
+
+    def wait(self, timeout=None):
+        return self.code
+
+
+def test_the_engine_starts_its_comfyui_once_the_renderer_is_ready(tmp_path):
+    from manganation.comfy_process import ComfyProcess
+
+    comfy = _bundled_comfy(tmp_path)
+    venv = tmp_path / "data/comfyui-venv"
+    installer = cs.Installer(comfy, PINS, venv=venv, data=tmp_path / "data/comfyui",
+                             bundled=True, log=lambda *a: None)
+    started = []
+    process = ComfyProcess(lambda log: installer, "http://127.0.0.1:8199",
+                           comfy_paths=tmp_path / "data/paths.yaml",
+                           models_root=tmp_path / "data/models",
+                           log_file=tmp_path / "data/comfyui.log",
+                           popen=lambda cmd, **kw: started.append(FakeProcess(cmd, **kw))
+                           or started[-1], is_up=lambda url: False)
+    assert process.start() == "renderer missing" and not started
+    cs._python_in(venv).parent.mkdir(parents=True)
+    cs._python_in(venv).write_text("")
+    _fake_torch(venv, "2.14.1+cu130")
+    installer.mark_ready()
+    assert process.start() == "started"
+    cmd = started[0].cmd
+    assert cmd[:2] == [str(installer.python), "main.py"]
+    assert cmd[cmd.index("--port") + 1] == "8199" and "--user-directory" in cmd
+    assert cmd[cmd.index("--extra-model-paths-config") + 1] == str(tmp_path / "data/paths.yaml")
+    assert str((tmp_path / "data/models").resolve()) in (tmp_path / "data/paths.yaml").read_text()
+    assert started[0].kwargs["cwd"] == comfy
+    assert process.start() == "running" and len(started) == 1  # not twice
+    process.stop()
+    assert started[0].code == -15
+    elsewhere = ComfyProcess(lambda log: installer, "http://127.0.0.1:8199",
+                             comfy_paths=tmp_path / "p.yaml", models_root=tmp_path,
+                             log_file=tmp_path / "l", popen=lambda *a, **k: 1 / 0,
+                             is_up=lambda url: True)
+    assert elsewhere.start() == "running"  # something already answers: left alone

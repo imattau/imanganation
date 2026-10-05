@@ -9,7 +9,10 @@ fork's GIMP version needs, and changes only what makes it ours:
 - **Meson and CMake modules** install into ``lib`` (they default to ``lib64`` here).
 - **babl / GEGL:** pinned to the releases the fork is tested with (upstream builds
   their moving git master).
-- **GIMP:** the fork, from a local checkout (default) or a pinned git commit.
+- **GIMP:** the fork at a commit: the local checkout's HEAD (default), or a pushed one
+  (``--fork-git``). flatpak-builder caches git sources by commit; a ``dir`` source it
+  can't checksum, so GIMP would rebuild every time. ``--fork-worktree`` builds the
+  checkout as it is, uncommitted changes included, for testing them.
 - **The Imanganation plug-in**, installed with GIMP (``lib/gimp/3.0/plug-ins``), and
   its lettering fonts (``share/fonts``).
 - **The engine**, runnable in the sandbox before anything is downloaded: its code and
@@ -32,6 +35,7 @@ import argparse
 import difflib
 import json
 import subprocess
+import sys
 import urllib.request
 from pathlib import Path
 
@@ -184,8 +188,14 @@ def libdir_into_lib(modules: list) -> None:
         libdir_into_lib(module.get("modules", []))
 
 
+def _head(checkout: Path) -> str:
+    return subprocess.run(["git", "rev-parse", "HEAD"], cwd=checkout, check=True,
+                          capture_output=True, text=True).stdout.strip()
+
+
 def make(upstream: dict, *, fork: Path | None, fork_git: str | None, fork_commit: str | None,
-         app_id: str = APP_ID, repo: Path = REPO, engine: list[dict] | None = None) -> dict:
+         app_id: str = APP_ID, repo: Path = REPO, engine: list[dict] | None = None,
+         worktree: bool = False) -> dict:
     """``engine``: the engine/ComfyUI/uv modules to add after the plug-in (main() builds
     them; tests can leave them out)."""
     manifest = json.loads(json.dumps(upstream))  # a deep copy
@@ -202,10 +212,13 @@ def make(upstream: dict, *, fork: Path | None, fork_git: str | None, fork_commit
         module["sources"] = [{"type": "git", **pin}] + [
             s for s in module.get("sources", []) if s.get("type") != "git"]
     gimp = modules[names.index("gimp")]
-    # A local checkout's .git stays (GIMP's About shows the commit from it), minus the
-    # files git rewrites on every status/fetch: they'd make GIMP rebuild each time.
-    source = ({"type": "git", "url": fork_git, "commit": fork_commit} if fork_git
-              else {"type": "dir", "path": str(Path(fork).resolve()), "skip": GIT_CHURN})
+    if fork_git:
+        source = {"type": "git", "url": fork_git, "commit": fork_commit}
+    elif worktree:  # uncommitted changes too; rebuilt on every build (dir sources are)
+        source = {"type": "dir", "path": str(Path(fork).resolve()), "skip": GIT_CHURN}
+    else:
+        source = {"type": "git", "url": f"file://{Path(fork).resolve()}",
+                  "commit": fork_commit or _head(Path(fork))}
     gimp["sources"] = [source] + [s for s in gimp["sources"] if s.get("type") != "dir"]
     gimp["config-opts"] = [opt for opt in gimp.get("config-opts", [])
                            if not opt.startswith("-Dbuild-id=")] + [f"-Dbuild-id={app_id}"]
@@ -221,6 +234,9 @@ def main() -> None:
                         help="local fork checkout (default: ./imanganation-gimp)")
     parser.add_argument("--fork-git", help="build the fork from this git URL instead")
     parser.add_argument("--fork-commit", help="the commit to build (with --fork-git)")
+    parser.add_argument("--fork-worktree", action="store_true",
+                        help="build the local fork as it is, uncommitted changes included "
+                        "(rebuilds GIMP every time)")
     parser.add_argument("--app-id", default=APP_ID)
     parser.add_argument("--out", type=Path, default=HERE / ".build" / f"{APP_ID}.json")
     args = parser.parse_args()
@@ -232,13 +248,22 @@ def main() -> None:
     from manganation.comfy_setup import load_pins
 
     pins = load_pins()
-    engine = [json.loads((HERE / "engine-deps.json").read_text()), engine_module(REPO),
+    # The engine's dir sources can't be checksummed, so it rebuilds every time, and so
+    # does everything after it: last, so ComfyUI and uv stay cached.
+    engine = [json.loads((HERE / "engine-deps.json").read_text()),
               comfyui_module(REPO, pins, comfy_patches(REPO, pins["comfyui"],
                                                        args.out.parent / "patches")),
-              uv_module()]
+              uv_module(), engine_module(REPO)]
+    if not args.fork_git and not args.fork_worktree:
+        dirty = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"],
+                               cwd=args.fork, capture_output=True, text=True).stdout.strip()
+        if dirty:
+            print(f"note: building the fork's HEAD ({_head(args.fork)[:10]}); its "
+                  f"uncommitted changes aren't included (--fork-worktree to include them)",
+                  file=sys.stderr)
     manifest = make(json.loads(upstream_file.read_text()), fork=args.fork,
                     fork_git=args.fork_git, fork_commit=args.fork_commit, app_id=args.app_id,
-                    engine=engine)
+                    engine=engine, worktree=args.fork_worktree)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(manifest, indent=2) + "\n")
     print(args.out)

@@ -269,7 +269,7 @@ def render_inline(
     character's ``version`` selects that reference version. The image goes to the
     engine's own ``outputs/<project id>/`` cache. The engine never writes into the
     container: the plug-in copies the result in as a take."""
-    from manganation.config import REPO_ROOT
+    from manganation.config import outputs_root
     from manganation.identity import identity_root
     from manganation.project_container import panel_to_spec
 
@@ -289,7 +289,7 @@ def render_inline(
                                   f"(known: {', '.join(known) or 'none'})")
             spec.refs[name] = str(ref)  # the per-panel override path in reference_for
             used[name] = version
-    out_dir = (outputs if outputs is not None else REPO_ROOT / "outputs") / project_id
+    out_dir = (outputs if outputs is not None else outputs_root()) / project_id
     out = out_dir / f"{panel.get('id', 'panel')}-{uuid.uuid4().hex[:12]}.png"
     result = _render(spec, root, frame_w, frame_h, reading_order=ReadingOrder(reading_order),
                      seed=seed, client=client, out=out, seq=None, placements=placements,

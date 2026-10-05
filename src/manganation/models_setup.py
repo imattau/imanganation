@@ -327,10 +327,12 @@ class SetupRunner:
 
     ``renderer(log)`` returns the ComfyUI installer (comfy_setup.Installer) when the
     renderer is set up here too (the Flatpak, where nothing else installs it): it's the
-    first row, and a download installs it before the models."""
+    first row, and a download installs it before the models; ``on_renderer_ready`` runs
+    once it's installed (the engine starts its own ComfyUI)."""
 
     def __init__(self, root: Path, models: Callable[[], list[ModelFile]], *,
-                 comfy_paths: Path | None = None, fetch=None, find=None, renderer=None):
+                 comfy_paths: Path | None = None, fetch=None, find=None, renderer=None,
+                 on_renderer_ready: Callable[[], object] | None = None):
         import threading
 
         self.root = Path(root)
@@ -339,6 +341,7 @@ class SetupRunner:
         self._fetch = fetch or download
         self._find = find or find_existing
         self.renderer = renderer
+        self.on_renderer_ready = on_renderer_ready
         self._lock = threading.Lock()
         self._cancel = threading.Event()
         self._thread = None
@@ -466,6 +469,9 @@ class SetupRunner:
             summary = installer.verify()
             installer.mark_ready()
             self._update(finished=[*self._task["finished"], f"renderer ({summary})"])
+            if self.on_renderer_ready is not None:
+                self._update(current="Starting ComfyUI…")
+                self.on_renderer_ready()
         except (RuntimeError, OSError, subprocess.CalledProcessError) as exc:
             self._update(errors=[*self._task["errors"], f"renderer: {exc}"])
         self._update(phase="models")

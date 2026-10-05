@@ -31,6 +31,8 @@ def version() -> None:
 @app.command()
 def serve(
     port: int = typer.Option(8790, help="Port to listen on (127.0.0.1 only)."),
+    comfyui: bool = typer.Option(False, "--comfyui", help="Also run ComfyUI, as this "
+                                 "engine's child (the Flatpak: nothing else starts it)."),
 ) -> None:
     """Run the local engine API (used by the GIMP plug-in)."""
     import uvicorn
@@ -39,8 +41,28 @@ def serve(
     from manganation.web.api import create_app
 
     remember_engine_home()  # how a packaged (Flatpak) GIMP finds this checkout
+    comfy = None
+    if comfyui:
+        import atexit
 
-    uvicorn.run(create_app(), host="127.0.0.1", port=port)
+        from manganation.comfy_process import ComfyProcess
+        from manganation.comfy_setup import installer_for
+        from manganation.config import (
+            comfy_paths_file,
+            data_root,
+            load_settings,
+            models_root,
+        )
+
+        settings = load_settings()
+        comfy = ComfyProcess(lambda log: installer_for(load_settings(), log=log),
+                             settings.comfyui.base_url, comfy_paths=comfy_paths_file(),
+                             models_root=models_root(settings),
+                             log_file=data_root() / "comfyui.log")
+        rprint(f"ComfyUI: {comfy.start()} ({settings.comfyui.base_url})")
+        atexit.register(comfy.stop)
+
+    uvicorn.run(create_app(comfy_process=comfy), host="127.0.0.1", port=port)
 
 
 @app.command()
@@ -153,11 +175,11 @@ def doctor() -> None:
         except Exception:
             rprint(f"  {label}: [red]down[/red]")
 
-    from manganation.config import load_models
+    from manganation.config import load_models, models_root
     from manganation.web.api import required_models
 
     missing = [m for m in required_models(settings, load_models(),
-                                          REPO_ROOT / settings.paths.models_dir)
+                                          models_root(settings))
                if not m["present"]]
     if missing:
         rprint(f"  models: [yellow]{len(missing)} missing[/yellow] "
@@ -198,16 +220,16 @@ def setup(
 
     from manganation import models_setup as ms
     from manganation.config import (
-        REPO_ROOT,
         comfy_paths_file,
         load_models,
         load_settings,
+        models_root,
         remember_engine_home,
     )
 
     remember_engine_home()
     settings = load_settings()
-    root = (REPO_ROOT / settings.paths.models_dir).resolve()
+    root = models_root(settings).resolve()
     models = ms.needed(settings, load_models())
     states = {m.role: ms.state(m, root, verify=verify) for m in models}
 
@@ -298,10 +320,10 @@ def install_comfyui(
     from manganation import models_setup as ms
     from manganation.config import (
         CONFIG_DIR,
-        REPO_ROOT,
         comfy_paths_file,
         load_models,
         load_settings,
+        models_root,
         remember_engine_home,
     )
 
@@ -355,11 +377,11 @@ def install_comfyui(
         rprint(f"[red]A step failed: {exc}[/red]")
         raise typer.Exit(1) from exc
     rprint(f"[green]ComfyUI is ready[/green]: torch {summary}")
-    models_root = (REPO_ROOT / settings.paths.models_dir).resolve()
-    if ms.write_comfy_paths(comfy_paths_file(), models_root):
-        rprint(f"Pointed ComfyUI's model paths at {models_root}.")
+    store = models_root(settings).resolve()
+    if ms.write_comfy_paths(comfy_paths_file(), store):
+        rprint(f"Pointed ComfyUI's model paths at {store}.")
     missing = [m for m in ms.needed(settings, load_models())
-               if ms.state(m, models_root) != "present"]
+               if ms.state(m, store) != "present"]
     rprint("Next: [bold]manganation setup[/bold] to get the models."
            if missing else "Start it with ./scripts/comfy.sh start (GIMP starts it too).")
 

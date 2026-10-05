@@ -188,7 +188,7 @@ def refine_inline(
     the engine's ``outputs/<project>/`` cache; the plug-in records it as a take."""
     import uuid
 
-    from manganation.config import REPO_ROOT
+    from manganation.config import outputs_root
 
     source = Path(source)
     if not source.is_file():
@@ -196,7 +196,7 @@ def refine_inline(
     if origin_width <= 0 or origin_height <= 0:
         raise RefineError("origin size must be positive")
     style_prompt, negative = _style_prompts()
-    out_dir = (outputs if outputs is not None else REPO_ROOT / "outputs") / project_id
+    out_dir = (outputs if outputs is not None else outputs_root()) / project_id
     out = out_dir / f"{source.stem}-hires-{uuid.uuid4().hex[:12]}.png"
     result = refine_image(
         source, origin_size=(origin_width, origin_height),
