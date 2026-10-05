@@ -1,0 +1,129 @@
+# Build the Imanganation Flatpak (packaging/flatpak/) and, for a version tag, release it.
+#
+# - push to main, pull requests: build; the bundle is a downloadable artifact.
+# - a tag like v0.1.0: build and attach the bundle to a GitHub Release.
+# - Actions tab -> "Run workflow": build on demand.
+#
+# GIMP is the fork commit packaging/flatpak/fork.json pins (bump it when the fork
+# changes). The same build.sh as locally: Ubuntu's flatpak-builder 1.4, GNOME 51 SDK
+# from Flathub. The first build compiles GIMP and ~20 libraries (an hour or more); the
+# builder's state is cached, so later builds rebuild what changed.
+name: Flatpak
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write  # create releases
+
+concurrency:
+  group: flatpak-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  flatpak:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    steps:
+      - name: Free disk space
+        # The GNOME SDK (6 GB), the builder's state (4 GB) and repo (2.5 GB) don't fit
+        # in a runner's ~14 GB free; drop toolchains this job never uses.
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL \
+            /usr/local/share/boost /usr/local/.ghcup /usr/share/swift /usr/local/share/powershell
+          sudo docker image prune --all --force > /dev/null || true
+          df -h /
+
+      - name: Allow sandboxes
+        # Ubuntu 24.04 restricts unprivileged user namespaces with AppArmor; flatpak-builder
+        # runs every build step in a bubblewrap sandbox, which needs them.
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      - name: Install flatpak-builder
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q flatpak flatpak-builder
+          flatpak-builder --version
+
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Read the fork pin
+        id: fork
+        run: echo "commit=$(python3 -c 'import json; print(json.load(open("packaging/flatpak/fork.json"))["commit"])')" >> "$GITHUB_OUTPUT"
+
+      - name: Check out the GIMP fork (for its upstream manifest)
+        uses: actions/checkout@v4
+        with:
+          repository: imattau/imanganation-gimp
+          ref: ${{ steps.fork.outputs.commit }}
+          path: imanganation-gimp
+
+      - name: Restore the builder's state
+        uses: actions/cache/restore@v4
+        with:
+          path: packaging/flatpak/.build/state
+          key: flatpak-state-${{ github.run_id }}
+          restore-keys: flatpak-state-
+
+      - name: Build
+        env:
+          FLATPAK_BUILDER_ARGS: --disable-rofiles-fuse
+        run: packaging/flatpak/build.sh --fork-pinned
+
+      - name: Save the builder's state
+        # main and tags only, so pull requests don't evict it (the cache holds 10 GB)
+        if: always() && github.event_name != 'pull_request'
+        uses: actions/cache/save@v4
+        with:
+          path: packaging/flatpak/.build/state
+          key: flatpak-state-${{ github.run_id }}
+
+      - name: Name the bundle
+        id: bundle
+        run: |
+          version="${GITHUB_REF_NAME}"
+          [[ "$GITHUB_REF" == refs/tags/v* ]] || version="$(git rev-parse --short HEAD)"
+          file="dist/imanganation-${version}.flatpak"
+          mv dist/imanganation-gimp.flatpak "$file"
+          echo "file=$file" >> "$GITHUB_OUTPUT"
+          ls -la dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: imanganation-flatpak
+          path: ${{ steps.bundle.outputs.file }}
+          retention-days: 14
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORK: ${{ steps.fork.outputs.commit }}
+          BUNDLE: ${{ steps.bundle.outputs.file }}
+        run: |
+          cat > release-notes.md <<EOF
+          ## Install
+
+          \`\`\`bash
+          flatpak install --user $(basename "$BUNDLE")
+          \`\`\`
+
+          Start **Imanganation** from your app menu. **Imanganation → Set Up Models…** opens
+          by itself and downloads the renderer (ComfyUI and PyTorch for your GPU, about 5.5 GB
+          on disk) and the models (about 15 GB), or links models you already have.
+          Needs a GPU with about 12 GB of VRAM; NVIDIA needs Flatpak's NVIDIA driver extension
+          (Flatpak installs it to match your driver).
+
+          ## Source
+
+          - Imanganation (engine, plug-in, packaging): ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/tree/${GITHUB_SHA}
+          - GIMP fork (GPL-3.0): https://github.com/imattau/imanganation-gimp/tree/${FORK}
+          EOF
+          gh release create "$GITHUB_REF_NAME" "$BUNDLE" --title "Imanganation $GITHUB_REF_NAME" \
+            --notes-file release-notes.md --verify-tag

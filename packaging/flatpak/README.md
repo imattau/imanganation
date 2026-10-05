@@ -68,6 +68,21 @@ later builds reuse the cache in `packaging/flatpak/.build/` and recompile only w
 changed (the engine module always: its sources are directories, which flatpak-builder
 can't checksum, so it comes last).
 
+### CI and releases
+
+`.github/workflows/flatpak.yml` builds the Flatpak on GitHub: on pushes to `main` and
+pull requests (the bundle is a downloadable artifact of the run), on demand from the
+Actions tab, and for a version tag, where it also creates a GitHub Release with the
+bundle attached:
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0
+```
+
+CI builds the fork commit `fork.json` pins (`build.sh --fork-pinned`), not the fork's
+latest: bump the pin when the fork changes. The builder's state is cached between runs
+(main and tags only); the first build compiles everything and takes an hour or more.
+
 `make_manifest.py` writes the manifest (`.build/<app id>.json`) from the fork's own
 upstream manifest (`imanganation-gimp/build/linux/flatpak/org.gimp.GIMP-nightly.json`),
 so GIMP's dependency list follows the fork as it merges upstream. It changes:

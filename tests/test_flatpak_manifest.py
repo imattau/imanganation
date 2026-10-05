@@ -173,3 +173,12 @@ def test_the_patch_is_a_real_diff_of_the_pinned_file(tmp_path):
     text = patch.read_text()
     assert text.startswith(f"--- a/{PATCHES[0].file}\n+++ b/{PATCHES[0].file}\n")
     assert "+        self.return_all_hidden_states = True" in text
+
+
+
+def test_ci_builds_the_pinned_fork_commit():
+    pin = json.loads((ROOT / "packaging/flatpak/fork.json").read_text())
+    assert pin["repo"] == "https://github.com/imattau/imanganation-gimp.git"
+    assert len(pin["commit"]) == 40 and int(pin["commit"], 16) >= 0
+    script = (ROOT / "packaging/flatpak/make_manifest.py").read_text()
+    assert "--fork-pinned" in script

@@ -10,8 +10,8 @@ fork's GIMP version needs, and changes only what makes it ours:
 - **Meson and CMake modules** install into ``lib`` (they default to ``lib64`` here).
 - **babl / GEGL:** pinned to the releases the fork is tested with (upstream builds
   their moving git master).
-- **GIMP:** the fork at a commit: the local checkout's HEAD (default), or a pushed one
-  (``--fork-git``). flatpak-builder caches git sources by commit; a ``dir`` source it
+- **GIMP:** the fork at a commit: the local checkout's HEAD (default), a pushed one
+  (``--fork-git``), or the one ``fork.json`` pins (``--fork-pinned``: CI and releases). flatpak-builder caches git sources by commit; a ``dir`` source it
   can't checksum, so GIMP would rebuild every time. ``--fork-worktree`` builds the
   checkout as it is, uncommitted changes included, for testing them.
 - **The Imanganation plug-in**, installed with GIMP (``lib/gimp/3.0/plug-ins``), and
@@ -237,12 +237,17 @@ def main() -> None:
                         help="local fork checkout (default: ./imanganation-gimp)")
     parser.add_argument("--fork-git", help="build the fork from this git URL instead")
     parser.add_argument("--fork-commit", help="the commit to build (with --fork-git)")
+    parser.add_argument("--fork-pinned", action="store_true",
+                        help="build the fork commit fork.json pins, from GitHub (CI, releases)")
     parser.add_argument("--fork-worktree", action="store_true",
                         help="build the local fork as it is, uncommitted changes included "
                         "(rebuilds GIMP every time)")
     parser.add_argument("--app-id", default=APP_ID)
     parser.add_argument("--out", type=Path, default=HERE / ".build" / f"{APP_ID}.json")
     args = parser.parse_args()
+    if args.fork_pinned:
+        pin = json.loads((HERE / "fork.json").read_text())
+        args.fork_git, args.fork_commit = pin["repo"], pin["commit"]
     if bool(args.fork_git) != bool(args.fork_commit):
         parser.error("--fork-git and --fork-commit go together")
     upstream_file = (args.fork / "build/linux/flatpak/org.gimp.GIMP-nightly.json")

@@ -2,7 +2,8 @@
 # Build the Imanganation GIMP Flatpak and a single-file bundle to hand to users.
 #   packaging/flatpak/build.sh [--install] [make_manifest.py options...]
 # The fork is built at its checkout's HEAD (committed code only, cached by commit);
-# --fork-worktree builds it as it is, --fork-git/--fork-commit a pushed commit.
+# --fork-worktree builds it as it is, --fork-git/--fork-commit a pushed commit, and
+# --fork-pinned the commit fork.json pins (what CI and releases build).
 # Needs flatpak and flatpak-builder. The first build downloads the GNOME SDK (~1 GB)
 # and compiles GIMP's dependencies, which takes a while; later builds reuse the cache.
 # Output: dist/imanganation-gimp.flatpak   (install: flatpak install --user <file>)
@@ -25,8 +26,10 @@ MANIFEST="$(cd "$ROOT" && uv run -q python "$HERE/make_manifest.py" ${ARGS[@]+"$
 APP_ID="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["app-id"])' "$MANIFEST")"
 BRANCH="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["branch"])' "$MANIFEST")"
 
+# FLATPAK_BUILDER_ARGS: extra options (CI passes --disable-rofiles-fuse).
+# shellcheck disable=SC2086
 flatpak-builder --user --install-deps-from=flathub --force-clean --ccache \
-  --state-dir="$BUILD/state" --repo="$BUILD/repo" \
+  --state-dir="$BUILD/state" --repo="$BUILD/repo" ${FLATPAK_BUILDER_ARGS:-} \
   ${INSTALL[@]+"${INSTALL[@]}"} \
   "$BUILD/app" "$MANIFEST"
 
