@@ -165,3 +165,110 @@ def test_cli_check_reports_missing_files_and_exits_nonzero(tmp_path, monkeypatch
     assert "missing" in result.output and "to download" in result.output
     assert "FAIR AI Public License" in result.output
     assert not Path(tmp_path / "models").exists()  # --check changes nothing
+
+
+# --- the engine's /setup endpoints --------------------------------------------
+
+
+def _wait(client, until=lambda t: t["state"] != "running"):
+    import time
+
+    for _ in range(200):
+        report = client.get("/setup").json()
+        if until(report["task"]):
+            return report
+        time.sleep(0.01)
+    raise AssertionError("setup task did not finish")
+
+
+def _app(tmp_path, models, *, fetch=None, find=None):
+    from fastapi.testclient import TestClient
+
+    from manganation.web.api import create_app
+
+    runner = ms.SetupRunner(tmp_path / "models", lambda: models, fetch=fetch, find=find,
+                            comfy_paths=tmp_path / "paths.yaml")
+    return TestClient(create_app(render=lambda *a, **k: None, root=tmp_path,
+                                 setup_runner=runner))
+
+
+def _fake_fetch(model, root, progress=None):
+    path = model.path(root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(PAYLOAD)
+    if progress:
+        progress(len(PAYLOAD), len(PAYLOAD))
+    return path
+
+
+def test_setup_reports_then_downloads_what_is_missing(tmp_path):
+    client = _app(tmp_path, [_model()], fetch=_fake_fetch)
+    report = client.get("/setup").json()
+    assert not report["ready"] and report["missing_bytes"] == len(PAYLOAD)
+    row = report["models"][0]
+    assert (row["state"], row["downloadable"], row["feature"]) == ("missing", True, "rendering")
+
+    started = client.post("/setup/download", json={})
+    assert started.status_code == 202 and started.json()["kind"] == "download"
+    report = _wait(client)
+    assert report["task"]["state"] == "done" and report["task"]["finished"] == ["m.safetensors"]
+    assert report["task"]["done"] == len(PAYLOAD)
+    assert report["ready"] and report["models"][0]["state"] == "present"
+    assert report["comfy_paths_changed"]  # ComfyUI's paths now name this models folder
+    assert str((tmp_path / "models").resolve()) in (tmp_path / "paths.yaml").read_text()
+
+
+def test_one_setup_task_at_a_time_and_cancel_keeps_the_part(tmp_path):
+    import threading
+
+    release = threading.Event()
+
+    def slow_fetch(model, root, progress=None):
+        while not release.wait(0.01):
+            progress(1, model.size)  # raises Cancelled once cancel is asked
+
+    client = _app(tmp_path, [_model()], fetch=slow_fetch)
+    client.post("/setup/download", json={})
+    assert client.post("/setup/download", json={}).status_code == 409
+    assert client.post("/setup/link", json={"folders": [str(tmp_path)]}).status_code == 409
+    client.post("/setup/cancel")
+    report = _wait(client)
+    release.set()
+    assert report["task"]["state"] == "cancelled" and not report["ready"]
+
+
+def test_failed_downloads_are_reported_and_others_continue(tmp_path):
+    second = ms.ModelFile(role="upscaler", feature="hi-res", file="u.pth",
+                          subdir="upscale_models", size=len(PAYLOAD),
+                          sha256=hashlib.sha256(PAYLOAD).hexdigest(), urls=["https://x/u"])
+
+    def fetch(model, root, progress=None):
+        if model.file == "m.safetensors":
+            raise ms.SetupError("could not download m.safetensors: HTTP 503")
+        return _fake_fetch(model, root, progress)
+
+    client = _app(tmp_path, [_model(), second], fetch=fetch)
+    client.post("/setup/download", json={})
+    report = _wait(client)
+    assert report["task"]["state"] == "error"
+    assert report["task"]["finished"] == ["u.pth"]
+    assert "HTTP 503" in report["task"]["errors"][0]
+
+
+def test_setup_refuses_a_download_that_does_not_fit(tmp_path, monkeypatch):
+    monkeypatch.setattr(ms, "free_bytes", lambda root: 10)
+    response = _app(tmp_path, [_model()], fetch=_fake_fetch).post("/setup/download", json={})
+    assert response.status_code == 507 and "disk space" in response.json()["detail"]
+
+
+def test_setup_links_files_the_user_already_has(tmp_path):
+    library = tmp_path / "ComfyUI"
+    library.mkdir()
+    (library / "whatever.safetensors").write_bytes(PAYLOAD)
+    client = _app(tmp_path, [_model()])
+    assert client.post("/setup/link", json={"folders": [str(tmp_path / "nope")]}
+                       ).status_code == 400
+    client.post("/setup/link", json={"folders": [str(library)]})
+    report = _wait(client)
+    assert report["task"]["state"] == "done" and report["ready"]
+    assert report["task"]["finished"] == ["m.safetensors (hard link)"]

@@ -300,3 +300,143 @@ def _base_path(text: str) -> str | None:
         if key == "base_path":
             return value.strip()
     return None
+
+
+# --- background runner (the engine's /setup endpoints) ---------------------------
+
+
+class Cancelled(Exception):
+    """Raised from a progress callback to stop a download; its .part is kept."""
+
+
+class SetupRunner:
+    """One setup task at a time (a download run or a link search) in a background
+    thread, so the engine stays responsive and the GIMP dialog can poll progress.
+    Downloads don't use the GPU, so they run beside renders, not in the job queue.
+
+    ``models`` returns the needed ModelFiles (re-read each time, so a settings change
+    shows up); ``comfy_paths`` is ComfyUI's extra-model-paths file, rewritten for
+    ``root`` when a task starts (``comfy_paths_changed`` then asks for a restart)."""
+
+    def __init__(self, root: Path, models: Callable[[], list[ModelFile]], *,
+                 comfy_paths: Path | None = None, fetch=None, find=None):
+        import threading
+
+        self.root = Path(root)
+        self.models = models
+        self.comfy_paths = comfy_paths
+        self._fetch = fetch or download
+        self._find = find or find_existing
+        self._lock = threading.Lock()
+        self._cancel = threading.Event()
+        self._thread = None
+        self._task = {"kind": None, "state": "idle"}
+        self.comfy_paths_changed = False
+
+    # -- reading
+    def report(self) -> dict:
+        models = self.models()
+        with self._lock:
+            task = dict(self._task)
+        rows = [{"role": m.role, "feature": m.feature, "file": m.file, "size": m.size,
+                 "state": state(m, self.root), "license": m.license,
+                 "license_url": m.license_url, "downloadable": bool(m.urls),
+                 "note": m.note} for m in models]
+        missing = [r for r in rows if r["state"] != "present"]
+        return {"models_dir": str(self.root), "free_bytes": free_bytes(self.root),
+                "models": rows, "missing_bytes": sum(r["size"] or 0 for r in missing
+                                                    if r["downloadable"]),
+                "ready": not missing, "task": task,
+                "comfy_paths_changed": self.comfy_paths_changed}
+
+    def busy(self) -> bool:
+        return self._thread is not None and self._thread.is_alive()
+
+    # -- starting
+    def start_download(self, roles: list[str] | None = None) -> dict:
+        todo = [m for m in self.models() if state(m, self.root) != "present" and m.urls
+                and (roles is None or m.role in roles)]
+        total = sum(m.size or 0 for m in todo)
+        if total > free_bytes(self.root):
+            raise SetupError(f"not enough disk space: {total / 1e9:.1f} GB needed, "
+                             f"{free_bytes(self.root) / 1e9:.1f} GB free")
+        return self._start("download", lambda: self._download(todo), files=len(todo),
+                           total=total)
+
+    def start_link(self, folders: list[Path]) -> dict:
+        for folder in folders:
+            if not Path(folder).expanduser().is_dir():
+                raise SetupError(f"not a folder: {folder}")
+        todo = [m for m in self.models() if state(m, self.root) != "present"]
+        return self._start("link", lambda: self._link(todo, folders),
+                           folders=[str(f) for f in folders])
+
+    def cancel(self) -> dict:
+        self._cancel.set()
+        return self.report()["task"]
+
+    def _start(self, kind: str, work: Callable[[], None], **info) -> dict:
+        import threading
+
+        with self._lock:
+            if self.busy():
+                raise SetupError(f"a {self._task['kind']} is already running")
+            self._cancel.clear()
+            self._task = {"kind": kind, "state": "running", "current": None, "done": 0,
+                          "file_done": 0, "file_total": 0, "finished": [], "errors": [],
+                          **info}
+            self._thread = threading.Thread(target=self._run, args=(work,), daemon=True,
+                                            name=f"setup-{kind}")
+            self._thread.start()
+            return dict(self._task)
+
+    def _run(self, work: Callable[[], None]) -> None:
+        if self.comfy_paths is not None:
+            try:
+                if write_comfy_paths(self.comfy_paths, self.root):
+                    self.comfy_paths_changed = True
+            except OSError as exc:
+                self._update(errors=[*self._task["errors"],
+                                     f"could not write {self.comfy_paths}: {exc}"])
+        try:
+            work()
+            outcome = "cancelled" if self._cancel.is_set() else (
+                "error" if self._task["errors"] else "done")
+        except Exception as exc:  # noqa: BLE001 - reported to the dialog, never lost
+            self._update(errors=[*self._task["errors"], str(exc)])
+            outcome = "error"
+        self._update(state=outcome, current=None)
+
+    def _update(self, **changes) -> None:
+        with self._lock:
+            self._task = {**self._task, **changes}
+
+    # -- work
+    def _download(self, todo: list[ModelFile]) -> None:
+        before = 0
+        for m in todo:  # most useful first
+            if self._cancel.is_set():
+                return
+            self._update(current=m.file, file_done=0, file_total=m.size or 0)
+
+            def progress(done, total, before=before):
+                if self._cancel.is_set():
+                    raise Cancelled
+                self._update(file_done=done, file_total=total, done=before + done)
+
+            try:
+                self._fetch(m, self.root, progress=progress)
+            except Cancelled:
+                return
+            except SetupError as exc:
+                self._update(errors=[*self._task["errors"], str(exc)])
+            else:
+                self._update(finished=[*self._task["finished"], m.file])
+            before += m.size or 0
+
+    def _link(self, todo: list[ModelFile], folders: list[Path]) -> None:
+        self._update(current="searching for matching files…")
+        for role, found in self._find(todo, folders).items():
+            model = next(m for m in todo if m.role == role)
+            how = link_into_place(found, model.path(self.root))
+            self._update(finished=[*self._task["finished"], f"{model.file} ({how})"])

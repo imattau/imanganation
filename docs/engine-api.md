@@ -155,6 +155,31 @@ locked as the `base` reference. The result has `name`, `created`, `appearance`,
 keeps them) and the sheet is added as a new version (`design-02`, …) and made active;
 earlier designs are kept. No description and no traits is a `422`.
 
+## Models: `/setup`
+
+The engine fetches its own models (`src/manganation/models_setup.py`, also behind
+`manganation setup`). One setup task runs at a time, in a background thread beside
+renders (downloads don't use the GPU).
+
+- `GET /setup` → `{"models_dir", "free_bytes", "missing_bytes", "ready",
+  "models": [{"role", "feature", "file", "size", "state", "license", "license_url",
+  "downloadable", "note"}], "task", "comfy_paths_changed"}`. `state` is `present`,
+  `missing`, `wrong size` or `unknown`. `task` is the running or last task:
+  `{"kind": "download"|"link", "state": "running"|"done"|"error"|"cancelled",
+  "current", "done", "total", "file_done", "file_total", "finished", "errors"}`.
+- `POST /setup/download` `{"roles": [...]}` (optional; default all missing) → `202`
+  with the task. Most useful first; each file is hashed and only moved into place when
+  its SHA-256 matches; a failed file is reported and the rest continue. `409` while a
+  task runs, `507` without the disk space.
+- `POST /setup/link` `{"folders": [...]}` → `202`: search folders of models the user
+  already has (by size, then SHA-256) and hard-link (else symlink) matches in. `400`
+  for a path that isn't a folder.
+- `POST /setup/cancel`: stop the download; the partial file is kept and the next
+  download resumes it.
+
+Starting a task also points ComfyUI's `config/comfyui_extra_model_paths.yaml` at the
+models folder; `comfy_paths_changed` then says ComfyUI needs a restart.
+
 ## Paths in container forms
 
 `source`, `mask` and `image_path` must be existing files under the projects root
@@ -170,6 +195,7 @@ earlier designs are kept. No description and no traits is a `422`.
 | `GET /characters` | The cast, by `project` or legacy `project_dir` |
 | `POST /characters/reference` | Register an image as a character's new active reference version |
 | `DELETE /characters` | Remove a character; their designs move to `characters/.deleted/` |
+| `GET /setup`, `POST /setup/download\|link\|cancel` | Model files: state, download, link existing, pause |
 | `GET /status` | ComfyUI/GPU health, running/queued/recent jobs (by project + panel id), missing models |
 | `GET /health` | Liveness |
 

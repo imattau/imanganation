@@ -174,6 +174,15 @@ the top-level *Imanganation* menu:
   cursor). The script's page numbers only show up in a note like "the script starts a
   new page here". They never restrict which image a panel goes into.
 - **Place Panel…**: places any PNG manually.
+- **Set Up Models…**: the AI models aren't included with the app. This lists the files
+  the engine needs (what each is for, size, state, a link to its licence), with
+  **Download** for the missing ones, checkpoint first, and **Use Files I Have…** to
+  link matching files from a ComfyUI or A1111 folder (found by content, no extra disk
+  space). The dialog isn't modal: downloads run in the engine, it shows their progress
+  while you work, **Pause Download** keeps the partial file, and Download resumes it.
+  It opens by itself at startup when the checkpoint is missing (rendering can't work
+  without it). Engine: `GET /setup`, `POST /setup/download|link|cancel`; the same
+  module as `manganation setup`.
 - **Engine Status…**: one click, no dialog. Shows engine and ComfyUI health (GPU, free
   VRAM), running jobs with elapsed time, queued jobs, recent jobs with their errors,
   missing model files for the current settings, and the image's project progress

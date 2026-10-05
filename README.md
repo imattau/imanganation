@@ -90,6 +90,8 @@ missing, checkpoint first so you can render as soon as it lands:
 - `--check` only reports; `--verify` re-hashes files already in place; `-y` skips the
   question. `HF_TOKEN` and `HF_ENDPOINT` (a Hugging Face mirror) are honoured.
 - Setup also points `config/comfyui_extra_model_paths.yaml` at your models folder.
+- In GIMP the same thing is **Imanganation → Set Up Models…**, which opens by itself on
+  first start when the checkpoint is missing.
 
 ## GIMP (the interface)
 

@@ -56,6 +56,7 @@ from gi.repository import (  # noqa: E402
 try:
     import bubbles as bubble_templates
     import lettering
+    import setup_ui
     from layouts import frame_rings, layout_preview_rgb, page_layout_availability
     from panel_ui import _panel_label as panel_label
     from panel_ui import build_docks, build_welcome_docks, character_row_id, rgb_png
@@ -76,7 +77,7 @@ try:
 except ImportError:  # Keep older single-file plug-in installs usable for legacy projects.
     ProjectFileError = ValueError
     project_from_script = parse_script_text = script_looks_canonical = None
-    lettering = bubble_templates = None
+    lettering = bubble_templates = setup_ui = None
     load_project = record_take = save_project = apply_field_edit = None
     delete_character = None
     new_id = None
@@ -99,6 +100,7 @@ PROC_PROJECT_DOCKS = "plug-in-imanganation-project-docks"
 PROC_PAGE_LAYOUT = "plug-in-imanganation-page-layout"
 PROC_AUTOSTART = "extension-imanganation-ui"
 PROC_NEW_PROJECT = "plug-in-imanganation-new-project"
+PROC_SETUP_MODELS = "plug-in-imanganation-setup-models"
 DOCK_PROJECT = "project"
 DOCK_INSPECTOR = "inspector"
 DOCK_FILMSTRIP = "filmstrip"
@@ -119,6 +121,7 @@ DOCK_ACTIONS = {
 DOCK_OPEN_PROJECT = "plug-in-imanganation-dock-open-project"
 DOCK_OPEN_PAGE = "plug-in-imanganation-dock-open-page"  # Context's "Open page" button
 DOCK_NEW_PROJECT = "plug-in-imanganation-dock-new-project"
+DOCK_SETUP_MODELS = "plug-in-imanganation-dock-setup-models"  # the workspace shows it
 DOCK_DESIGN_CHARACTER = "plug-in-imanganation-dock-design-character"
 # Project tree right-click menus (one-string procedures: the row id)
 DOCK_NEW_CHARACTER = "plug-in-imanganation-dock-new-character"
@@ -2363,6 +2366,8 @@ def _dock_action(procedure, config, data):
                 return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
         elif data == "design-character":
             _design_selected_character()
+        elif data == "setup-models":
+            _show_setup_dialog()
         else:
             _refresh_project_docks()
         return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
@@ -2804,6 +2809,178 @@ def _dock_page_menu(procedure, config, data):
     return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
 
 
+def _setup_models_run(procedure, config, data):
+    """Imanganation > Set Up Models: the workspace shows the dialog (it keeps polling
+    the engine's download progress while you work)."""
+    try:
+        _dock_pdb_call(DOCK_SETUP_MODELS, {})
+    except Exception:
+        return _error(procedure, "The Imanganation workspace is not running; restart GIMP "
+                                 "to start it")
+    return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+
+
+_SETUP_DIALOG = {}  # the open Set Up Models dialog's widgets, while it's shown
+
+
+def _setup_report():
+    """GET /setup, or None while the engine isn't answering."""
+    try:
+        return _http("GET", f"{ENGINE_URL}/setup", timeout=3)
+    except EngineError:
+        return None
+
+
+def _show_setup_dialog():
+    """Set Up Models: what's missing, licences, Download / Use Files I Have / Cancel.
+    Not modal: downloads run in the engine, and the dialog polls them every second."""
+    if setup_ui is None:
+        raise ValueError("This plug-in install is missing setup_ui.py")
+    if _SETUP_DIALOG:
+        _SETUP_DIALOG["dialog"].present()
+        return
+    dialog = Gtk.Dialog(title="Set Up Models")
+    dialog.set_default_size(620, -1)
+    box = dialog.get_content_area()
+    box.set_spacing(8)
+    box.set_border_width(12)
+    intro = Gtk.Label(label=setup_ui.INTRO, xalign=0.0, wrap=True, max_width_chars=72)
+    box.pack_start(intro, False, False, 0)
+    grid = Gtk.Grid(column_spacing=12, row_spacing=4, margin_top=4)
+    box.pack_start(grid, False, False, 0)
+    headline = Gtk.Label(xalign=0.0, wrap=True, max_width_chars=72)
+    headline.get_style_context().add_class("heading")
+    box.pack_start(headline, False, False, 0)
+    bar = Gtk.ProgressBar(show_text=True, no_show_all=True)
+    box.pack_start(bar, False, False, 0)
+    details = Gtk.Label(xalign=0.0, wrap=True, max_width_chars=72, selectable=True)
+    box.pack_start(details, False, False, 0)
+    licence = Gtk.Label(xalign=0.0, wrap=True, max_width_chars=72)
+    licence.get_style_context().add_class("dim-label")
+    box.pack_start(licence, False, False, 0)
+
+    link_button = dialog.add_button("Use Files I Have…", 1)
+    cancel_button = dialog.add_button("Pause Download", 2)
+    download_button = dialog.add_button("Download", 3)
+    dialog.add_button("Close", Gtk.ResponseType.CLOSE)
+    widgets = {"dialog": dialog, "grid": grid, "headline": headline, "bar": bar,
+               "details": details, "licence": licence, "link": link_button,
+               "cancel": cancel_button, "download": download_button, "rows": None}
+
+    def post(path, body):
+        try:
+            _http("POST", f"{ENGINE_URL}{path}", body, timeout=10)
+        except EngineError as exc:
+            Gimp.message(f"Set Up Models: {exc}")
+        refresh()
+
+    def on_response(_dialog, response):
+        if response == 1:
+            folder = _choose_models_folder(dialog)
+            if folder is not None:
+                post("/setup/link", {"folders": [str(folder)]})
+        elif response == 2:
+            post("/setup/cancel", {})
+        elif response == 3:
+            post("/setup/download", {})
+        else:
+            dialog.destroy()
+
+    def refresh():
+        if not _SETUP_DIALOG:
+            return False  # closed: stop polling
+        _update_setup_dialog(widgets, _setup_report())
+        return True
+
+    def on_destroy(_widget):
+        _SETUP_DIALOG.clear()
+
+    dialog.connect("response", on_response)
+    dialog.connect("destroy", on_destroy)
+    _SETUP_DIALOG.update(widgets)
+    refresh()
+    dialog.show_all()
+    GLib.timeout_add_seconds(1, refresh)
+
+
+def _update_setup_dialog(widgets, report):
+    """Fill the dialog from a GET /setup report (None: the engine isn't answering)."""
+    actions = setup_ui.actions(report)
+    widgets["download"].set_label(actions["download"])
+    widgets["download"].set_sensitive(actions["download_enabled"])
+    widgets["link"].set_sensitive(actions["link_enabled"])
+    widgets["cancel"].set_sensitive(actions["cancel_enabled"])
+    if report is None:
+        widgets["headline"].set_text("Waiting for the Imanganation engine to start…")
+        widgets["details"].set_text("")
+        widgets["bar"].hide()
+        return
+    grid, task = widgets["grid"], report.get("task") or {}
+    rows = report.get("models", [])
+    if widgets["rows"] is None or len(widgets["rows"]) != len(rows):
+        for child in grid.get_children():
+            grid.remove(child)
+        widgets["rows"] = []
+        for index, row in enumerate(rows):
+            feature = Gtk.Label(label=row.get("feature") or row.get("role"), xalign=0.0,
+                                hexpand=True, wrap=True, max_width_chars=34)
+            size = Gtk.Label(label=setup_ui.human_size(row.get("size")), xalign=1.0)
+            state = Gtk.Label(xalign=0.0)
+            licence = (Gtk.LinkButton.new_with_label(row["license_url"], "Licence")
+                       if row.get("license_url") else Gtk.Label(label=""))
+            licence.set_tooltip_text(row.get("license") or "")
+            for column, widget in enumerate((feature, size, state, licence)):
+                grid.attach(widget, column, index, 1, 1)
+            widgets["rows"].append(state)
+        grid.show_all()
+    for label, row in zip(widgets["rows"], rows, strict=True):
+        label.set_text(setup_ui.row_state(row, task))
+    widgets["headline"].set_text(setup_ui.headline(report))
+    fraction, text = setup_ui.progress(report)
+    if text:
+        if fraction < 0:
+            widgets["bar"].pulse()
+        else:
+            widgets["bar"].set_fraction(fraction)
+        widgets["bar"].set_text(text)
+        widgets["bar"].show()
+    else:
+        widgets["bar"].hide()
+    widgets["details"].set_text("\n".join(setup_ui.details(report)))
+    widgets["licence"].set_text(setup_ui.licence_note(report))
+
+
+def _choose_models_folder(parent):
+    dialog = Gtk.FileChooserDialog(
+        title="Folder of Models You Already Have", action=Gtk.FileChooserAction.SELECT_FOLDER,
+        transient_for=parent)
+    dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+                       "Use This Folder", Gtk.ResponseType.ACCEPT)
+    dialog.set_modal(True)
+    dialog.set_current_folder(str(Path.home()))
+    response = dialog.run()
+    filename = dialog.get_filename() if response == Gtk.ResponseType.ACCEPT else None
+    dialog.destroy()
+    return Path(filename) if filename else None
+
+
+def _prompt_setup_when_engine_up(deadline):
+    """At startup, once the engine answers: open Set Up Models if rendering can't work
+    yet (no checkpoint). Gives up quietly after ``deadline``."""
+    def poll():
+        report = _setup_report()
+        if report is None:
+            return time.monotonic() < deadline  # keep waiting while the engine starts
+        if setup_ui is not None and setup_ui.should_prompt(report):
+            try:
+                _show_setup_dialog()
+            except Exception as exc:  # never break the workspace over this
+                Gimp.message(f"Could not open Set Up Models: {exc}")
+        return False
+
+    GLib.timeout_add_seconds(3, poll)
+
+
 def _new_project_run(procedure, config, data):
     """File > Create > New Project from Script: the extension shows the dialog."""
     try:
@@ -3096,6 +3273,7 @@ def _add_dock_callbacks(plugin):
         (DOCK_ITEMS[DOCK_INSPECTOR], _dock_field_edit, "field", True),
         (DOCK_OPEN_PAGE, _dock_action, "open-page", False),
         (DOCK_NEW_PROJECT, _dock_action, "new-project", False),
+        (DOCK_SETUP_MODELS, _dock_action, "setup-models", False),
         (DOCK_DESIGN_CHARACTER, _dock_action, "design-character", False),
         (DOCK_NEW_CHARACTER, _dock_character_menu, "new", True),
         (DOCK_DESIGN_CHARACTER_ITEM, _dock_character_menu, "design", True),
@@ -3251,6 +3429,7 @@ def _autostart_run(procedure, config, data):
                                  orphan_id=None, candidate_id=None)
         _add_dock_callbacks(_DOCK_PLUGIN)
         _start_engine_services()
+        _prompt_setup_when_engine_up(time.monotonic() + 180)
         GLib.timeout_add(1000, _watch_canvas_selection)
         _register_project_docks(_DOCK_PLUGIN)
     except Exception as exc:
@@ -3268,7 +3447,7 @@ class Imanganation(Gimp.PlugIn):
     def do_query_procedures(self):
         return [PROC_RENDER, PROC_NEXT, PROC_REGEN, PROC_INPAINT, PROC_REFINE, PROC_SETREF,
                 PROC_PLACE, PROC_STATUS, PROC_PROJECT_DOCKS, PROC_PAGE_LAYOUT, PROC_AUTOSTART,
-                PROC_NEW_PROJECT, *DOCK_SHOW.values()]
+                PROC_NEW_PROJECT, PROC_SETUP_MODELS, *DOCK_SHOW.values()]
 
     def do_create_procedure(self, name):
         global _DOCK_PLUGIN
@@ -3307,6 +3486,20 @@ class Imanganation(Gimp.PlugIn):
                 "New Imanganation project from a script",
                 "Build a project (panels, pages, cast, locations) from a script and "
                 "design its characters.", name)
+            proc.set_attribution("imanganation", "imanganation", "2026")
+            return proc
+        if name == PROC_SETUP_MODELS:
+            proc = Gimp.Procedure.new(
+                self, name, Gimp.PDBProcType.PLUGIN, _setup_models_run, None)
+            proc.set_menu_label("Set Up _Models...")
+            proc.add_enum_argument("run-mode", "Run mode", "How to run the procedure",
+                                   Gimp.RunMode, Gimp.RunMode.INTERACTIVE,
+                                   GObject.ParamFlags.READWRITE)
+            proc.add_menu_path("<Image>/Imanganation")
+            proc.set_documentation(
+                "Download or link Imanganation's AI models",
+                "Show which model files the engine needs, their licences and state; "
+                "download the missing ones or link files you already have.", name)
             proc.set_attribution("imanganation", "imanganation", "2026")
             return proc
         if name == PROC_PROJECT_DOCKS:

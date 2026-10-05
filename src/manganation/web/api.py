@@ -175,6 +175,14 @@ class CharacterRequest(BaseModel):
         return self
 
 
+class SetupDownloadRequest(BaseModel):
+    roles: list[str] | None = Field(default=None, description="Only these (default: all missing)")
+
+
+class SetupLinkRequest(BaseModel):
+    folders: list[str] = Field(min_length=1, description="Folders of models you already have")
+
+
 class ScriptParseRequest(BaseModel):
     """A script as text. Page/panel scripts parse instantly; prose goes through the
     LLM (queued like any job, so it never shares the GPU with a render)."""
@@ -255,6 +263,7 @@ def create_app(
     outputs: Path | None = None,
     design_character=None,
     parse_script=None,
+    setup_runner=None,
 ) -> FastAPI:
     app = FastAPI(title="imanganation engine")
     jobs: dict[str, Job] = {}
@@ -307,6 +316,61 @@ def create_app(
             except IdentityError as exc:
                 raise HTTPException(400, str(exc)) from exc
         return CharacterRegistry.from_path(resolve_project(project_dir, root))
+
+    setup_state: dict = {}
+
+    def setup():
+        """The model setup runner (models_setup.SetupRunner), made on first use."""
+        if setup_runner is not None:
+            return setup_runner
+        if "runner" not in setup_state:
+            from manganation import models_setup
+            from manganation.config import CONFIG_DIR, REPO_ROOT, load_models, load_settings
+
+            settings = load_settings()
+            setup_state["runner"] = models_setup.SetupRunner(
+                REPO_ROOT / settings.paths.models_dir,
+                lambda: models_setup.needed(load_settings(), load_models()),
+                comfy_paths=CONFIG_DIR / "comfyui_extra_model_paths.yaml")
+        return setup_state["runner"]
+
+    @app.get("/setup")
+    def setup_report() -> dict:
+        """Model files the settings need and their state, free disk space, and the
+        running setup task (a download or a link search) with its progress."""
+        return setup().report()
+
+    @app.post("/setup/download", status_code=202)
+    def setup_download(req: SetupDownloadRequest) -> dict:
+        """Download the missing model files in the background, most useful first.
+        Poll GET /setup. 409 while another setup task runs; 507 without disk space."""
+        from manganation.models_setup import SetupError
+
+        runner = setup()
+        if runner.busy():
+            raise HTTPException(409, "a setup task is already running")
+        try:
+            return runner.start_download(req.roles)
+        except SetupError as exc:
+            raise HTTPException(507 if "disk space" in str(exc) else 409, str(exc)) from exc
+
+    @app.post("/setup/link", status_code=202)
+    def setup_link(req: SetupLinkRequest) -> dict:
+        """Search folders of models the user already has; link matching files in."""
+        from manganation.models_setup import SetupError
+
+        runner = setup()
+        if runner.busy():
+            raise HTTPException(409, "a setup task is already running")
+        try:
+            return runner.start_link([Path(f) for f in req.folders])
+        except SetupError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @app.post("/setup/cancel")
+    def setup_cancel() -> dict:
+        """Stop the running download; finished files stay, the current one resumes later."""
+        return setup().cancel()
 
     @app.get("/health")
     def health() -> dict:
