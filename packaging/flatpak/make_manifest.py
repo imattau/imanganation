@@ -10,18 +10,29 @@ fork's GIMP version needs, and changes only what makes it ours:
 - **babl / GEGL:** pinned to the releases the fork is tested with (upstream builds
   their moving git master).
 - **GIMP:** the fork, from a local checkout (default) or a pinned git commit.
-- **The Imanganation plug-in**, installed with GIMP (``lib/gimp/3.0/plug-ins``).
+- **The Imanganation plug-in**, installed with GIMP (``lib/gimp/3.0/plug-ins``), and
+  its lettering fonts (``share/fonts``).
+- **The engine**, runnable in the sandbox before anything is downloaded: its code and
+  config in ``share/imanganation``, a ``manganation`` launcher, and its Python packages
+  (``engine-deps.json``, from ``engine_deps.py``) for the runtime's Python.
+- **ComfyUI's code** at the commits ``config/comfyui.yaml`` pins, with its IP-Adapter node
+  and imanganation's patches (``share/imanganation/vendor/ComfyUI``). Its PyTorch is
+  GPU-specific and gigabytes big, so it's installed on first run, with **uv** (bundled).
 - **Starting the engine:** ``--talk-name=org.freedesktop.Flatpak``, so the plug-in can
-  start the engine and ComfyUI on the host (``flatpak-spawn --host``). They stay outside
-  the sandbox: they need the GPU, CUDA and gigabytes of models.
+  start the engine and ComfyUI on the host (``flatpak-spawn --host``) for a host install.
 
-Standard library only. ``build.sh`` runs it; see README.md.
+Run with the repo's environment (``uv run``: it reads ``config/comfyui.yaml``); network
+access is needed to read the pinned ComfyUI file the patch applies to. ``build.sh`` runs
+it; see README.md.
 """
 
 from __future__ import annotations
 
 import argparse
+import difflib
 import json
+import subprocess
+import urllib.request
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -35,6 +46,16 @@ PINNED = {  # module -> git tag and commit (what ~/.local/gimp-deps was built fr
              "commit": "3ed6237faa44bc64bdff8dcb2750c734ac680d40"},
 }
 PLUGIN_DIR = "/app/lib/gimp/3.0/plug-ins/imanganation"
+GIT_CHURN = [".git/index", ".git/FETCH_HEAD", ".git/ORIG_HEAD", ".git/logs"]
+ENGINE_DIR = "/app/share/imanganation"  # REPO_ROOT inside the Flatpak
+UV = {"version": "0.11.29", "sha256":
+      "04f8b82f5d47f0512dcd32c67a4a6f16a0ea27c81537c338fd0ad6b23cebe829"}
+LAUNCHER = f"""#!/usr/bin/env python3
+import sys
+sys.path.insert(0, "{ENGINE_DIR}/src")
+from manganation.cli import app
+sys.exit(app())
+"""
 
 
 def plugin_module(repo: Path) -> dict:
@@ -47,8 +68,94 @@ def plugin_module(repo: Path) -> dict:
         sources.append({"type": "file", "path": str(target), "dest-filename": path.name})
         mode = "755" if path.name == "imanganation.py" else "644"
         commands.append(f"install -Dm{mode} {path.name} {PLUGIN_DIR}/{path.name}")
+    for font in sorted((repo / "assets" / "fonts").glob("*")):
+        if font.suffix.lower() in (".ttf", ".otf", ".txt"):
+            sources.append({"type": "file", "path": str(font)})
+            commands.append(f"install -Dm644 {font.name} /app/share/fonts/imanganation/{font.name}")
     return {"name": "imanganation-plugin", "buildsystem": "simple",
             "build-commands": commands, "sources": sources}
+
+
+def engine_module(repo: Path) -> dict:
+    """The engine's code and config, and a ``manganation`` launcher on PATH."""
+    skip = ["__pycache__", "*.pyc"]
+    return {
+        "name": "imanganation-engine", "buildsystem": "simple",
+        "sources": [
+            {"type": "dir", "path": str(repo / "src"), "dest": "src", "skip": skip},
+            {"type": "dir", "path": str(repo / "config"), "dest": "config"},
+            {"type": "file", "path": str(repo / "pyproject.toml")},
+            {"type": "inline", "contents": LAUNCHER, "dest-filename": "manganation"},
+        ],
+        "build-commands": [
+            f"mkdir -p {ENGINE_DIR}",
+            f"cp -r src config pyproject.toml {ENGINE_DIR}/",
+            "install -Dm755 manganation /app/bin/manganation",
+        ],
+    }
+
+
+def _raw_url(repo_url: str, commit: str, path: str) -> str:
+    owner_repo = repo_url.removeprefix("https://github.com/").removesuffix(".git")
+    return f"https://raw.githubusercontent.com/{owner_repo}/{commit}/{path}"
+
+
+def _original(repo: Path, pin: dict, path: str) -> str:
+    """A file of the pinned ComfyUI as upstream has it: from the local checkout's git
+    when it has the commit, else GitHub."""
+    try:
+        return subprocess.run(["git", "show", f"{pin['commit']}:{path}"],
+                              cwd=repo / "vendor" / "ComfyUI", check=True,
+                              capture_output=True, text=True).stdout
+    except (OSError, subprocess.CalledProcessError):
+        with urllib.request.urlopen(_raw_url(pin["repo"], pin["commit"], path),
+                                    timeout=30) as response:
+            return response.read().decode()
+
+
+def comfy_patches(repo: Path, pin: dict, out_dir: Path) -> list[Path]:
+    """imanganation's ComfyUI patches (comfy_setup.PATCHES) as unified diffs."""
+    from manganation.comfy_setup import PATCHES
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    files = []
+    for index, patch in enumerate(PATCHES, start=1):
+        before = _original(repo, pin, patch.file)
+        if patch.old not in before:
+            raise SystemExit(f"{patch.file} at {pin['commit'][:10]} doesn't contain the "
+                             "code imanganation patches; update the pin or the patch")
+        after = before.replace(patch.old, patch.new)
+        diff = "".join(difflib.unified_diff(
+            before.splitlines(keepends=True), after.splitlines(keepends=True),
+            f"a/{patch.file}", f"b/{patch.file}"))
+        path = out_dir / f"comfyui-{index:02d}-{Path(patch.file).stem}.patch"
+        path.write_text(diff)
+        files.append(path)
+    return files
+
+
+def comfyui_module(repo: Path, pins: dict, patches: list[Path]) -> dict:
+    """ComfyUI and its custom nodes at their pinned commits, patched. Code only: the
+    venv with PyTorch for the user's GPU is made on first run."""
+    sources = [{"type": "git", "url": pins["comfyui"]["repo"],
+                "commit": pins["comfyui"]["commit"]}]
+    for name, pin in pins.get("custom_nodes", {}).items():
+        sources.append({"type": "git", "url": pin["repo"], "commit": pin["commit"],
+                        "dest": f"custom_nodes/{name}"})
+    sources += [{"type": "patch", "path": str(p)} for p in patches]
+    return {"name": "comfyui", "buildsystem": "simple", "sources": sources,
+            # git sources arrive with their whole history (ComfyUI's is ~2 GB): code only.
+            "build-commands": ["find . -name .git -prune -exec rm -rf {} +",
+                               f"mkdir -p {ENGINE_DIR}/vendor/ComfyUI",
+                               f"cp -a . {ENGINE_DIR}/vendor/ComfyUI/"]}
+
+
+def uv_module() -> dict:
+    return {"name": "uv", "buildsystem": "simple",
+            "sources": [{"type": "archive", "sha256": UV["sha256"], "url":
+                         f"https://github.com/astral-sh/uv/releases/download/{UV['version']}"
+                         "/uv-x86_64-unknown-linux-gnu.tar.gz"}],
+            "build-commands": ["install -Dm755 uv /app/bin/uv"]}
 
 
 LIBDIR_OPTION = {"meson": "--libdir=lib", "cmake": "-DCMAKE_INSTALL_LIBDIR=lib",
@@ -74,7 +181,9 @@ def libdir_into_lib(modules: list) -> None:
 
 
 def make(upstream: dict, *, fork: Path | None, fork_git: str | None, fork_commit: str | None,
-         app_id: str = APP_ID, repo: Path = REPO) -> dict:
+         app_id: str = APP_ID, repo: Path = REPO, engine: list[dict] | None = None) -> dict:
+    """``engine``: the engine/ComfyUI/uv modules to add after the plug-in (main() builds
+    them; tests can leave them out)."""
     manifest = json.loads(json.dumps(upstream))  # a deep copy
     manifest.update({"app-id": app_id, "branch": "stable",
                      "runtime-version": RUNTIME_VERSION, "tags": ["GTK+3"]})
@@ -89,13 +198,16 @@ def make(upstream: dict, *, fork: Path | None, fork_git: str | None, fork_commit
         module["sources"] = [{"type": "git", **pin}] + [
             s for s in module.get("sources", []) if s.get("type") != "git"]
     gimp = modules[names.index("gimp")]
+    # A local checkout's .git stays (GIMP's About shows the commit from it), minus the
+    # files git rewrites on every status/fetch: they'd make GIMP rebuild each time.
     source = ({"type": "git", "url": fork_git, "commit": fork_commit} if fork_git
-              else {"type": "dir", "path": str(Path(fork).resolve())})
+              else {"type": "dir", "path": str(Path(fork).resolve()), "skip": GIT_CHURN})
     gimp["sources"] = [source] + [s for s in gimp["sources"] if s.get("type") != "dir"]
     gimp["config-opts"] = [opt for opt in gimp.get("config-opts", [])
                            if not opt.startswith("-Dbuild-id=")] + [f"-Dbuild-id={app_id}"]
     libdir_into_lib(modules)
-    modules.insert(names.index("gimp") + 1, plugin_module(repo))
+    at = names.index("gimp") + 1
+    modules[at:at] = [plugin_module(repo), *(engine or [])]
     return manifest
 
 
@@ -113,8 +225,16 @@ def main() -> None:
     upstream_file = (args.fork / "build/linux/flatpak/org.gimp.GIMP-nightly.json")
     if not upstream_file.is_file():
         parser.error(f"no upstream manifest at {upstream_file}; pass --fork")
+    from manganation.comfy_setup import load_pins
+
+    pins = load_pins()
+    engine = [json.loads((HERE / "engine-deps.json").read_text()), engine_module(REPO),
+              comfyui_module(REPO, pins, comfy_patches(REPO, pins["comfyui"],
+                                                       args.out.parent / "patches")),
+              uv_module()]
     manifest = make(json.loads(upstream_file.read_text()), fork=args.fork,
-                    fork_git=args.fork_git, fork_commit=args.fork_commit, app_id=args.app_id)
+                    fork_git=args.fork_git, fork_commit=args.fork_commit, app_id=args.app_id,
+                    engine=engine)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(manifest, indent=2) + "\n")
     print(args.out)

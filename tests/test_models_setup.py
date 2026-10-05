@@ -275,3 +275,14 @@ def test_setup_links_files_the_user_already_has(tmp_path):
     report = _wait(client)
     assert report["task"]["state"] == "done" and report["ready"]
     assert report["task"]["finished"] == ["m.safetensors (hard link)"]
+
+
+def test_a_sandboxed_engine_never_records_itself_as_the_host_install(tmp_path, monkeypatch):
+    from manganation import config
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    real_exists = Path.exists
+    monkeypatch.setattr(Path, "exists", lambda self: True if str(self) == "/.flatpak-info"
+                        else real_exists(self))
+    config.remember_engine_home()
+    assert not (tmp_path / ".config/imanganation/engine-home").exists()

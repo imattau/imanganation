@@ -170,7 +170,11 @@ def load_models() -> dict:
 
 def remember_engine_home() -> None:
     """Note where this engine checkout lives, in ~/.config/imanganation/engine-home: a
-    packaged GIMP (the Flatpak) reads it to start the engine and ComfyUI. Best-effort."""
+    packaged GIMP (the Flatpak) reads it to start the engine and ComfyUI. Best-effort.
+    Not from inside a Flatpak: an engine bundled there isn't a host checkout, and the
+    sandbox shares the real home folder, so it would overwrite the host install's note."""
+    if Path("/.flatpak-info").exists():
+        return
     try:
         note = Path.home() / ".config" / "imanganation" / "engine-home"
         if not note.is_file() or note.read_text().strip() != str(REPO_ROOT):

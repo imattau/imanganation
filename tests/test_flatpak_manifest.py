@@ -45,7 +45,8 @@ def test_the_manifest_is_ours_with_pinned_deps_and_the_plugin(tmp_path):
     assert modules["babl"]["sources"] == [{"type": "git", **mm.PINNED["babl"]}]
     assert modules["gegl"]["sources"][1] == {"type": "patch", "path": "p.patch"}  # kept
     gimp = modules["gimp"]
-    assert gimp["sources"][0] == {"type": "dir", "path": str((tmp_path / "fork").resolve())}
+    assert gimp["sources"][0] == {"type": "dir", "path": str((tmp_path / "fork").resolve()),
+                                  "skip": mm.GIT_CHURN}  # git status mustn't force a rebuild
     assert gimp["sources"][1]["type"] == "shell"
     assert gimp["config-opts"] == ["-Dgi-docgen=disabled",
                                    "-Dbuild-id=io.github.imattau.Imanganation"]  # no buildsystem
@@ -56,7 +57,7 @@ def test_the_manifest_is_ours_with_pinned_deps_and_the_plugin(tmp_path):
 
 def test_the_plugin_module_installs_every_file_resolving_the_parser_symlink():
     plugin = mm.plugin_module(ROOT)
-    names = sorted(s["dest-filename"] for s in plugin["sources"])
+    names = sorted(s["dest-filename"] for s in plugin["sources"] if "dest-filename" in s)
     on_disk = sorted(p.name for p in (ROOT / "gimp/imanganation").glob("*.py"))
     assert names == on_disk and "setup_ui.py" in names and "script_canonical.py" in names
     canonical = next(s for s in plugin["sources"] if s["dest-filename"] == "script_canonical.py")
@@ -95,3 +96,65 @@ def test_the_real_upstream_manifest_still_has_what_we_change():
                                   "org.gimp.GIMP-nightly.json").read_text())
     out = mm.make(upstream, fork=ROOT / "imanganation-gimp", fork_git=None, fork_commit=None)
     assert {"babl", "gegl", "gimp", "imanganation-plugin"} <= set(_names(out))
+
+
+def test_the_lettering_fonts_ship_with_the_plugin():
+    commands = mm.plugin_module(ROOT)["build-commands"]
+    fonts = [c for c in commands if "/app/share/fonts/imanganation/" in c]
+    assert any("Bangers-Regular.ttf" in c for c in fonts)
+    assert any("ComicNeue-Bold.ttf" in c for c in fonts)
+    assert any("OFL" in c for c in fonts)  # the licence travels with the fonts
+
+
+def test_the_engine_runs_from_the_bundle():
+    engine = mm.engine_module(ROOT)
+    dests = {s.get("dest") for s in engine["sources"]}
+    assert {"src", "config"} <= dests
+    launcher = next(s for s in engine["sources"] if s["type"] == "inline")
+    assert f'"{mm.ENGINE_DIR}/src"' in launcher["contents"]
+    assert "install -Dm755 manganation /app/bin/manganation" in engine["build-commands"]
+
+
+def test_engine_deps_are_the_locked_versions_as_verified_wheels():
+    deps = json.loads((ROOT / "packaging/flatpak/engine-deps.json").read_text())
+    command = deps["build-commands"][0]
+    assert "--no-index" in command and "--no-deps" in command  # offline, exactly these
+    assert "--ignore-installed" in command  # never over the runtime's read-only copies
+    wheels = [s["url"].rsplit("/", 1)[-1] for s in deps["sources"]]
+    assert all(len(s["sha256"]) == 64 for s in deps["sources"])
+    for wheel in wheels:
+        assert wheel.endswith("-none-any.whl") or "cp314" in wheel or "abi3" in wheel, wheel
+    lock = (ROOT / "uv.lock").read_text()
+    for pin in command.split()[-len(wheels):]:
+        name, version = pin.split("==")
+        assert f'name = "{name}"\nversion = "{version}"' in lock, pin
+
+
+def test_comfyui_is_the_pinned_code_with_its_node_and_patch(tmp_path):
+    from manganation.comfy_setup import load_pins
+
+    pins = load_pins()
+    patch = tmp_path / "comfyui-01-clip_vision.patch"
+    patch.write_text("x")
+    module = mm.comfyui_module(ROOT, pins, [patch])
+    sources = module["sources"]
+    assert sources[0] == {"type": "git", "url": pins["comfyui"]["repo"],
+                          "commit": pins["comfyui"]["commit"]}
+    node = pins["custom_nodes"]["ComfyUI_IPAdapter_plus"]
+    assert {"type": "git", "url": node["repo"], "commit": node["commit"],
+            "dest": "custom_nodes/ComfyUI_IPAdapter_plus"} in sources
+    assert sources[-1] == {"type": "patch", "path": str(patch)}
+    assert module["build-commands"][0].startswith("find . -name .git")  # no 2 GB history
+    uv = mm.uv_module()["sources"][0]
+    assert uv["type"] == "archive" and len(uv["sha256"]) == 64 and mm.UV["version"] in uv["url"]
+
+
+@pytest.mark.skipif(not (ROOT / "vendor/ComfyUI/.git").exists(),
+                    reason="no local ComfyUI checkout to diff against")
+def test_the_patch_is_a_real_diff_of_the_pinned_file(tmp_path):
+    from manganation.comfy_setup import PATCHES, load_pins
+
+    [patch] = mm.comfy_patches(ROOT, load_pins()["comfyui"], tmp_path)
+    text = patch.read_text()
+    assert text.startswith(f"--- a/{PATCHES[0].file}\n+++ b/{PATCHES[0].file}\n")
+    assert "+        self.return_all_hidden_states = True" in text

@@ -19,6 +19,24 @@ GIMP finds the engine through `~/.config/imanganation/engine-home`, which the en
 writes whenever `manganation serve`, `setup` or `install-comfyui` runs.
 `IMANGANATION_HOME` overrides it (`flatpak override --user --env=IMANGANATION_HOME=…`).
 
+### Moving the engine inside (in progress)
+
+The Flatpak also carries the engine and ComfyUI, so a user won't need the host
+install at all. Verified: CUDA PyTorch runs in the sandbox at full speed (Flatpak's
+NVIDIA driver extension provides `libcuda`), and the bundled engine starts and serves.
+
+| Bundled now | Where |
+|---|---|
+| The engine (`src`, `config`) and a `manganation` launcher | `/app/share/imanganation`, `/app/bin` |
+| Its Python packages, the `uv.lock` versions for the runtime's Python 3.14 | `engine-deps.json` (regenerate with `engine_deps.py` when `uv.lock` changes) |
+| ComfyUI and ComfyUI_IPAdapter_plus at the `config/comfyui.yaml` commits, patched | `/app/share/imanganation/vendor/ComfyUI` |
+| `uv`, to install PyTorch for the user's GPU on first run | `/app/bin/uv` |
+| The lettering fonts (Comic Neue, Bangers; SIL OFL) | `/app/share/fonts/imanganation` |
+
+Still to do: install PyTorch and ComfyUI's packages on first run, keep models, venv and
+outputs in the app's data folder, and start the bundled engine instead of the host's.
+Until then the plug-in uses the host install described above.
+
 ## Build
 
 ```bash
@@ -30,6 +48,7 @@ Needs `flatpak` and `flatpak-builder`. The first build downloads the GNOME 51 SD
 compiles GIMP's dependencies, which takes a long time; later builds reuse the cache in
 `packaging/flatpak/.build/` and recompile only what changed.
 
+Run it from the repo (it uses `uv run` to read `config/comfyui.yaml`).
 `make_manifest.py` writes the manifest (`.build/<app id>.json`) from the fork's own
 upstream manifest (`imanganation-gimp/build/linux/flatpak/org.gimp.GIMP-nightly.json`),
 so GIMP's dependency list follows the fork as it merges upstream. It changes:

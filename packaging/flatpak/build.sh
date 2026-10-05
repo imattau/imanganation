@@ -19,7 +19,7 @@ command -v flatpak-builder >/dev/null || {
   echo "flatpak-builder is needed (e.g. apt install flatpak-builder)"; exit 1; }
 flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 
-MANIFEST="$(python3 "$HERE/make_manifest.py" ${ARGS[@]+"${ARGS[@]}"})"
+MANIFEST="$(cd "$ROOT" && uv run -q python "$HERE/make_manifest.py" ${ARGS[@]+"${ARGS[@]}"})"
 APP_ID="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["app-id"])' "$MANIFEST")"
 BRANCH="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["branch"])' "$MANIFEST")"
 
