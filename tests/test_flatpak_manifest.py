@@ -145,6 +145,9 @@ def test_comfyui_is_the_pinned_code_with_its_node_and_patch(tmp_path):
             "dest": "custom_nodes/ComfyUI_IPAdapter_plus"} in sources
     assert sources[-1] == {"type": "patch", "path": str(patch)}
     assert module["build-commands"][0].startswith("find . -name .git")  # no 2 GB history
+    from manganation.comfy_setup import BUNDLED_MARKER
+
+    assert module["build-commands"][-1].endswith(f"/vendor/ComfyUI/{BUNDLED_MARKER}")
     uv = mm.uv_module()["sources"][0]
     assert uv["type"] == "archive" and len(uv["sha256"]) == 64 and mm.UV["version"] in uv["url"]
 

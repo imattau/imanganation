@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from pathlib import Path
 
@@ -168,12 +169,37 @@ def load_models() -> dict:
     return yaml.safe_load((CONFIG_DIR / "models.yaml").read_text()) or {}
 
 
+def in_flatpak() -> bool:
+    return Path("/.flatpak-info").exists()
+
+
+def data_root() -> Path:
+    """Where the engine keeps what it downloads and makes (the renderer's venv, …).
+
+    IMANGANATION_DATA if set; inside the Flatpak the app's data folder
+    (~/.var/app/<app id>/data/imanganation: the bundled code is read-only); otherwise
+    this checkout, so a developer install keeps everything where it always was."""
+    if os.environ.get("IMANGANATION_DATA"):
+        return Path(os.environ["IMANGANATION_DATA"])
+    if in_flatpak():
+        base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local/share")
+        return Path(base) / "imanganation"
+    return REPO_ROOT
+
+
+def comfy_paths_file() -> Path:
+    """ComfyUI's extra-model-paths file: in config/ for a checkout, in the data folder
+    inside the Flatpak (the bundled config is read-only)."""
+    name = "comfyui_extra_model_paths.yaml"
+    return data_root() / name if in_flatpak() else CONFIG_DIR / name
+
+
 def remember_engine_home() -> None:
     """Note where this engine checkout lives, in ~/.config/imanganation/engine-home: a
     packaged GIMP (the Flatpak) reads it to start the engine and ComfyUI. Best-effort.
     Not from inside a Flatpak: an engine bundled there isn't a host checkout, and the
     sandbox shares the real home folder, so it would overwrite the host install's note."""
-    if Path("/.flatpak-info").exists():
+    if in_flatpak():
         return
     try:
         note = Path.home() / ".config" / "imanganation" / "engine-home"

@@ -286,3 +286,75 @@ def test_a_sandboxed_engine_never_records_itself_as_the_host_install(tmp_path, m
                         else real_exists(self))
     config.remember_engine_home()
     assert not (tmp_path / ".config/imanganation/engine-home").exists()
+
+
+# --- the renderer (ComfyUI + PyTorch) as part of setup, as in the Flatpak --------------
+
+
+class FakeInstaller:
+    def __init__(self, log, *, fail=None, state=None):
+        self.log, self.fail, self.state = log, fail, state if state is not None else {}
+
+    def ready(self):
+        return self.state.get("ready", False)
+
+    def plan(self):
+        self.log("Checking the GPU")
+        return "plan"
+
+    def install(self, plan):
+        self.log("Installing PyTorch (cu130); a few GB…")
+        if self.fail:
+            raise ms.SetupError(self.fail)
+
+    def verify(self):
+        return "2.14.1+cu130 | NVIDIA GeForce RTX 5060 Ti"
+
+    def mark_ready(self):
+        self.state["ready"] = True
+
+
+def _renderer_app(tmp_path, fail=None):
+    from fastapi.testclient import TestClient
+
+    from manganation.web.api import create_app
+
+    state = {}
+    runner = ms.SetupRunner(tmp_path / "models", lambda: [_model()], fetch=_fake_fetch,
+                            renderer=lambda log: FakeInstaller(log, fail=fail, state=state))
+    return TestClient(create_app(render=lambda *a, **k: None, root=tmp_path,
+                                 setup_runner=runner)), state
+
+
+def test_the_renderer_is_the_first_row_and_installs_before_the_models(tmp_path):
+    client, state = _renderer_app(tmp_path)
+    report = client.get("/setup").json()
+    row = report["models"][0]
+    assert (row["role"], row["state"], row["size"]) == ("renderer", "missing",
+                                                         ms.RENDERER_BYTES)
+    assert report["missing_bytes"] == ms.RENDERER_BYTES + len(PAYLOAD)
+    started = client.post("/setup/download", json={}).json()
+    assert started["renderer"] and started["phase"] == "renderer"
+    report = _wait(client)
+    task = report["task"]
+    assert task["state"] == "done" and task["phase"] == "models"
+    assert task["finished"] == ["renderer (2.14.1+cu130 | NVIDIA GeForce RTX 5060 Ti)",
+                                "m.safetensors"]
+    assert report["ready"] and state["ready"]
+
+
+def test_a_failed_renderer_is_reported_and_the_models_still_download(tmp_path):
+    client, state = _renderer_app(tmp_path, fail="the NVIDIA driver is too old")
+    client.post("/setup/download", json={})
+    report = _wait(client)
+    assert report["task"]["state"] == "error"
+    assert report["task"]["errors"] == ["renderer: the NVIDIA driver is too old"]
+    assert report["task"]["finished"] == ["m.safetensors"]
+    assert report["models"][0]["state"] == "missing" and not report["ready"]
+
+
+def test_the_renderer_counts_towards_the_disk_space_check(tmp_path, monkeypatch):
+    monkeypatch.setattr(ms, "free_bytes", lambda root: ms.RENDERER_BYTES)  # models won't fit
+    client, _ = _renderer_app(tmp_path)
+    response = client.post("/setup/download", json={})
+    assert response.status_code == 507 and "disk space" in response.json()["detail"]

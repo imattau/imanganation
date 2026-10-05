@@ -198,8 +198,8 @@ def setup(
 
     from manganation import models_setup as ms
     from manganation.config import (
-        CONFIG_DIR,
         REPO_ROOT,
+        comfy_paths_file,
         load_models,
         load_settings,
         remember_engine_home,
@@ -234,9 +234,9 @@ def setup(
                       f"[{colours.get(st, 'red')}]{st}[/]")
     rprint(table)
 
-    if not check and ms.write_comfy_paths(CONFIG_DIR / "comfyui_extra_model_paths.yaml", root):
+    if not check and ms.write_comfy_paths(comfy_paths_file(), root):
         rprint(f"Pointed ComfyUI's model paths at {root} "
-               "(config/comfyui_extra_model_paths.yaml); restart ComfyUI to pick it up.")
+               f"({comfy_paths_file()}); restart ComfyUI to pick it up.")
 
     todo = [m for m in models if states[m.role] != "present"]
     unfetchable = [m for m in todo if not m.urls]
@@ -299,6 +299,7 @@ def install_comfyui(
     from manganation.config import (
         CONFIG_DIR,
         REPO_ROOT,
+        comfy_paths_file,
         load_models,
         load_settings,
         remember_engine_home,
@@ -306,8 +307,8 @@ def install_comfyui(
 
     remember_engine_home()
     settings = load_settings()
-    comfy = (target or REPO_ROOT / settings.paths.comfyui_dir).resolve()
-    installer = cs.Installer(comfy, cs.load_pins(), log=rprint)
+    installer = cs.installer_for(settings, comfy=target and target.resolve(), log=rprint)
+    comfy = installer.comfy
     if freeze:
         path = CONFIG_DIR / installer.pins["constraints"]
         path.write_text(installer.freeze())
@@ -322,7 +323,8 @@ def install_comfyui(
         raise typer.Exit(1) from exc
 
     g = plan.gpu
-    rprint(f"[bold]ComfyUI[/bold] in {comfy}")
+    rprint(f"[bold]ComfyUI[/bold] in {comfy}"
+           + (f" (bundled; venv in {installer.venv})" if installer.bundled else ""))
     rprint("GPU: " + {"cuda": f"{g.name} (compute {g.capability}, {g.vram_gb} GB, driver "
                               f"CUDA {g.driver_cuda})",
                       "rocm": f"{g.name} (ROCm)", "mps": "Apple Silicon (Metal)",
@@ -345,6 +347,7 @@ def install_comfyui(
         installer.install(plan, force=force)
         rprint("Checking the install (PyTorch, then a ComfyUI start-up test)…")
         summary = installer.verify()
+        installer.mark_ready()
     except (cs.InstallError, OSError) as exc:
         rprint(f"[red]{exc}[/red]")
         raise typer.Exit(1) from exc
@@ -353,7 +356,7 @@ def install_comfyui(
         raise typer.Exit(1) from exc
     rprint(f"[green]ComfyUI is ready[/green]: torch {summary}")
     models_root = (REPO_ROOT / settings.paths.models_dir).resolve()
-    if ms.write_comfy_paths(CONFIG_DIR / "comfyui_extra_model_paths.yaml", models_root):
+    if ms.write_comfy_paths(comfy_paths_file(), models_root):
         rprint(f"Pointed ComfyUI's model paths at {models_root}.")
     missing = [m for m in ms.needed(settings, load_models())
                if ms.state(m, models_root) != "present"]

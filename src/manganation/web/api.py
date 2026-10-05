@@ -325,13 +325,21 @@ def create_app(
             return setup_runner
         if "runner" not in setup_state:
             from manganation import models_setup
-            from manganation.config import CONFIG_DIR, REPO_ROOT, load_models, load_settings
+            from manganation.config import (
+                REPO_ROOT,
+                comfy_paths_file,
+                load_models,
+                load_settings,
+            )
 
             settings = load_settings()
+            from manganation.comfy_setup import installer_for
+
             setup_state["runner"] = models_setup.SetupRunner(
                 REPO_ROOT / settings.paths.models_dir,
                 lambda: models_setup.needed(load_settings(), load_models()),
-                comfy_paths=CONFIG_DIR / "comfyui_extra_model_paths.yaml")
+                comfy_paths=comfy_paths_file(),
+                renderer=lambda log: installer_for(load_settings(), log=log))
         return setup_state["runner"]
 
     @app.get("/setup")

@@ -15,10 +15,16 @@ pins, under ``settings.paths.comfyui_dir`` (``vendor/ComfyUI``):
    (the command also points ComfyUI's model paths at the models folder).
 
 Every step is skipped when already done, so re-running is safe and quick.
+
+**Bundled** (the Flatpak): ComfyUI's code ships in the app, read-only and already
+patched (``BUNDLED_MARKER``), so there's no checkout; the venv, a uv-managed Python and
+ComfyUI's writable folders live in the data folder (``config.data_root()``), and the
+GPU is read from the driver library because the sandbox has no ``nvidia-smi``.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import platform
 import re
@@ -34,6 +40,12 @@ import yaml
 
 class InstallError(RuntimeError):
     pass
+
+
+# Written into ComfyUI's code folder by the Flatpak build: the code is bundled
+# (read-only, patched), so install into the data folder instead of the checkout.
+BUNDLED_MARKER = ".imanganation-bundled"
+READY_MARKER = ".imanganation-ready"  # in the venv: what a verified install holds
 
 
 # --- patches ------------------------------------------------------------------
@@ -115,9 +127,38 @@ def _version(text: str) -> tuple[int, ...]:
     return tuple(int(p) for p in re.findall(r"\d+", text)[:2]) or (0,)
 
 
-def detect_gpu(run: Callable[..., str] | None = None) -> Gpu:
+def _libcuda_gpu(load: Callable[[str], object] | None = None) -> Gpu | None:
+    """The first NVIDIA GPU through the driver's own library (``libcuda``): what the
+    sandbox has where ``nvidia-smi`` isn't (the Flatpak's NVIDIA driver extension)."""
+    import ctypes
+
+    try:
+        lib = (load or ctypes.CDLL)("libcuda.so.1")
+        if lib.cuInit(0) != 0:
+            return None
+        version, count, device = ctypes.c_int(), ctypes.c_int(), ctypes.c_int()
+        lib.cuDriverGetVersion(ctypes.byref(version))
+        if lib.cuDeviceGetCount(ctypes.byref(count)) != 0 or count.value < 1:
+            return None
+        lib.cuDeviceGet(ctypes.byref(device), 0)
+        name = ctypes.create_string_buffer(256)
+        lib.cuDeviceGetName(name, 256, device)
+        major, minor, memory = ctypes.c_int(), ctypes.c_int(), ctypes.c_size_t()
+        lib.cuDeviceGetAttribute(ctypes.byref(major), 75, device)  # compute capability
+        lib.cuDeviceGetAttribute(ctypes.byref(minor), 76, device)
+        lib.cuDeviceTotalMem_v2(ctypes.byref(memory), device)
+    except (OSError, AttributeError):
+        return None
+    v = version.value
+    return Gpu("cuda", name.value.decode(errors="replace"), f"{v // 1000}.{v % 1000 // 10}",
+               f"{major.value}.{minor.value}", round(memory.value / 1024 ** 3, 1))
+
+
+def detect_gpu(run: Callable[..., str] | None = None,
+               libcuda: Callable[[str], object] | None = None) -> Gpu:
     """What PyTorch build this machine needs. ``run(cmd) -> stdout`` (raises
-    FileNotFoundError / CalledProcessError when a tool is missing)."""
+    FileNotFoundError / CalledProcessError when a tool is missing); ``libcuda`` loads
+    the driver library (ctypes.CDLL), tried when there's no nvidia-smi."""
     run = run or _capture
     try:
         rows = run(["nvidia-smi", "--query-gpu=name,compute_cap,memory.total",
@@ -129,6 +170,9 @@ def detect_gpu(run: Callable[..., str] | None = None) -> Gpu:
                    round(float(memory) / 1024, 1))
     except (FileNotFoundError, subprocess.CalledProcessError, IndexError, ValueError):
         pass
+    gpu = _libcuda_gpu(libcuda)
+    if gpu is not None:
+        return gpu
     try:
         info = run(["rocminfo"])
         names = re.findall(r"Marketing Name:\s*(.+)", info)
@@ -179,8 +223,20 @@ def _capture_all(cmd: list[str], cwd: Path | None = None) -> str:
 
 
 def venv_python(comfy: Path) -> Path:
-    return (Path(comfy) / ".venv" / ("Scripts/python.exe" if os.name == "nt"
-                                     else "bin/python"))
+    """The python of a checkout's own venv (``<comfy>/.venv``)."""
+    return _python_in(Path(comfy) / ".venv")
+
+
+def _python_in(venv: Path) -> Path:
+    return Path(venv) / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+
+
+def is_patched(comfy: Path, patches=PATCHES) -> bool:
+    for patch in patches:
+        text = (Path(comfy) / patch.file).read_text()
+        if patch.old in text or patch.new not in text:
+            return False
+    return True
 
 
 @dataclass
@@ -197,13 +253,64 @@ class Installer:
     returns stdout, ``capture_all`` stdout and stderr. All injectable for tests."""
 
     def __init__(self, comfy: Path, pins: dict, *, run=None, capture=None,
-                 capture_all=None, log=print):
+                 capture_all=None, log=print, venv: Path | None = None,
+                 data: Path | None = None, bundled: bool = False):
+        """``bundled``: ComfyUI's code is read-only and already patched (the Flatpak);
+        ``venv`` (default ``<comfy>/.venv``) and ``data`` (ComfyUI's user, input,
+        output and temp folders; default: ComfyUI's own) are then in the data folder."""
         self.comfy = Path(comfy)
         self.pins = pins
-        self._run = run or (lambda cmd, cwd=None: subprocess.run(cmd, cwd=cwd, check=True))
+        self.bundled = bundled
+        self.venv = Path(venv) if venv is not None else self.comfy / ".venv"
+        self.data = Path(data) if data is not None else None
+        self._run = run or (lambda cmd, cwd=None: subprocess.run(
+            cmd, cwd=cwd, check=True, env={**os.environ, **self.uv_env()}))
         self._capture = capture or _capture
         self._capture_all = capture_all or _capture_all
         self.log = log
+
+    @property
+    def python(self) -> Path:
+        return _python_in(self.venv)
+
+    def uv_env(self) -> dict[str, str]:
+        """Bundled: uv fetches its own Python into the data folder (the runtime's is
+        3.14, ComfyUI is pinned to another) and never uses a system one."""
+        if not self.bundled:
+            return {}
+        return {"UV_PYTHON_INSTALL_DIR": str(self.venv.parent / "python"),
+                "UV_PYTHON_PREFERENCE": "only-managed"}
+
+    def comfy_args(self) -> list[str]:
+        """ComfyUI command-line options for where it may write. Bundled, its code
+        folder is read-only, so user data (and its database), input, output and temp go
+        to the data folder; the code folder stays the base, so the bundled custom nodes
+        are found."""
+        if self.data is None:
+            return []
+        args = []
+        for kind in ("user", "input", "output", "temp"):
+            folder = self.data / kind
+            folder.mkdir(parents=True, exist_ok=True)
+            args += [f"--{kind}-directory", str(folder)]
+        return args
+
+    def ready(self) -> bool:
+        """A verified install of the pinned ComfyUI with its PyTorch untouched since:
+        cheap (no subprocess), for status polling. A full check is plan()."""
+        try:
+            marker = json.loads((self.venv / READY_MARKER).read_text())
+        except (OSError, ValueError):
+            # A checkout installed before the marker existed: PyTorch and our patch
+            # are enough (`install-comfyui --check` does the thorough comparison).
+            return (not self.bundled and self.torch_build() is not None
+                    and (self.comfy / PATCHES[0].file).is_file() and is_patched(self.comfy))
+        return (marker.get("comfyui") == self.pins["comfyui"]["commit"]
+                and marker.get("torch") == self.torch_build() is not None)
+
+    def mark_ready(self) -> None:
+        (self.venv / READY_MARKER).write_text(json.dumps(
+            {"comfyui": self.pins["comfyui"]["commit"], "torch": self.torch_build()}))
 
     # -- inspection
     def head(self, repo: Path) -> str | None:
@@ -232,20 +339,19 @@ class Installer:
         return edits
 
     def torch_build(self) -> str | None:
-        python = venv_python(self.comfy)
-        if not python.is_file():
-            return None
-        try:
-            return self._capture([str(python), "-c", "import torch; print(torch.__version__)"]
-                                 ).strip()
-        except subprocess.CalledProcessError:
-            return None
+        """The installed PyTorch version (e.g. 2.14.1+cu130), from its package metadata:
+        no import, so it's cheap enough to poll."""
+        for meta in sorted(self.venv.glob("lib/python*/site-packages/torch-*.dist-info/METADATA")):
+            for line in meta.read_text(errors="replace").splitlines():
+                if line.startswith("Version:"):
+                    return line.split(":", 1)[1].strip()
+        return None
 
     def plan(self, gpu: Gpu | None = None) -> Plan:
         gpu = gpu or detect_gpu(lambda cmd: self._capture(cmd))
         index = torch_index(gpu, self.pins)
         plan = Plan(self.comfy, gpu, index)
-        repos = [("ComfyUI", self.comfy, self.pins["comfyui"])] + [
+        repos = [] if self.bundled else [("ComfyUI", self.comfy, self.pins["comfyui"])] + [
             (name, self.comfy / "custom_nodes" / name, pin)
             for name, pin in self.pins.get("custom_nodes", {}).items()]
         for name, path, pin in repos:
@@ -256,32 +362,41 @@ class Installer:
                 plan.steps.append(f"move {name} from {head[:10]} to {pin['commit'][:10]}")
         build = self.torch_build()
         wanted = (index or "").rsplit("/", 1)[-1]
-        if not venv_python(self.comfy).is_file():
-            plan.steps.append(f"create a Python {self.pins['python']} venv")
+        if not self.python.is_file():
+            plan.steps.append(f"create a Python {self.pins['python']} venv"
+                              + (" (downloads that Python)" if self.bundled else ""))
         if build is None or (wanted and not build.endswith(f"+{wanted}")):
             plan.steps.append(f"install PyTorch ({wanted or 'default build'})"
                               + (f", replacing {build}" if build else ""))
         plan.steps.append("install ComfyUI's requirements (quick when already there)")
-        plan.steps.append("apply imanganation's patches; check the install")
+        plan.steps.append("check the install" if self.bundled else
+                          "apply imanganation's patches; check the install")
         return plan
 
     # -- doing
     def install(self, plan: Plan, *, force: bool = False) -> None:
-        if shutil.which("git") is None:
+        if not self.bundled and shutil.which("git") is None:
             raise InstallError("git is needed: install it from your package manager")
         if shutil.which("uv") is None:
             raise InstallError("uv is needed: https://docs.astral.sh/uv/getting-started/")
-        self._checkout("ComfyUI", self.comfy, self.pins["comfyui"], force)
+        if self.bundled:
+            if not is_patched(self.comfy):
+                raise InstallError(f"the bundled ComfyUI in {self.comfy} isn't patched; "
+                                   "the app build is broken")
+        else:
+            self._checkout("ComfyUI", self.comfy, self.pins["comfyui"], force)
         for name, pin in self.pins.get("custom_nodes", {}).items():
             node = self.comfy / "custom_nodes" / name
-            self._checkout(name, node, pin, force)
-            requirements = node / "requirements.txt"
+            if not self.bundled:
+                self._checkout(name, node, pin, force)
+        if not self.python.is_file():
+            self.log(f"Creating a Python {self.pins['python']} venv…")
+            self.venv.parent.mkdir(parents=True, exist_ok=True)
+            self._run(["uv", "venv", "--python", self.pins["python"], str(self.venv)])
+        for name in self.pins.get("custom_nodes", {}):
+            requirements = self.comfy / "custom_nodes" / name / "requirements.txt"
             if requirements.is_file():
                 self._pip(["-r", str(requirements)])
-        python = venv_python(self.comfy)
-        if not python.is_file():
-            self.log(f"Creating a Python {self.pins['python']} venv…")
-            self._run(["uv", "venv", "--python", self.pins["python"], str(python.parents[1])])
         wanted = (plan.index or "").rsplit("/", 1)[-1]
         build = self.torch_build()
         if build is None or (wanted and not build.endswith(f"+{wanted}")):
@@ -296,8 +411,9 @@ class Installer:
         constraints = self.constraints_file()
         self._pip(["-r", str(self.comfy / "requirements.txt")]
                   + (["-c", str(constraints)] if constraints else []))
-        for line in apply_patches(self.comfy):
-            self.log(line)
+        if not self.bundled:
+            for line in apply_patches(self.comfy):
+                self.log(line)
 
     def constraints_file(self) -> Path | None:
         from manganation.config import CONFIG_DIR
@@ -309,10 +425,10 @@ class Installer:
     def freeze(self) -> str:
         """The constraints file text for this (tested) venv."""
         return constraints_from_freeze(self._capture(
-            ["uv", "pip", "freeze", "--python", str(venv_python(self.comfy))]))
+            ["uv", "pip", "freeze", "--python", str(self.python)]))
 
     def _pip(self, args: list[str]) -> None:
-        self._run(["uv", "pip", "install", "--python", str(venv_python(self.comfy)), *args])
+        self._run(["uv", "pip", "install", "--python", str(self.python), *args])
 
     def _checkout(self, name: str, path: Path, pin: dict, force: bool) -> None:
         if self.head(path) is None:
@@ -341,7 +457,7 @@ class Installer:
         """Check the install works: PyTorch imports and sees the GPU, and ComfyUI
         starts (its own --quick-test-for-ci) with every pinned custom node loaded.
         -> a summary line; raises InstallError otherwise."""
-        python = str(venv_python(self.comfy))
+        python = str(self.python)
         probe = ("import torch; cuda = torch.cuda.is_available(); "
                  "mps = getattr(torch.backends, 'mps', None) is not None "
                  "and torch.backends.mps.is_available(); "
@@ -353,9 +469,9 @@ class Installer:
             raise InstallError(f"PyTorch doesn't import in the venv: {exc.stderr or exc}"
                                ) from exc
         try:
-            log = self._capture_all([python, "main.py", "--quick-test-for-ci", "--cpu"]
-                                if "CPU only" in torch_line else
-                                [python, "main.py", "--quick-test-for-ci"], self.comfy)
+            log = self._capture_all(
+                [python, "main.py", "--quick-test-for-ci", *self.comfy_args()]
+                + (["--cpu"] if "CPU only" in torch_line else []), self.comfy)
         except subprocess.CalledProcessError as exc:
             tail = "\n".join((exc.stdout or "").splitlines()[-15:])
             raise InstallError(f"ComfyUI doesn't start:\n{tail}") from exc
@@ -366,6 +482,19 @@ class Installer:
                 raise InstallError(f"ComfyUI started but the {name} nodes didn't load; "
                                    "see the log above")
         return torch_line
+
+
+def installer_for(settings, *, comfy: Path | None = None, log=print, **kwargs) -> Installer:
+    """The installer for this engine: the checkout's ComfyUI (``vendor/ComfyUI`` and
+    its .venv), or, when its code is the Flatpak's bundled copy, the data folder."""
+    from manganation.config import REPO_ROOT, data_root
+
+    comfy = Path(comfy or REPO_ROOT / settings.paths.comfyui_dir)
+    if (comfy / BUNDLED_MARKER).exists():
+        data = data_root()
+        return Installer(comfy, load_pins(), log=log, venv=data / "comfyui-venv",
+                         data=data / "comfyui", bundled=True, **kwargs)
+    return Installer(comfy, load_pins(), log=log, **kwargs)
 
 
 def load_pins(path: Path | None = None) -> dict:

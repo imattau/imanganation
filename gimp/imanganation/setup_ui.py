@@ -8,9 +8,10 @@ from __future__ import annotations
 
 from typing import Any
 
-INTRO = ("Imanganation's AI models aren't included with the app. Download what's missing "
-         "below, or point it at a folder of models you already have (ComfyUI, A1111): "
-         "matching files are linked in without using more disk space.")
+INTRO = ("Imanganation's renderer and AI models aren't included with the app. Download "
+         "what's missing below, or point it at a folder of models you already have "
+         "(ComfyUI, A1111): matching files are linked in without using more disk space.")
+RENDERER = "renderer"  # the row for ComfyUI + PyTorch, when the engine installs it
 
 
 def human_size(n: int | None) -> str:
@@ -29,6 +30,13 @@ def row_state(row: dict[str, Any], task: dict[str, Any]) -> str:
     """One model's state line: "Ready", "Missing", "Downloading 42%", "Failed"…"""
     if row.get("state") == "present":
         return "Ready"
+    if row.get("role") == RENDERER:
+        if task.get("state") == "running" and task.get("phase") == RENDERER:
+            return "Installing…"
+        if any(error.startswith("renderer:") for error in task.get("errors", [])):
+            return "Failed (see below)"
+        return "Missing" if row.get("state") == "missing" else (
+            f"Problem: {row.get('note') or row.get('state')}")
     if not row.get("file"):
         return f"Not configured: {row.get('note') or 'unknown'}"
     if task.get("state") == "running" and task.get("current") == row["file"]:
@@ -46,6 +54,9 @@ def headline(report: dict[str, Any]) -> str:
     task = report.get("task") or {}
     missing = [r for r in report.get("models", []) if r.get("state") != "present"]
     if running(report):
+        if task.get("phase") == RENDERER:
+            return ("Installing the renderer (ComfyUI and PyTorch for your GPU): a few GB, "
+                    "then the models…")
         if task.get("kind") == "link":
             return "Searching for matching files (large files take a while to check)…"
         total = task.get("total") or 0
@@ -55,7 +66,10 @@ def headline(report: dict[str, Any]) -> str:
         return "All models are ready."
     needed = report.get("missing_bytes") or 0
     first = missing[0]
-    lead = ("Rendering needs the checkpoint first." if first.get("role") == "checkpoint"
+    needs = [name for role, name in ((RENDERER, "the renderer"), ("checkpoint", "the checkpoint"))
+             if any(r.get("role") == role for r in missing)]
+    lead = (f"Rendering needs {' and '.join(needs)} first." if needs and first.get("role")
+            in (RENDERER, "checkpoint")
             else f"{len(missing)} file{'s' if len(missing) != 1 else ''} missing.")
     return f"{lead} {human_size(needed)} to download, {human_size(report.get('free_bytes'))} free."
 
@@ -71,6 +85,9 @@ def details(report: dict[str, Any]) -> list[str]:
                      + ", ".join(found) if found else
                      "No matching files found in that folder.")
     elif state == "done" and task.get("kind") == "download":
+        renderer = [f for f in task.get("finished", []) if f.startswith("renderer (")]
+        if renderer:
+            lines.append(f"The renderer is installed and starts on your GPU: {renderer[0][10:-1]}.")
         lines.append("Download finished; every file was checked against its SHA-256.")
     elif state == "cancelled":
         lines.append("Download paused. Download again to resume where it stopped.")
@@ -90,6 +107,8 @@ def progress(report: dict[str, Any]) -> tuple[float, str]:
         return 0.0, ""
     if task.get("kind") == "link":
         return -1.0, "Checking files…"  # pulse
+    if task.get("phase") == RENDERER:
+        return -1.0, task.get("current") or "Installing the renderer…"
     total = task.get("total") or 0
     fraction = min(1.0, task.get("done", 0) / total) if total else 0.0
     current = task.get("current") or ""
@@ -119,9 +138,9 @@ def licence_note(report: dict[str, Any]) -> str:
 
 
 def should_prompt(report: dict[str, Any] | None) -> bool:
-    """Open the dialog by itself at startup? Only when rendering can't work at all
-    (no checkpoint) and nothing is already being set up."""
+    """Open the dialog by itself at startup? Only when rendering can't work at all (no
+    renderer or no checkpoint) and nothing is already being set up."""
     if report is None or running(report):
         return False
-    return any(r.get("role") == "checkpoint" and r.get("state") != "present"
+    return any(r.get("role") in ("checkpoint", RENDERER) and r.get("state") != "present"
                for r in report.get("models", []))

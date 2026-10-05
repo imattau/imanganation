@@ -33,9 +33,17 @@ NVIDIA driver extension provides `libcuda`), and the bundled engine starts and s
 | `uv`, to install PyTorch for the user's GPU on first run | `/app/bin/uv` |
 | The lettering fonts (Comic Neue, Bangers; SIL OFL) | `/app/share/fonts/imanganation` |
 
-Still to do: install PyTorch and ComfyUI's packages on first run, keep models, venv and
-outputs in the app's data folder, and start the bundled engine instead of the host's.
-Until then the plug-in uses the host install described above.
+**First run (done):** the bundled engine installs the renderer itself, into the app's
+data folder (`~/.var/app/io.github.imattau.Imanganation/data/imanganation`): a uv-managed
+Python 3.12, PyTorch for the GPU (read from the driver library: the sandbox has no
+`nvidia-smi`), and ComfyUI's packages at the tested versions (about 5.5 GB). ComfyUI runs
+from the read-only bundled code with its user, input, output and temp folders there
+too. `manganation install-comfyui` does this, and Set Up Models shows it as its first
+row (**renderer**), installed before the models. Verified in the sandbox from an
+empty data folder: GPU found, PyTorch cu130, ComfyUI starts with the IP-Adapter nodes.
+
+Still to do: keep models and outputs in the data folder, and start the bundled engine
+and ComfyUI instead of the host's. Until then the plug-in uses the host install above.
 
 ## Build
 

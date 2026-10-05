@@ -180,9 +180,12 @@ the top-level *Imanganation* menu:
   link matching files from a ComfyUI or A1111 folder (found by content, no extra disk
   space). The dialog isn't modal: downloads run in the engine, it shows their progress
   while you work, **Pause Download** keeps the partial file, and Download resumes it.
-  It opens by itself at startup when the checkpoint is missing (rendering can't work
-  without it). Engine: `GET /setup`, `POST /setup/download|link|cancel`; the same
-  module as `manganation setup`.
+  Its first row is the **renderer** (ComfyUI and PyTorch for your GPU, about 5.5 GB):
+  missing on a fresh Flatpak install, it's installed before the models, with each step
+  shown under the progress bar. It opens by itself at startup when the renderer or the
+  checkpoint is missing (rendering can't work without them). Engine: `GET /setup`,
+  `POST /setup/download|link|cancel`; the same modules as `manganation setup` and
+  `install-comfyui`.
 - **Engine Status…**: one click, no dialog. Shows engine and ComfyUI health (GPU, free
   VRAM), running jobs with elapsed time, queued jobs, recent jobs with their errors,
   missing model files for the current settings, and the image's project progress

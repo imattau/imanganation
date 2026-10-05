@@ -309,6 +309,13 @@ class Cancelled(Exception):
     """Raised from a progress callback to stop a download; its .part is kept."""
 
 
+RENDERER_ROLE = "renderer"
+# What the renderer's venv takes on disk (measured: PyTorch cu130 with its CUDA
+# libraries 5.2 GB, a uv-managed Python 0.1 GB, ComfyUI's packages); downloads are
+# smaller (compressed wheels), so this is also a safe disk-space estimate.
+RENDERER_BYTES = 5_500_000_000
+
+
 class SetupRunner:
     """One setup task at a time (a download run or a link search) in a background
     thread, so the engine stays responsive and the GIMP dialog can poll progress.
@@ -316,10 +323,14 @@ class SetupRunner:
 
     ``models`` returns the needed ModelFiles (re-read each time, so a settings change
     shows up); ``comfy_paths`` is ComfyUI's extra-model-paths file, rewritten for
-    ``root`` when a task starts (``comfy_paths_changed`` then asks for a restart)."""
+    ``root`` when a task starts (``comfy_paths_changed`` then asks for a restart).
+
+    ``renderer(log)`` returns the ComfyUI installer (comfy_setup.Installer) when the
+    renderer is set up here too (the Flatpak, where nothing else installs it): it's the
+    first row, and a download installs it before the models."""
 
     def __init__(self, root: Path, models: Callable[[], list[ModelFile]], *,
-                 comfy_paths: Path | None = None, fetch=None, find=None):
+                 comfy_paths: Path | None = None, fetch=None, find=None, renderer=None):
         import threading
 
         self.root = Path(root)
@@ -327,6 +338,7 @@ class SetupRunner:
         self.comfy_paths = comfy_paths
         self._fetch = fetch or download
         self._find = find or find_existing
+        self.renderer = renderer
         self._lock = threading.Lock()
         self._cancel = threading.Event()
         self._thread = None
@@ -342,6 +354,8 @@ class SetupRunner:
                  "state": state(m, self.root), "license": m.license,
                  "license_url": m.license_url, "downloadable": bool(m.urls),
                  "note": m.note} for m in models]
+        if self.renderer is not None:
+            rows.insert(0, self._renderer_row())
         missing = [r for r in rows if r["state"] != "present"]
         return {"models_dir": str(self.root), "free_bytes": free_bytes(self.root),
                 "models": rows, "missing_bytes": sum(r["size"] or 0 for r in missing
@@ -349,19 +363,42 @@ class SetupRunner:
                 "ready": not missing, "task": task,
                 "comfy_paths_changed": self.comfy_paths_changed}
 
+    def _renderer_row(self) -> dict:
+        row = {"role": RENDERER_ROLE,
+               "feature": "renderer: ComfyUI and PyTorch for your GPU (required)",
+               "file": "ComfyUI + PyTorch", "size": RENDERER_BYTES, "downloadable": True,
+               "license": "GPL-3.0 (ComfyUI), BSD-3-Clause (PyTorch), NVIDIA CUDA EULA",
+               "license_url": "https://github.com/comfyanonymous/ComfyUI/blob/master/LICENSE",
+               "note": ""}
+        try:
+            row["state"] = "present" if self.renderer(lambda *a: None).ready() else "missing"
+        except Exception as exc:  # noqa: BLE001 - a broken install shows, never crashes
+            row.update(state="unknown", note=str(exc))
+        return row
+
     def busy(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
 
     # -- starting
     def start_download(self, roles: list[str] | None = None) -> dict:
+        """Download what's missing (``roles``: only these). The renderer, if it's set up
+        here and missing, is installed first: rendering needs it before any model."""
         todo = [m for m in self.models() if state(m, self.root) != "present" and m.urls
                 and (roles is None or m.role in roles)]
+        renderer = (self.renderer is not None and (roles is None or RENDERER_ROLE in roles)
+                    and self._renderer_row()["state"] != "present")
         total = sum(m.size or 0 for m in todo)
-        if total > free_bytes(self.root):
-            raise SetupError(f"not enough disk space: {total / 1e9:.1f} GB needed, "
+        needed = total + (RENDERER_BYTES if renderer else 0)
+        if needed > free_bytes(self.root):
+            raise SetupError(f"not enough disk space: {needed / 1e9:.1f} GB needed, "
                              f"{free_bytes(self.root) / 1e9:.1f} GB free")
-        return self._start("download", lambda: self._download(todo), files=len(todo),
-                           total=total)
+        def work():
+            if renderer:
+                self._install_renderer()
+            self._download(todo)
+
+        return self._start("download", work, files=len(todo) + renderer, total=total,
+                           renderer=renderer, phase="renderer" if renderer else "models")
 
     def start_link(self, folders: list[Path]) -> dict:
         for folder in folders:
@@ -412,6 +449,27 @@ class SetupRunner:
             self._task = {**self._task, **changes}
 
     # -- work
+    def _install_renderer(self) -> None:
+        """ComfyUI's venv with PyTorch for this GPU (comfy_setup), then its start-up
+        check. Its steps can't be interrupted mid-way: a pause applies after it."""
+        import subprocess
+
+        self._update(phase="renderer", current="Checking the GPU…")
+
+        def log(*parts):
+            self._update(current=" ".join(str(p) for p in parts)[:200])
+
+        try:
+            installer = self.renderer(log)
+            installer.install(installer.plan())
+            self._update(current="Checking that ComfyUI starts on the GPU…")
+            summary = installer.verify()
+            installer.mark_ready()
+            self._update(finished=[*self._task["finished"], f"renderer ({summary})"])
+        except (RuntimeError, OSError, subprocess.CalledProcessError) as exc:
+            self._update(errors=[*self._task["errors"], f"renderer: {exc}"])
+        self._update(phase="models")
+
     def _download(self, todo: list[ModelFile]) -> None:
         before = 0
         for m in todo:  # most useful first

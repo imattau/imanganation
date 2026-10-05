@@ -163,12 +163,17 @@ renders (downloads don't use the GPU).
 
 - `GET /setup` → `{"models_dir", "free_bytes", "missing_bytes", "ready",
   "models": [{"role", "feature", "file", "size", "state", "license", "license_url",
-  "downloadable", "note"}], "task", "comfy_paths_changed"}`. `state` is `present`,
+  "downloadable", "note"}], "task", "comfy_paths_changed"}`. When the engine installs
+  its own renderer (inside the Flatpak; also shown for a checkout), the first row is
+  `{"role": "renderer"}`: ComfyUI's venv with PyTorch for the GPU (comfy_setup), sized
+  at its ~5.5 GB on disk. `state` is `present`,
   `missing`, `wrong size` or `unknown`. `task` is the running or last task:
   `{"kind": "download"|"link", "state": "running"|"done"|"error"|"cancelled",
   "current", "done", "total", "file_done", "file_total", "finished", "errors"}`.
 - `POST /setup/download` `{"roles": [...]}` (optional; default all missing) → `202`
-  with the task. Most useful first; each file is hashed and only moved into place when
+  with the task. A missing renderer is installed first (`task.phase` is `renderer`, then
+  `models`; `current` is the step being run); it can't be paused mid-way, and if it
+  fails the models still download. Most useful first; each file is hashed and only moved into place when
   its SHA-256 matches; a failed file is reported and the rest continue. `409` while a
   task runs, `507` without the disk space.
 - `POST /setup/link` `{"folders": [...]}` → `202`: search folders of models the user

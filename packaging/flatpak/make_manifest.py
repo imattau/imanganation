@@ -46,7 +46,8 @@ PINNED = {  # module -> git tag and commit (what ~/.local/gimp-deps was built fr
              "commit": "3ed6237faa44bc64bdff8dcb2750c734ac680d40"},
 }
 PLUGIN_DIR = "/app/lib/gimp/3.0/plug-ins/imanganation"
-GIT_CHURN = [".git/index", ".git/FETCH_HEAD", ".git/ORIG_HEAD", ".git/logs"]
+# .git/modules: the gimp-data submodule's git data, also rewritten by every git status.
+GIT_CHURN = [".git/index", ".git/FETCH_HEAD", ".git/ORIG_HEAD", ".git/logs", ".git/modules"]
 ENGINE_DIR = "/app/share/imanganation"  # REPO_ROOT inside the Flatpak
 UV = {"version": "0.11.29", "sha256":
       "04f8b82f5d47f0512dcd32c67a4a6f16a0ea27c81537c338fd0ad6b23cebe829"}
@@ -145,9 +146,12 @@ def comfyui_module(repo: Path, pins: dict, patches: list[Path]) -> dict:
     sources += [{"type": "patch", "path": str(p)} for p in patches]
     return {"name": "comfyui", "buildsystem": "simple", "sources": sources,
             # git sources arrive with their whole history (ComfyUI's is ~2 GB): code only.
+            # The marker tells the engine this code is bundled (read-only, patched): its
+            # venv and writable folders go to the data folder (comfy_setup.installer_for).
             "build-commands": ["find . -name .git -prune -exec rm -rf {} +",
                                f"mkdir -p {ENGINE_DIR}/vendor/ComfyUI",
-                               f"cp -a . {ENGINE_DIR}/vendor/ComfyUI/"]}
+                               f"cp -a . {ENGINE_DIR}/vendor/ComfyUI/",
+                               f"touch {ENGINE_DIR}/vendor/ComfyUI/.imanganation-bundled"]}
 
 
 def uv_module() -> dict:

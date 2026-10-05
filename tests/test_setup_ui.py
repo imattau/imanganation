@@ -86,3 +86,38 @@ def test_only_the_checkpoint_missing_opens_the_dialog_by_itself():
     damaged = _report(("wrong size", "present"))
     assert setup_ui.row_state(damaged["models"][0], damaged["task"]) == (
         "Damaged: will download again")
+
+
+def _renderer_row(state="missing"):
+    return {"role": "renderer", "feature": "renderer: ComfyUI and PyTorch for your GPU (required)",
+            "file": "ComfyUI + PyTorch", "size": 5_500_000_000, "state": state,
+            "license": "GPL-3.0 (ComfyUI), BSD-3-Clause (PyTorch), NVIDIA CUDA EULA",
+            "license_url": "https://x/LICENSE", "downloadable": True}
+
+
+def test_the_renderer_row_installs_first_with_its_own_progress():
+    report = _report()
+    report["models"].insert(0, _renderer_row())
+    report["missing_bytes"] += 5_500_000_000
+    assert setup_ui.headline(report).startswith(
+        "Rendering needs the renderer and the checkpoint first. 12.6 GB to download")
+    assert setup_ui.should_prompt(report)
+    installing = {"kind": "download", "state": "running", "phase": "renderer",
+                  "current": "Installing PyTorch (cu130); a few GB…", "errors": []}
+    busy = {**report, "task": installing}
+    assert setup_ui.row_state(report["models"][0], installing) == "Installing…"
+    assert setup_ui.row_state(report["models"][1], installing) == "Missing"
+    assert setup_ui.progress(busy) == (-1.0, "Installing PyTorch (cu130); a few GB…")
+    assert setup_ui.headline(busy).startswith("Installing the renderer")
+    failed = {"kind": "download", "state": "error", "phase": "models",
+              "finished": ["noobaiXL.safetensors"],
+              "errors": ["renderer: the NVIDIA driver is too old"]}
+    assert setup_ui.row_state(report["models"][0], failed) == "Failed (see below)"
+    done = {"kind": "download", "state": "done", "errors": [],
+            "finished": ["renderer (2.14.1+cu130 | NVIDIA GeForce RTX 5060 Ti)"]}
+    assert setup_ui.details({**report, "task": done})[0] == (
+        "The renderer is installed and starts on your GPU: "
+        "2.14.1+cu130 | NVIDIA GeForce RTX 5060 Ti.")
+    ready = _report(("present", "present"))
+    ready["models"].insert(0, _renderer_row("missing"))
+    assert setup_ui.should_prompt(ready)  # no renderer: can't render, so ask
