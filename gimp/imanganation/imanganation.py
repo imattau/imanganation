@@ -57,6 +57,7 @@ try:
     import bubbles as bubble_templates
     import lettering
     from layouts import frame_rings, layout_preview_rgb, page_layout_availability
+    from panel_ui import _panel_label as panel_label
     from panel_ui import build_docks, build_welcome_docks, character_row_id, rgb_png
     from project_store import (
         ProjectFileError,
@@ -79,6 +80,7 @@ except ImportError:  # Keep older single-file plug-in installs usable for legacy
     new_id = None
     build_docks = None
     character_row_id = None
+    panel_label = None
     rgb_png = None
     build_welcome_docks = None
     frame_rings = layout_preview_rgb = page_layout_availability = None
@@ -1917,11 +1919,11 @@ def _refresh_project_docks(sync_canvas=False):
         old = by_id.get(orphan_id)
         new = by_id.get(candidate_id)
         if old is not None:
-            contents["script"] += (f"\nOrphan\t{_panel_label(old)} · "
+            contents["script"] += (f"\nOrphan\t{panel_label(old)} · "
                                    f"{len(old.get('takes', []))} retained takes · "
                                    f"active {old.get('active_take') or 'None'}")
         if new is not None:
-            contents["script"] += f"\nCandidate\t{_panel_label(new)}"
+            contents["script"] += f"\nCandidate\t{panel_label(new)}"
     if selected_id in {panel["id"] for panel in manifest["panels"]}:
         references = _engine_reference_rows(root, manifest, selected_id)
         if references:
