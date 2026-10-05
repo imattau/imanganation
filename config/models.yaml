@@ -150,3 +150,19 @@ taggers:
       url: https://huggingface.co/SmilingWolf/wd-swinv2-tagger-v3/resolve/627aef95638667ddcaa3ac8ae625e88ea5b02f51/selected_tags.csv
       size: 308468
       sha256: 298633d94d0031d2081c0893f29c82eab7f0df00b08483ba8f29d1e979441217
+
+# Detectors find each figure in a render, so `manganation eval` can tag figures one by
+# one (who wears what; a cloned or missing character). `setup --eval` fetches them.
+detectors:
+  anime_person:
+    id: anime-person-detect-v1.3-s.onnx
+    display: Anime person detector v1.3 (YOLOv8s, ONNX, runs on the CPU)
+    source: https://huggingface.co/deepghs/anime_person_detection (person_detect_v1.3_s)
+    subdir: taggers
+    threshold: 0.324     # the release's F1-optimal confidence
+    feature: render-accuracy eval (finds each figure)
+    license: {name: MIT, url: https://huggingface.co/deepghs/anime_person_detection}
+    download:
+      url: https://huggingface.co/deepghs/anime_person_detection/resolve/e39c744c22432ad01f91dd254fe2b02c8d878b8c/person_detect_v1.3_s/model.onnx
+      size: 44583231
+      sha256: 6da88929438cd442e31e45ff4f934dd2d7eb9cf7a423c22885d650ee52550f90

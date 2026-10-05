@@ -69,7 +69,7 @@ def default_tagger() -> Tagger:
     from manganation.config import load_models, models_root
 
     root = models_root()
-    model, tags = ms.evaluation(load_models())
+    model, tags, *_ = ms.evaluation(load_models())
     missing = [m.file or m.note for m in (model, tags) if ms.state(m, root) != "present"]
     if missing:
         raise RuntimeError(f"tagger files missing ({', '.join(missing)}): run "

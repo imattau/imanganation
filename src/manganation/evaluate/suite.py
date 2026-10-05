@@ -14,8 +14,17 @@ tags each image with the WD14 tagger, and scores the checks:
 Seeds stay fixed, so two runs differ only by what changed in between (prompt, style,
 settings, models). ``compare`` puts two reports side by side.
 
-The tagger sees the picture as a whole: it can tell that someone is grinning, not
-*who*. Per-character bleed needs a region-aware check (not here yet).
+With ``characters`` in the suite (each one's identity ``tags`` and ``forbid``), the
+person detector also finds every figure:
+
+- **figures**: as many figures as the panel has characters (a clone or a dropped
+  character fails it; the tagger alone counted a three-figure render as two).
+- **identity**: each figure is cropped and tagged on its own, figures are matched to
+  characters by the best assignment, and each character's tags are checked on their
+  own crop. Costume bleed (Akira in Yuki's skirt) fails a ``forbid``.
+
+Without them, the tagger sees the picture as a whole: it can tell that someone is
+grinning, not *who*.
 """
 
 from __future__ import annotations
@@ -25,6 +34,7 @@ import re
 import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime
+from itertools import permutations
 from pathlib import Path
 
 import yaml
@@ -58,6 +68,8 @@ class Suite:
     cases: list[Case]
     reading_order: str = "rtl"
     threshold: float = DEFAULT_THRESHOLD
+    # name -> {"tags": [...], "forbid": [...]}, checked on that character's own figure
+    characters: dict[str, dict[str, list[str]]] = field(default_factory=dict)
 
 
 def _repo_path(value: str) -> Path:
@@ -82,7 +94,10 @@ def load_suite(path: Path | str) -> Suite:
         script=_repo_path(data["script"]), identity=_repo_path(data["identity"]),
         seeds=[int(s) for s in data["seeds"]], cases=cases,
         reading_order=data.get("reading_order", "rtl"),
-        threshold=float(data.get("threshold", DEFAULT_THRESHOLD)))
+        threshold=float(data.get("threshold", DEFAULT_THRESHOLD)),
+        characters={name: {"tags": list((c or {}).get("tags") or []),
+                           "forbid": list((c or {}).get("forbid") or [])}
+                    for name, c in (data.get("characters") or {}).items()})
 
 
 def panel_specs(suite: Suite) -> dict[str, object]:
@@ -155,11 +170,82 @@ def score_image(probs: dict[str, float], case: Case, count: list[str],
     return checks
 
 
+COVERED = 0.3  # a figure more covered than this by another one: its crop shows both
+
+
+def covered(box, others) -> float:
+    """Share of ``box`` that other figures' boxes cover (the most covered by any one)."""
+    from manganation.evaluate.detector import Box
+
+    def inter(a: Box, b: Box) -> float:
+        return (max(0.0, min(a.x1, b.x1) - max(a.x0, b.x0))
+                * max(0.0, min(a.y1, b.y1) - max(a.y0, b.y0)))
+    return max((inter(box, o) / box.area for o in others if box.area), default=0.0)
+
+
+def _identity_checks(name: str, want: dict, probs: dict[str, float],
+                     threshold: float, *, forbids: bool = True) -> list[dict]:
+    """``forbids`` off for an overlapped figure: its crop holds the other character
+    too, so "Akira: not skirt" would judge Yuki's skirt."""
+    checks = [check_tag(t, probs, threshold) for t in want["tags"]]
+    if forbids:
+        checks += [check_tag(t, probs, threshold, forbid=True) for t in want["forbid"]]
+    for c in checks:
+        c["label"], c["kind"] = f"{name}: {c['label']}", "identity"
+    return checks
+
+
+def score_figures(image: Path, names: list[str], suite: Suite, tagger,
+                  detector) -> tuple[list[dict], list[dict]]:
+    """-> (checks, figures). Each figure is tagged alone and matched to the character
+    whose identity checks it passes best; a character without a figure fails theirs."""
+    from PIL import Image
+
+    with Image.open(image) as im:
+        im = im.convert("RGB")
+        boxes = detector.figures(im)
+        crops = [tagger.tags(im.crop((max(0, round(b.x0)), max(0, round(b.y0)),
+                                      min(im.width, round(b.x1)),
+                                      min(im.height, round(b.y1)))))
+                 for b in boxes]
+    clear = [covered(b, boxes[:i] + boxes[i + 1:]) <= COVERED for i, b in enumerate(boxes)]
+    checks = [{"label": f"figures: {len(names)}", "kind": "figures",
+               "ok": len(boxes) == len(names), "detail": f"found {len(boxes)}"}]
+    known = [n for n in names if n in suite.characters]
+    best: tuple[int, dict[str, int]] = (-1, {})
+    # every way to give the known characters distinct figures (or none, if too few)
+    slots = list(range(len(boxes))) + [None] * len(known)
+    for chosen in dict.fromkeys(permutations(slots, len(known))):  # ordered: ties stable
+        passed = sum(c["ok"] for name, f in zip(known, chosen, strict=True) if f is not None
+                     for c in _identity_checks(name, suite.characters[name], crops[f],
+                                               suite.threshold, forbids=clear[f]))
+        if passed > best[0]:
+            best = (passed, {n: f for n, f in zip(known, chosen, strict=True)
+                             if f is not None})
+    owner = {f: n for n, f in best[1].items()}
+    for name in known:
+        want = suite.characters[name]
+        if name in best[1]:
+            f = best[1][name]
+            checks += _identity_checks(name, want, crops[f], suite.threshold,
+                                       forbids=clear[f])
+        else:
+            checks += [{"label": f"{name}: {t}", "kind": "identity", "ok": False,
+                        "detail": "no figure"} for t in want["tags"]]
+    figures = [{"box": [round(b.x0), round(b.y0), round(b.x1), round(b.y1)],
+                "score": round(b.score, 2), "character": owner.get(i),
+                "overlapped": not clear[i]}
+               for i, b in enumerate(boxes)]
+    return checks, figures
+
+
 def unknown_tags(suite: Suite, vocabulary: set[str]) -> list[str]:
     """Expectation tags the tagger can never output (a typo, or not a Danbooru tag):
     such a check would always fail (or, forbidden, always pass)."""
+    identity = [e for c in suite.characters.values() for e in [*c["tags"], *c["forbid"]]]
     wanted = {t for c in suite.cases for e in [*c.tags, *c.forbid, *(c.count or [])]
               for t in _alternatives(e)}
+    wanted |= {t for e in identity for t in _alternatives(e)}
     return sorted(wanted - vocabulary)
 
 
@@ -209,8 +295,9 @@ def render_all(suite: Suite, out_dir: Path, *, client=None, log=print) -> None:
 
 
 def score_all(suite: Suite, out_dir: Path, tagger, *, label: str = "",
-              snapshot: dict | None = None) -> dict:
-    """Tag every render in ``out_dir`` and write ``report.json`` (+ ``sheet.png``)."""
+              snapshot: dict | None = None, detector=None) -> dict:
+    """Tag every render in ``out_dir`` and write ``report.json`` (+ ``sheet.png``).
+    With a ``detector`` (and ``characters`` in the suite), figures are checked too."""
     specs = panel_specs(suite)
     results = []
     for case in suite.cases:
@@ -224,10 +311,15 @@ def score_all(suite: Suite, out_dir: Path, tagger, *, label: str = "",
             meta = image.with_suffix(".json")
             prompt = json.loads(meta.read_text()).get("prompt", "") if meta.exists() else ""
             checks = score_image(probs, case, count, suite.threshold)
+            figures: list[dict] = []
+            if detector is not None and suite.characters:
+                more, figures = score_figures(image, specs[case.id].characters, suite,
+                                              tagger, detector)
+                checks += more
             top = sorted(probs.items(), key=lambda kv: -kv[1])[:30]
             results.append({
                 "case": case.id, "seed": seed, "image": image.name, "prompt": prompt,
-                "checks": checks,
+                "checks": checks, "figures": figures,
                 "score": sum(c["ok"] for c in checks) / len(checks) if checks else 1.0,
                 "top_tags": {t: round(p, 3) for t, p in top if p >= 0.2}})
     report = {"suite": suite.name, "suite_path": str(suite.path), "label": label,
@@ -278,8 +370,15 @@ def contact_sheet(results: list[dict], out_dir: Path, *, thumb: int = 320) -> Pa
         y = 8 + cases.index(r["case"]) * (thumb + caption + 8)
         with Image.open(out_dir / r["image"]) as im:
             im = im.convert("RGB")
+            scale = min(thumb / im.width, thumb / im.height)
             im.thumbnail((thumb, thumb))
-            sheet.paste(im, (x + (thumb - im.width) // 2, y + (thumb - im.height) // 2))
+            ox, oy = x + (thumb - im.width) // 2, y + (thumb - im.height) // 2
+            sheet.paste(im, (ox, oy))
+        for fig in r.get("figures", []):
+            x0, y0, x1, y1 = (round(v * scale) for v in fig["box"])
+            colour = "lime" if fig["character"] else "red"
+            draw.rectangle((ox + x0, oy + y0, ox + x1, oy + y1), outline=colour, width=2)
+            draw.text((ox + x0 + 3, oy + y0 + 2), fig["character"] or "?", fill=colour)
         passed = sum(c["ok"] for c in r["checks"])
         failed = [c["label"] for c in r["checks"] if not c["ok"]]
         text = f"{r['case']} s{r['seed']}: {passed}/{len(r['checks'])}\n"

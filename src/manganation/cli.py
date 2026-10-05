@@ -684,6 +684,15 @@ def _print_report(report: dict) -> None:
                f"{', '.join(report['unknown_tags'])}")
 
 
+def _detector_for(suite):
+    """The person detector, when the suite has per-character checks for it."""
+    if not suite.characters:
+        return None
+    from manganation.evaluate.detector import default_detector
+
+    return default_detector()
+
+
 @eval_app.command("run")
 def eval_run(
     suite_file: Path = typer.Argument(..., help="Suite YAML, e.g. config/eval/rooftop.yaml."),
@@ -704,6 +713,7 @@ def eval_run(
     if seeds:
         suite.seeds = [int(s) for s in seeds.split(",") if s.strip()]
     tagger = default_tagger()  # fail before an hour of rendering, not after
+    detector = _detector_for(suite)
     if out is None:
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         slug = re.sub(r"[^A-Za-z0-9_.-]+", "-", label).strip("-")
@@ -711,7 +721,8 @@ def eval_run(
     rprint(f"Run folder: {out}")
     snapshot = ev._snapshot()
     ev.render_all(suite, out, log=rprint)
-    report = ev.score_all(suite, out, tagger, label=label, snapshot=snapshot)
+    report = ev.score_all(suite, out, tagger, label=label, snapshot=snapshot,
+                          detector=detector)
     _print_report(report)
     rprint(f"Report: {out / 'report.json'}\nSheet: {out / 'sheet.png'}")
 
@@ -731,7 +742,7 @@ def eval_score(
     suite = ev.load_suite(suite_file or old["suite_path"])
     suite.seeds = old["seeds"]
     report = ev.score_all(suite, run_dir, default_tagger(), label=old.get("label", ""),
-                          snapshot=old.get("config"))
+                          snapshot=old.get("config"), detector=_detector_for(suite))
     _print_report(report)
 
 
@@ -752,6 +763,10 @@ def eval_compare(
     a, b = load(before), load(after)
     if a["seeds"] != b["seeds"]:
         rprint("[yellow]The runs used different seeds: differences are partly luck.[/yellow]")
+    if set(a["summary"]["by_check"]) != set(b["summary"]["by_check"]):
+        rprint("[yellow]The runs were scored with different checks, so their overall "
+               "scores don't compare: re-score one with `eval score <run> --suite …`."
+               "[/yellow]")
     table = Table(title=f"{a.get('label') or before}  ->  {b.get('label') or after}")
     for col in ("", "Before", "After", "Change"):
         table.add_column(col, justify="left" if not col else "right", overflow="fold")

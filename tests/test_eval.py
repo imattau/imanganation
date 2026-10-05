@@ -64,9 +64,10 @@ def test_eval_tagger_is_registered_but_not_needed_to_render():
     from manganation import models_setup as ms
     from manganation.config import load_settings
 
-    model, tags = ms.evaluation(load_models())
+    model, tags, detector = ms.evaluation(load_models())
     assert model.file.endswith(".onnx") and model.urls and model.sha256
-    assert tags.file.endswith(".csv") and tags.urls
+    assert tags.file.endswith(".csv") and tags.urls and tags.sha256
+    assert detector.file.endswith(".onnx") and detector.urls and detector.sha256
     assert model.file not in {m.file for m in ms.needed(load_settings(), load_models())}
 
 
@@ -121,3 +122,88 @@ def test_compare_lines_up_two_reports():
     rows = ev.compare(a, b)
     assert rows[0] == ("overall", 0.5, 0.75)
     assert ("sit: new", None, 0.0) in rows
+
+
+# --- per-figure checks ------------------------------------------------------------
+
+
+def test_nms_keeps_people_side_by_side_but_drops_duplicates():
+    from manganation.evaluate.detector import Box, suppress
+
+    a, dup = Box(0, 0, 100, 200, 0.9), Box(2, 0, 102, 200, 0.8)
+    close = Box(40, 0, 140, 200, 0.85)  # a second person half behind the first
+    assert suppress([a, dup, close], 0.7) == [a, close]
+
+
+class FakeDetector:
+    def __init__(self, boxes):
+        self.boxes = boxes
+
+    def figures(self, image):
+        return self.boxes
+
+
+class CropTagger:
+    """Tags a crop by where it starts: in the black left half Akira-like, else Yuki."""
+    vocabulary = {"1boy", "1girl", "brown hair", "skirt", "pants", "white hair"}
+
+    def __init__(self, left, right):
+        self.left, self.right = left, right
+
+    def tags(self, image):
+        return self.left if image.getpixel((0, 0)) == (0, 0, 0) else self.right
+
+
+def _pair_suite(tmp_path):
+    suite = _suite(tmp_path)
+    suite.characters = {"Akira": {"tags": ["1boy", "brown hair"], "forbid": ["skirt"]},
+                        "Yuki": {"tags": ["1girl", "white hair"], "forbid": ["pants"]}}
+    return suite
+
+
+def _two_tone(tmp_path):
+    img = Image.new("RGB", (100, 50), "white")
+    img.paste((0, 0, 0), (0, 0, 50, 50))  # left half black
+    path = tmp_path / "pair.png"
+    img.save(path)
+    return path
+
+
+def test_figures_are_matched_to_characters_and_bleed_fails(tmp_path):
+    from manganation.evaluate.detector import Box
+
+    suite, image = _pair_suite(tmp_path), _two_tone(tmp_path)
+    boxes = [Box(0, 0, 50, 50, 0.9), Box(50, 0, 100, 50, 0.9)]
+    akira = {"1boy": 0.9, "brown hair": 0.9, "skirt": 0.8}   # wearing Yuki's skirt
+    yuki = {"1girl": 0.9, "white hair": 0.9}
+    checks, figures = ev.score_figures(image, ["Yuki", "Akira"], suite,
+                                       CropTagger(akira, yuki), FakeDetector(boxes))
+    assert [f["character"] for f in figures] == ["Akira", "Yuki"]
+    failed = [c["label"] for c in checks if not c["ok"]]
+    assert failed == ["Akira: not skirt"]
+
+
+def test_a_clone_or_a_missing_figure_fails(tmp_path):
+    from manganation.evaluate.detector import Box
+
+    suite, image = _pair_suite(tmp_path), _two_tone(tmp_path)
+    yuki = {"1girl": 0.9, "white hair": 0.9}
+    checks, _ = ev.score_figures(image, ["Yuki", "Akira"], suite, CropTagger(yuki, yuki),
+                                 FakeDetector([Box(50, 0, 100, 50, 0.9)]))
+    assert checks[0] == {"label": "figures: 2", "kind": "figures", "ok": False,
+                         "detail": "found 1"}
+    assert {c["detail"] for c in checks if c["label"].startswith("Akira")} == {"no figure"}
+
+
+def test_an_overlapped_figure_skips_its_forbids(tmp_path):
+    from manganation.evaluate.detector import Box
+
+    suite, image = _pair_suite(tmp_path), _two_tone(tmp_path)
+    # Akira half behind Yuki: his crop shows her skirt, which says nothing about him
+    boxes = [Box(0, 0, 80, 50, 0.9), Box(50, 0, 100, 50, 0.9)]
+    akira = {"1boy": 0.9, "brown hair": 0.9, "skirt": 0.8}
+    yuki = {"1girl": 0.9, "white hair": 0.9}
+    checks, figures = ev.score_figures(image, ["Yuki", "Akira"], suite,
+                                       CropTagger(akira, yuki), FakeDetector(boxes))
+    assert figures[0]["overlapped"] and all(c["ok"] for c in checks)
+    assert "Akira: not skirt" not in [c["label"] for c in checks]

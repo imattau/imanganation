@@ -11,6 +11,18 @@ reading_order: rtl
 seeds: [101, 202, 303]
 threshold: 0.35
 
+# Checked on each character's own figure (the person detector finds them; each crop is
+# tagged alone). `forbid` holds the other character's look, so costume bleed between
+# them fails here even when the picture as a whole has every tag.
+characters:
+  Akira:
+    tags: ["1boy|male focus", brown hair,
+           "streaked hair|multicolored hair|blue hair|two-tone hair", pants, necktie]
+    forbid: [skirt, twintails, "white hair|grey hair", hair ribbon, "1girl"]
+  Yuki:
+    tags: ["1girl", "white hair|grey hair", twintails, "sailor collar|serafuku", skirt]
+    forbid: [pants, brown hair, blue hair, "1boy|male focus"]
+
 cases:
   - id: p1-1-sits-at-fence             # Akira sits alone against the chain-link fence,
     panel: 1-1                         # lunchbox on his knees. Wide, rooftop, afternoon.

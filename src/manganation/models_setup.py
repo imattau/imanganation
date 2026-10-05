@@ -92,11 +92,13 @@ def needed(settings, models: dict) -> list[ModelFile]:
 
 
 DEFAULT_TAGGER = "wd_swinv2_v3"
+DEFAULT_DETECTOR = "anime_person"
 
 
 def evaluation(models: dict, tagger: str = DEFAULT_TAGGER) -> list[ModelFile]:
-    """The files ``manganation eval`` judges renders with: a tagger and its tag list.
-    Not needed to render, so ``setup`` only fetches them when asked (``--eval``)."""
+    """The files ``manganation eval`` judges renders with: a tagger, its tag list and
+    a person detector. Not needed to render, so ``setup`` only fetches them when asked
+    (``--eval``)."""
     taggers = models.get("taggers", {})
     entry = taggers.get(tagger)
     out = [_entry(f"tagger ({tagger})", entry, "taggers",
@@ -104,6 +106,9 @@ def evaluation(models: dict, tagger: str = DEFAULT_TAGGER) -> list[ModelFile]:
     if entry is not None:
         out.append(_entry("tagger tags", taggers.get(entry.get("tags", "")), "taggers",
                           f"tagger {tagger!r} names no tag list that's in models.yaml"))
+    detectors = models.get("detectors", {})
+    out.append(_entry(f"detector ({DEFAULT_DETECTOR})", detectors.get(DEFAULT_DETECTOR),
+                      "taggers", f"no detectors.{DEFAULT_DETECTOR} in models.yaml"))
     return out
 
 
