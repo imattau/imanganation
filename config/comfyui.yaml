@@ -1,0 +1,34 @@
+# The ComfyUI install imanganation is tested with. `manganation install-comfyui`
+# (src/manganation/comfy_setup.py) builds exactly this under settings.paths.comfyui_dir.
+# Bump a commit only after rendering, inpaint, refine and keep-composition still work.
+
+comfyui:
+  repo: https://github.com/comfyanonymous/ComfyUI.git
+  commit: e9027f2b30f37bb3052714eb08fcf479542f4fc0  # 2026-10-03
+
+python: "3.12"
+
+# Every other package at the version tested with (regenerate from a tested venv with
+# `manganation install-comfyui --freeze` when bumping the commits above).
+constraints: comfyui-constraints.txt
+
+# Only what the engine's graphs use (render/graphs.py): IPAdapterAdvanced,
+# IPAdapterRegionalConditioning, IPAdapterCombineParams, IPAdapterFromParams.
+custom_nodes:
+  ComfyUI_IPAdapter_plus:
+    repo: https://github.com/cubiq/ComfyUI_IPAdapter_plus.git
+    commit: a0f451a5113cf9becb0847b92884cb10cbdec0ef  # 2025-04-14
+
+# PyTorch wheels per GPU backend (https://download.pytorch.org/whl/). For NVIDIA the
+# newest CUDA build the driver supports is chosen (`driver_cuda`: the driver's "CUDA
+# Version" must be at least this). `max_capability`: the newest GPU architecture a
+# build has kernels for (CUDA 12.6 builds can't run Blackwell, compute 12.x).
+torch:
+  cuda:
+    - {index: cu130, driver_cuda: "13.0"}
+    - {index: cu129, driver_cuda: "12.9"}
+    - {index: cu128, driver_cuda: "12.8"}
+    - {index: cu126, driver_cuda: "12.6", max_capability: "11.9"}
+  rocm: rocm7.1
+  cpu: cpu
+  base_url: https://download.pytorch.org/whl

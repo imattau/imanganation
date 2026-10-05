@@ -270,6 +270,80 @@ def setup(
     rprint("[green]Done: every model the current settings need is in place.[/green]")
 
 
+@app.command("install-comfyui")
+def install_comfyui(
+    check: bool = typer.Option(False, "--check", help="Only report what would change."),
+    gpu: str = typer.Option("auto", help="auto, cuda, rocm, mps or cpu (PyTorch build)."),
+    target: Path = typer.Option(None, "--dir", help="Where ComfyUI goes "
+                                "(default: settings.paths.comfyui_dir, vendor/ComfyUI)."),
+    force: bool = typer.Option(False, "--force",
+                               help="Overwrite local changes in the ComfyUI checkouts."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Don't ask before installing."),
+    freeze: bool = typer.Option(False, "--freeze", help="Maintainers: write the installed "
+                                "package versions to the constraints file and stop."),
+) -> None:
+    """Install the ComfyUI imanganation renders with: pinned commits, the right
+    PyTorch for this GPU, the custom nodes, imanganation's patches. Safe to re-run."""
+    from manganation import comfy_setup as cs
+    from manganation import models_setup as ms
+    from manganation.config import CONFIG_DIR, REPO_ROOT, load_models, load_settings
+
+    settings = load_settings()
+    comfy = (target or REPO_ROOT / settings.paths.comfyui_dir).resolve()
+    installer = cs.Installer(comfy, cs.load_pins(), log=rprint)
+    if freeze:
+        path = CONFIG_DIR / installer.pins["constraints"]
+        path.write_text(installer.freeze())
+        rprint(f"Wrote {path} from {comfy}'s venv.")
+        raise typer.Exit(0)
+    detected = cs.detect_gpu()
+    chosen = detected if gpu in ("auto", detected.backend) else cs.Gpu(gpu)
+    try:
+        plan = installer.plan(chosen)
+    except cs.InstallError as exc:
+        rprint(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    g = plan.gpu
+    rprint(f"[bold]ComfyUI[/bold] in {comfy}")
+    rprint("GPU: " + {"cuda": f"{g.name} (compute {g.capability}, {g.vram_gb} GB, driver "
+                              f"CUDA {g.driver_cuda})",
+                      "rocm": f"{g.name} (ROCm)", "mps": "Apple Silicon (Metal)",
+                      "cpu": "[yellow]none found: CPU only, far too slow to render[/yellow]"
+                      }.get(g.backend, g.backend))
+    if g.backend == "cuda" and 0 < g.vram_gb < 11:
+        rprint(f"[yellow]{g.vram_gb} GB of VRAM: SDXL needs about 12 GB; expect "
+               "out-of-memory errors.[/yellow]")
+    rprint(f"PyTorch: {plan.index or 'the default (PyPI) build'}")
+    structural = plan.steps[:-2]  # the last two (requirements, patches) always run
+    for step in plan.steps:
+        rprint(f"  • {step}")
+    if check:
+        rprint("[green]Up to date.[/green]" if not structural
+               else f"{len(structural)} change(s) to make; run without --check.")
+        raise typer.Exit(1 if structural else 0)
+    if structural and not yes and not typer.confirm("Go ahead?"):
+        raise typer.Exit(1)
+    try:
+        installer.install(plan, force=force)
+        rprint("Checking the install (PyTorch, then a ComfyUI start-up test)…")
+        summary = installer.verify()
+    except (cs.InstallError, OSError) as exc:
+        rprint(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    except Exception as exc:  # a failed git/uv step: its output is already above
+        rprint(f"[red]A step failed: {exc}[/red]")
+        raise typer.Exit(1) from exc
+    rprint(f"[green]ComfyUI is ready[/green]: torch {summary}")
+    models_root = (REPO_ROOT / settings.paths.models_dir).resolve()
+    if ms.write_comfy_paths(CONFIG_DIR / "comfyui_extra_model_paths.yaml", models_root):
+        rprint(f"Pointed ComfyUI's model paths at {models_root}.")
+    missing = [m for m in ms.needed(settings, load_models())
+               if ms.state(m, models_root) != "present"]
+    rprint("Next: [bold]manganation setup[/bold] to get the models."
+           if missing else "Start it with ./scripts/comfy.sh start (GIMP starts it too).")
+
+
 @script_app.command("parse")
 def script_parse(
     source: Path = typer.Argument(..., exists=True, dir_okay=False, help="Script file to parse."),

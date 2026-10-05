@@ -47,6 +47,10 @@ colour by the plain checkpoint. A dedicated manga LoRA is still TODO.
 - `ComfyUI-ppm` — `AttentionCouplePPM` for multi-character regional prompting
 - (removed `ComfyUI_essentials` — heavy optional deps, not needed yet)
 
+> Updated 2026-10-05: `uv run manganation install-comfyui` now builds this install
+> (pinned commits in `config/comfyui.yaml`, PyTorch for the GPU, patches). ComfyUI-ppm
+> is no longer installed: the engine never used Attention Couple.
+
 ## Patches applied to ComfyUI (`scripts/apply_comfyui_patches.sh`)
 
 1. **`comfy/clip_vision.py`** — force `return_all_hidden_states = True` for all

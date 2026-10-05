@@ -59,6 +59,7 @@ models/     checkpoints, LoRAs, IP-Adapters, ControlNets
 
 ```bash
 uv sync
+uv run manganation install-comfyui  # pinned ComfyUI + the right PyTorch for your GPU
 uv run manganation setup          # fetch the models (~15 GB; see below)
 ./scripts/comfy.sh start          # launch local ComfyUI (models auto-wired)
 uv run manganation doctor         # check GPU / ComfyUI / Ollama / models
@@ -68,6 +69,22 @@ uv run python scripts/phase0_spike.py
 uv run manganation script parse tests/fixtures/rooftop_canonical.md -p rooftop
 uv run manganation script parse my_story.md -p my_story   # prose -> LLM parser
 ```
+
+### ComfyUI
+
+`uv run manganation install-comfyui` builds the ComfyUI imanganation is tested with
+in `vendor/ComfyUI`: the commits pinned in `config/comfyui.yaml`, the custom node the
+engine uses (ComfyUI_IPAdapter_plus), every package at its tested version
+(`config/comfyui-constraints.txt`), and imanganation's patches. Needs `git` and `uv`.
+
+- **PyTorch for your GPU:** NVIDIA is read from `nvidia-smi`: the newest CUDA build
+  your driver supports that runs your GPU (RTX 50xx needs a CUDA 12.8+ driver; it says
+  so if yours is older). AMD (ROCm) and Apple Silicon are detected too; `--gpu` overrides.
+  SDXL wants about 12 GB of VRAM.
+- Re-running is safe and quick: finished steps are skipped. `--check` reports what would
+  change; local edits to the checkouts are refused unless `--force`.
+- It ends with a check that PyTorch sees the GPU and ComfyUI starts with the IP-Adapter
+  nodes loaded.
 
 ### Models
 

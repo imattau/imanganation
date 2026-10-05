@@ -14,7 +14,7 @@ is_up() { curl -s --max-time 3 "http://127.0.0.1:${PORT}/system_stats" >/dev/nul
 
 start() {
   if is_up; then echo "ComfyUI already up on :${PORT}"; return 0; fi
-  [ -x "$PY" ] || { echo "ComfyUI venv missing; run scripts/apply_comfyui_patches.sh after install"; exit 1; }
+  [ -x "$PY" ] || { echo "ComfyUI isn't installed; run: uv run manganation install-comfyui"; exit 1; }
   ( cd "$COMFY"
     setsid nohup "$PY" main.py \
       --extra-model-paths-config "$ROOT/config/comfyui_extra_model_paths.yaml" \
