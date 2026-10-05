@@ -2,6 +2,7 @@
 # Run the uninstalled imanganation-gimp build with everything it needs:
 #   scripts/gimp-dev.sh [gimp args...]
 # Environment overrides: GIMP_BUILD (default /tmp/imanganation-gimp-build),
+# GIMP_DATA_STAGE (default $GIMP_BUILD/dev-install),
 # GIMP_DEPS (default ~/.local/gimp-deps), GIMP3_DIRECTORY (default ~/.config/GIMP/3.3).
 # The imanganation workspace starts the engine and ComfyUI with GIMP and stops them when
 # it quits (IMANGANATION_AUTOSTART=0 to skip).
@@ -10,6 +11,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FORK="$ROOT/imanganation-gimp"
 B="${GIMP_BUILD:-/tmp/imanganation-gimp-build}"
+DATA_STAGE="${GIMP_DATA_STAGE:-$B/dev-install}"
 D="${GIMP_DEPS:-$HOME/.local/gimp-deps}"
 PROFILE="${GIMP3_DIRECTORY:-$HOME/.config/GIMP/3.3}"
 
@@ -23,7 +25,13 @@ for lib in libgimp libgimpbase libgimpcolor libgimpconfig libgimpmath libgimpmod
   LIBS="$LIBS$B/$lib:"
 done
 export LD_LIBRARY_PATH="$LIBS$D/lib:$D/lib/x86_64-linux-gnu:$D/usr/lib/x86_64-linux-gnu"
-export GIMP3_DATADIR="$B/gimp-data"
+# The uninstalled build tree contains compiled resource icons, but not the full icon
+# themes (those are install_data assets). Stage the build under /tmp so GTK can find
+# the complete Default and Legacy themes without installing anything system-wide.
+DESTDIR="$DATA_STAGE" ninja -C "$B" install
+DATA_DIR="$(sed -n 's/^#define GIMPDATADIR "\(.*\)"$/\1/p' "$B/config.h")"
+[ -n "$DATA_DIR" ] || { echo "Could not read GIMPDATADIR from $B/config.h"; exit 1; }
+export GIMP3_DATADIR="$DATA_STAGE$DATA_DIR"
 export GIMP_TESTING_MENUS_PATH="$B/menus:$FORK/menus"
 # The fork's defaults: workspace layout (sessionrc) and compact toolbox (toolrc).
 export GIMP3_SYSCONFDIR="$FORK/etc"
