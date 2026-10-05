@@ -27,6 +27,12 @@ dev = [
     "jsonschema>=4.23",
 ]
 
+# `manganation eval`: the WD14 tagger that judges renders (CPU ONNX).
+eval = [
+    "onnxruntime>=1.18",
+    "numpy>=1.26",
+]
+
 [project.scripts]
 manganation = "manganation.cli:app"
 

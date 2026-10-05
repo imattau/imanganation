@@ -91,6 +91,22 @@ def needed(settings, models: dict) -> list[ModelFile]:
     return out
 
 
+DEFAULT_TAGGER = "wd_swinv2_v3"
+
+
+def evaluation(models: dict, tagger: str = DEFAULT_TAGGER) -> list[ModelFile]:
+    """The files ``manganation eval`` judges renders with: a tagger and its tag list.
+    Not needed to render, so ``setup`` only fetches them when asked (``--eval``)."""
+    taggers = models.get("taggers", {})
+    entry = taggers.get(tagger)
+    out = [_entry(f"tagger ({tagger})", entry, "taggers",
+                  f"unknown tagger {tagger!r}; models.yaml has {sorted(taggers)}")]
+    if entry is not None:
+        out.append(_entry("tagger tags", taggers.get(entry.get("tags", "")), "taggers",
+                          f"tagger {tagger!r} names no tag list that's in models.yaml"))
+    return out
+
+
 # --- state -----------------------------------------------------------------
 
 

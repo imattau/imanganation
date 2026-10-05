@@ -42,6 +42,10 @@ that were silently corrupting references. See [`docs/phase6b.md`](./docs/phase6b
 **Inpaint — engine COMPLETE.** Repaint only a masked region of a panel (the engine half
 of the GIMP *Inpaint Selection*). See [`docs/inpaint.md`](./docs/inpaint.md).
 
+**Render-accuracy eval.** `manganation eval run config/eval/rooftop.yaml` renders a
+script's panels at fixed seeds and scores them with an anime tagger. Did the picture get
+the right people, pose, expression and setting? See [`docs/eval.md`](./docs/eval.md).
+
 Next: Phase 5 follow-ups (Inpaint Selection UI, regenerate, character reference from layer).
 
 ## Layout

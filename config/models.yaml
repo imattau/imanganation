@@ -124,3 +124,29 @@ controlnets:
       size: 2502139104
       sha256: e37bcdb2f4a6d1782daf6a943a326bee6e6d3027c34f6016460a2c937ba9fba0
 
+
+# Image taggers judge renders in `manganation eval` (docs/eval.md); `manganation setup
+# --eval` fetches them. Each names its tag list (`tags:`), like adapters name encoders.
+taggers:
+  wd_swinv2_v3:
+    id: wd-swinv2-tagger-v3.onnx
+    display: WD SwinV2 tagger v3 (Danbooru tags, ONNX, runs on the CPU)
+    source: https://huggingface.co/SmilingWolf/wd-swinv2-tagger-v3
+    tags: wd_swinv2_v3_tags
+    subdir: taggers
+    feature: render-accuracy eval (judge)
+    license: {name: Apache-2.0, url: https://huggingface.co/SmilingWolf/wd-swinv2-tagger-v3}
+    download:
+      url: https://huggingface.co/SmilingWolf/wd-swinv2-tagger-v3/resolve/627aef95638667ddcaa3ac8ae625e88ea5b02f51/model.onnx
+      size: 467460978
+      sha256: e6774bff34d43bd49f75a47db4ef217dce701c9847b546523eb85ff6dbba1db1
+  wd_swinv2_v3_tags:
+    id: wd-swinv2-tagger-v3.csv
+    display: WD SwinV2 tagger v3 tag list
+    subdir: taggers
+    feature: render-accuracy eval (tag names)
+    license: {name: Apache-2.0, url: https://huggingface.co/SmilingWolf/wd-swinv2-tagger-v3}
+    download:
+      url: https://huggingface.co/SmilingWolf/wd-swinv2-tagger-v3/resolve/627aef95638667ddcaa3ac8ae625e88ea5b02f51/selected_tags.csv
+      size: 308468
+      sha256: 298633d94d0031d2081c0893f29c82eab7f0df00b08483ba8f29d1e979441217

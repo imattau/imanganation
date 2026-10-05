@@ -481,6 +481,13 @@ def _advance(root, panels, seq, explicit, spec, manifest=None):
     Gimp.message(msg)
 
 
+def _render_warnings(result):
+    """Tell the artist what the engine had to render without (e.g. a character with no
+    registered appearance comes out as nobody in particular)."""
+    for warning in result.get("warnings") or []:
+        Gimp.message(f"Warning: {warning}")
+
+
 def _run_job(engine, path, body, label):
     """POST a job to the engine and poll it with a progress bar; -> result dict."""
     job = _http("POST", f"{engine}{path}", body)
@@ -721,6 +728,7 @@ def render_panel(procedure, run_mode, image, drawables, config, data):
         image.remove_channel(frame)
 
     _advance(root, panels, seq, explicit, spec, manifest)
+    _render_warnings(result)
     if manifest is not None:
         _save_project_page(image, root, manifest)
     return _success(procedure, layer)
@@ -961,6 +969,7 @@ def regenerate_panel(procedure, run_mode, image, drawables, config, data):
                    take_ref=_take_reference(root, seq, path))
     Gimp.message(f"Regenerated panel {seq:03d} as {Path(result['path']).name} "
                  f"(seed {seed}; previous take kept, hidden).")
+    _render_warnings(result)
     if manifest is not None:
         _save_project_page(image, root, manifest)
     return _success(procedure, new)

@@ -2,5 +2,9 @@ name: default_color
 color_mode: color
 checkpoint: primary
 loras: []
+# Measured with `manganation eval` (docs/quality/2026-10-05_eval_baseline.md): NoobAI's
+# own quality tags ("masterpiece, best quality, newest, absurdres") made male characters
+# render as girls (head-count checks 47% -> 33%), and a longer negative (comic, border,
+# bad hands, …) made no measurable difference. Change this only with an eval run.
 prompt_prefix: "manga panel, anime illustration, "
 negative: "text, speech bubble, watermark, signature, monochrome, greyscale, lowres, bad anatomy, worst quality, low quality"

@@ -93,6 +93,38 @@ def test_multi_character_prompt_leads_with_a_head_count():
     assert prompt.startswith("manga panel, 1girl, silver hair, surprised, Akira sighs")
 
 
+def test_panel_location_wins_over_the_scene_heading():
+    from manganation.render.panel import setting
+
+    moved = PanelSpec(page=2, panel=3, scene_heading="School rooftop — cont.",
+                      location="the stairwell", action="drags him down the stairs")
+    assert setting(moved) == "the stairwell"
+    assert "rooftop" not in build_prompt(moved, {})
+
+
+@pytest.mark.parametrize("heading, place", [
+    ("School rooftop — cont.", "School rooftop"),
+    ("Kitchen (CONT'D)", "Kitchen"),
+    ("Harbor - continued", "Harbor"),
+    ("School rooftop — late afternoon", "School rooftop — late afternoon"),
+    ("Contest hall", "Contest hall"),
+])
+def test_continuation_markers_are_not_places(heading, place):
+    from manganation.render.panel import setting
+
+    assert setting(PanelSpec(page=1, panel=1, scene_heading=heading)) == place
+
+
+def test_shot_is_not_repeated_from_the_action():
+    spec = PanelSpec(page=1, panel=1, camera="medium shot",
+                     action="Medium shot. Yuki drags Akira by the wrist.")
+    prompt = build_prompt(spec, {})
+    assert prompt == "medium shot, Yuki drags Akira by the wrist."
+    # a shot word inside the sentence is left alone
+    spec = PanelSpec(page=1, panel=1, camera="close-up", action="A close-up of the key.")
+    assert build_prompt(spec, {}) == "close-up, A close-up of the key."
+
+
 def test_output_path_adds_takes(tmp_path):
     (tmp_path / "panels").mkdir()
     assert output_path(tmp_path, 3).name == "003.png"
@@ -179,6 +211,14 @@ def test_render_panel_uses_single_character_reference(tmp_path):
     r = render_panel(project, 1, 100, 100, client=comfy)
     assert r.reference and r.reference.endswith("akira.png")
     assert comfy.graphs[0]["5"]["inputs"]["model"] == ["11", 0]  # routed via IP-Adapter
+
+
+def test_render_warns_about_characters_without_an_appearance(tmp_path):
+    # No registry: Akira would render as nobody in particular, and the artist should know.
+    project = _project(tmp_path, characters=["Akira"])
+    r = render_panel(project, 1, 100, 100, client=FakeComfy())
+    assert len(r.warnings) == 1 and "Akira" in r.warnings[0]
+    assert json.loads(Path(r.path).with_suffix(".json").read_text())["warnings"] == r.warnings
 
 
 # --- job API ------------------------------------------------------------------

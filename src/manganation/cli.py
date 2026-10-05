@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from datetime import datetime
 from pathlib import Path
 
 import typer
@@ -18,6 +20,8 @@ character_app = typer.Typer(help="Character registry / design commands.")
 app.add_typer(character_app, name="character")
 project_app = typer.Typer(help="Project container commands (docs/project-container.md).")
 app.add_typer(project_app, name="project")
+eval_app = typer.Typer(help="Render-accuracy evaluation (docs/eval.md).")
+app.add_typer(eval_app, name="eval")
 
 
 @app.command()
@@ -203,6 +207,8 @@ def setup(
     verify: bool = typer.Option(False, "--verify",
                                 help="Also hash files already in place (slow)."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Download without asking."),
+    evaluation: bool = typer.Option(False, "--eval",
+                                    help="Also the tagger `manganation eval` judges with."),
 ) -> None:
     """Get the model files the engine needs: link ones you have, download the rest.
 
@@ -231,6 +237,8 @@ def setup(
     settings = load_settings()
     root = models_root(settings).resolve()
     models = ms.needed(settings, load_models())
+    if evaluation:
+        models += ms.evaluation(load_models())
     states = {m.role: ms.state(m, root, verify=verify) for m in models}
 
     if not check and reuse:
@@ -646,3 +654,115 @@ def project_link(
         raise typer.BadParameter(f"projects/{identity} has no characters.json")
     register(project_id, identity)
     rprint(f"[green]linked[/green] {project_id} -> projects/{identity}")
+
+
+# --- eval -------------------------------------------------------------------------
+
+
+def _print_report(report: dict) -> None:
+    from rich.table import Table
+
+    summary = report["summary"]
+    table = Table(title=f"{report['suite']} {report.get('label') or ''}: "
+                        f"{summary['score']:.0%} of checks pass ({summary['images']} images)")
+    table.add_column("Case")
+    table.add_column("Score", justify="right")
+    table.add_column("Failing checks (times failed)", overflow="fold")
+    for case, score in summary["by_case"].items():
+        fails: dict[str, int] = {}
+        for r in report["results"]:
+            if r["case"] == case:
+                for c in r["checks"]:
+                    if not c["ok"]:
+                        fails[c["label"]] = fails.get(c["label"], 0) + 1
+        table.add_row(case, f"{score:.0%}",
+                      ", ".join(f"{k} ({n})" for k, n in fails.items()))
+    rprint(table)
+    rprint("By kind: " + ", ".join(f"{k} {v:.0%}" for k, v in summary["by_kind"].items()))
+    if report["unknown_tags"]:
+        rprint(f"[yellow]Not tags the tagger knows (fix the suite):[/yellow] "
+               f"{', '.join(report['unknown_tags'])}")
+
+
+@eval_app.command("run")
+def eval_run(
+    suite_file: Path = typer.Argument(..., help="Suite YAML, e.g. config/eval/rooftop.yaml."),
+    label: str = typer.Option("", "--label", "-l", help="Name this run (e.g. 'baseline')."),
+    out: Path = typer.Option(None, "--out", help="Run folder (default: outputs/eval/…). "
+                             "An existing one resumes: renders already there are kept."),
+    seeds: str = typer.Option("", "--seeds", help="Comma-separated seeds instead of the "
+                              "suite's (quicker, but not comparable with full runs)."),
+) -> None:
+    """Render a suite's panels at fixed seeds, tag them, score them against the script."""
+    import re
+
+    from manganation.config import outputs_root
+    from manganation.evaluate import suite as ev
+    from manganation.evaluate.tagger import default_tagger
+
+    suite = ev.load_suite(suite_file)
+    if seeds:
+        suite.seeds = [int(s) for s in seeds.split(",") if s.strip()]
+    tagger = default_tagger()  # fail before an hour of rendering, not after
+    if out is None:
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        slug = re.sub(r"[^A-Za-z0-9_.-]+", "-", label).strip("-")
+        out = outputs_root() / "eval" / f"{suite.name}-{stamp}{'-' + slug if slug else ''}"
+    rprint(f"Run folder: {out}")
+    snapshot = ev._snapshot()
+    ev.render_all(suite, out, log=rprint)
+    report = ev.score_all(suite, out, tagger, label=label, snapshot=snapshot)
+    _print_report(report)
+    rprint(f"Report: {out / 'report.json'}\nSheet: {out / 'sheet.png'}")
+
+
+@eval_app.command("score")
+def eval_score(
+    run_dir: Path = typer.Argument(..., help="A run folder from `eval run`."),
+    suite_file: Path = typer.Option(None, "--suite", help="Score against this suite "
+                                    "(default: the one the run used)."),
+) -> None:
+    """Re-score a run's renders (after editing the suite's expectations) without
+    re-rendering. The run's recorded config is kept."""
+    from manganation.evaluate import suite as ev
+    from manganation.evaluate.tagger import default_tagger
+
+    old = json.loads((run_dir / "report.json").read_text())
+    suite = ev.load_suite(suite_file or old["suite_path"])
+    suite.seeds = old["seeds"]
+    report = ev.score_all(suite, run_dir, default_tagger(), label=old.get("label", ""),
+                          snapshot=old.get("config"))
+    _print_report(report)
+
+
+@eval_app.command("compare")
+def eval_compare(
+    before: Path = typer.Argument(..., help="Report (or run folder) to compare from."),
+    after: Path = typer.Argument(..., help="Report (or run folder) to compare to."),
+    all_rows: bool = typer.Option(False, "--all", help="Also checks that didn't change."),
+) -> None:
+    """Two runs side by side: overall, per kind, per case, and every check that moved."""
+    from rich.table import Table
+
+    from manganation.evaluate import suite as ev
+
+    def load(path: Path) -> dict:
+        return json.loads(((path / "report.json") if path.is_dir() else path).read_text())
+
+    a, b = load(before), load(after)
+    if a["seeds"] != b["seeds"]:
+        rprint("[yellow]The runs used different seeds: differences are partly luck.[/yellow]")
+    table = Table(title=f"{a.get('label') or before}  ->  {b.get('label') or after}")
+    for col in ("", "Before", "After", "Change"):
+        table.add_column(col, justify="left" if not col else "right", overflow="fold")
+    fmt = lambda v: "-" if v is None else f"{v:.0%}"  # noqa: E731
+    for i, (row, x, y) in enumerate(ev.compare(a, b)):
+        is_check = ": " in row and row not in a["summary"]["by_case"]
+        if is_check and x == y and not all_rows:
+            continue
+        change = "" if x is None or y is None else f"{y - x:+.0%}"
+        colour = "green" if change.startswith("+") and change != "+0%" else (
+            "red" if change.startswith("-") else "")
+        table.add_row(row, fmt(x), fmt(y), f"[{colour}]{change}[/]" if colour else change,
+                      end_section=i == 0)
+    rprint(table)

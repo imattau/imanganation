@@ -10,6 +10,7 @@ panel's 1-based position in panels.json.
 from __future__ import annotations
 
 import json
+import logging
 import random
 import re
 import uuid
@@ -23,6 +24,8 @@ from manganation.layout.regions import assign_regions
 from manganation.render import graphs
 from manganation.render.comfy_client import ComfyClient
 from manganation.script.schema import PanelSpec, ReadingOrder, Script
+
+log = logging.getLogger(__name__)
 
 SDXL_PIXELS = 1024 * 1024
 MAX_ASPECT = 3.0  # beyond this SDXL composes badly; the frame mask crops the rest
@@ -45,6 +48,7 @@ class RenderResult:
     references: dict[str, str] = field(default_factory=dict)  # character -> version used
     placements: dict[str, str] = field(default_factory=dict)  # character -> mask file used
     guide: str | None = None  # the take whose composition this render kept (ControlNet)
+    warnings: list[str] = field(default_factory=list)  # e.g. a character rendered untagged
 
 
 def fit_resolution(
@@ -112,6 +116,28 @@ def character_group(spec: PanelSpec, name: str, tags: list[str], *,
     return group
 
 
+# "School rooftop — cont.", "Kitchen (CONT'D)": a script's continuation marker, not a place.
+_CONTINUED = re.compile(r"\s*[-—–:,]?\s*\(?\b(?:cont(?:'d|inued)?|contd)\.?\)?\s*$",
+                        re.IGNORECASE)
+
+
+def setting(spec: PanelSpec) -> str:
+    """Where the panel happens. Its own location wins over the scene heading: panel 3
+    moves to the stairwell, and "School rooftop" would put it back on the roof."""
+    place = spec.location.strip() or spec.scene_heading.strip()
+    return _CONTINUED.sub("", place).strip()
+
+
+def action_text(spec: PanelSpec) -> str:
+    """The action without the shot it often opens with ("Medium shot. Yuki drags…"):
+    the camera is already in the prompt, and the repeat only spends tokens."""
+    action = spec.action.strip()
+    camera = spec.camera.strip().rstrip(".")
+    if camera:
+        action = re.sub(rf"^{re.escape(camera)}\s*[.:;,-]\s*", "", action, flags=re.IGNORECASE)
+    return action
+
+
 def build_prompt(
     spec: PanelSpec, style: dict, character_tags: dict[str, list[str]] | None = None,
 ) -> str:
@@ -126,7 +152,7 @@ def build_prompt(
     for name in spec.characters:
         parts += character_group(spec, name, (character_tags or {}).get(name, []),
                                  counted=bool(counts))
-    parts += [spec.camera, spec.action, spec.scene_heading or spec.location]
+    parts += [spec.camera, action_text(spec), setting(spec)]
     parts += [f"{who} {face}" for who, face in spec.expressions.items()
               if who not in spec.characters]
     if spec.flashback:
@@ -194,7 +220,10 @@ def character_tags(
     """Tags per character from the project's registry (best-effort): their appearance,
     plus their default expression *unless the panel gives one* (the panel wins; Yuki
     grins by default, but "surprised" means surprised). Mannerisms are left out: the
-    panel's action decides the pose."""
+    panel's action decides the pose.
+
+    A character left out of the result renders as a bare name, i.e. as nobody in
+    particular; ``_render`` reports that as a warning."""
     try:
         from manganation.characters.registry import CharacterRegistry
 
@@ -206,7 +235,9 @@ def character_tags(
                 out[name] = character.appearance.prompt_tags(
                     expression=name not in (expressions or {}))
         return out
-    except Exception:  # noqa: BLE001 - no registry yet just means bare names
+    except Exception as exc:  # noqa: BLE001 - no registry yet just means bare names
+        log.warning("no character registry in %s (%s): rendering without appearance tags",
+                    project, exc)
         return {}
 
 
@@ -393,6 +424,11 @@ def _render(
 
     style = load_style()
     tags_by_char = character_tags(identity, spec.characters, spec.expressions)
+    warnings = [f"{name} has no registered appearance: rendered from the name alone, so "
+                "they won't look like their character"
+                for name in spec.characters if not tags_by_char.get(name)]
+    for warning in warnings:
+        log.warning("%s (identity %s)", warning, identity)
     prompt = build_prompt(spec, style, tags_by_char)
     width, height = fit_resolution(frame_w, frame_h)
     seed = seed if seed is not None else (spec.seed if spec.seed is not None
@@ -467,7 +503,7 @@ def _render(
         path=str(out), seq=seq, seed=seed, width=width, height=height,
         prompt=prompt, reference=ref_used,
         placements={n: str(p) for n, p in placements.items()},
-        guide=str(guide) if guide is not None else None,
+        guide=str(guide) if guide is not None else None, warnings=warnings,
     )
     out.with_suffix(".json").write_text(json.dumps(asdict(result), indent=2))
     return result

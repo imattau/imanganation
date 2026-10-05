@@ -11,6 +11,8 @@ models/**/*.ckpt
 models/**/*.pth
 models/**/*.bin
 models/**/*.gguf
+models/**/*.onnx
+models/taggers/*.csv
 !models/**/.gitkeep
 
 # ComfyUI

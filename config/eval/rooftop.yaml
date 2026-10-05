@@ -1,0 +1,54 @@
+# Render-accuracy suite: the rooftop script (docs/eval.md).
+#
+# Each case is a script panel (PAGE-PANEL), rendered at the frame size it has on the
+# page, at every seed. `expect.tags` are Danbooru tags the picture should show
+# (`a|b` = either), `expect.forbid` ones it shouldn't. The head count comes from the
+# characters' own count tags (Akira 1boy, Yuki 1girl) unless `expect.count` says.
+name: rooftop
+script: projects/rooftop.imanga/script/script.md
+identity: projects/_gimp_smoke          # single-figure references (see docs/quality)
+reading_order: rtl
+seeds: [101, 202, 303]
+threshold: 0.35
+
+cases:
+  - id: p1-1-sits-at-fence             # Akira sits alone against the chain-link fence,
+    panel: 1-1                         # lunchbox on his knees. Wide, rooftop, afternoon.
+    frame: [1056, 640]
+    expect:
+      tags: [sitting, chain-link fence, rooftop, "bento|food|box",
+             brown hair, "streaked hair|multicolored hair|blue hair|two-tone hair",
+             "orange eyes|yellow eyes|brown eyes", necktie, outdoors]
+      forbid: [standing]
+
+  - id: p1-2-head-snaps-up             # Close-up. Akira's head snaps up, eyes wide.
+    panel: 1-2                         # (Yuki calls from off-panel: she's not in it.)
+    frame: [1000, 1000]
+    expect:
+      tags: ["portrait|close-up|upper body", "surprised|wide-eyed|open mouth",
+             brown hair, "streaked hair|multicolored hair|blue hair|two-tone hair"]
+      forbid: [grin]
+
+  - id: p2-1-stands-over-him           # Two-shot. Yuki stands over (seated) Akira,
+    panel: 2-1                         # hands on her hips, grinning.
+    frame: [1408, 768]
+    expect:
+      tags: ["hands on own hips|hand on own hip", standing, sitting, "grin|smile", "white hair|grey hair",
+             twintails, "sailor collar|serafuku", pleated skirt, brown hair,
+             "streaked hair|multicolored hair|blue hair|two-tone hair", rooftop]
+
+  - id: p2-2-sighs                     # Reaction shot. Akira sighs, shoulders slumping.
+    panel: 2-2
+    frame: [640, 1056]
+    expect:
+      tags: ["sigh|closed eyes|half-closed eyes", brown hair,
+             "streaked hair|multicolored hair|blue hair|two-tone hair"]
+      forbid: [grin, "smile"]
+
+  - id: p2-3-drags-down-stairs         # Medium shot, the stairwell. Yuki drags Akira by
+    panel: 2-3                         # the wrist down the stairs.
+    frame: [704, 1344]
+    expect:
+      tags: [stairs, "holding another's wrist|hand grab|holding hands|pulling|dragging",
+             indoors, "white hair|grey hair", brown hair]
+      forbid: [chain-link fence, rooftop]
