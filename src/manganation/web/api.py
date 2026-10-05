@@ -128,11 +128,12 @@ class InpaintRequest(BaseModel):
     grow_mask_by: int | None = Field(default=None, ge=0, le=256)
     seed: int | None = None
     # Who is in the patch: names, or container-style {"name", "version"}. Their traits
-    # join the prompt; with exactly one, their reference guides it (on-model faces).
+    # join the prompt and their references guide it (on-model faces); with several,
+    # each reference covers its own band of the patch, in reading order.
     characters: list[str | dict] | None = None
-    # Identity strength for a single named character (IP-Adapter weight); default from
-    # settings. Lower lets the prompt change more (e.g. an expression), higher holds
-    # the reference closer.
+    reading_order: Literal["rtl", "ltr"] = "rtl"
+    # Identity strength (IP-Adapter weight); default from settings. Lower lets the
+    # prompt change more (e.g. an expression), higher holds the reference closer.
     character_weight: float | None = Field(default=None, ge=0, le=1.5)
 
     def character_list(self) -> list[dict] | None:
@@ -457,7 +458,8 @@ def create_app(
                 lambda: inpaint_inline(req.project, src, mask, prompt=req.prompt,
                                        denoise=req.denoise, grow_mask_by=req.grow_mask_by,
                                        seed=req.seed, characters=req.character_list(),
-                                       character_weight=req.character_weight),
+                                       character_weight=req.character_weight,
+                                       reading_order=req.reading_order),
             )
         project = resolve_project(req.project_dir, root)
         req.project_dir = str(project)
@@ -471,7 +473,8 @@ def create_app(
                             source=source, denoise=req.denoise,
                             grow_mask_by=req.grow_mask_by, seed=req.seed,
                             characters=req.character_list(),
-                            character_weight=req.character_weight),
+                            character_weight=req.character_weight,
+                            reading_order=req.reading_order),
         )
 
     @app.get("/characters")

@@ -35,8 +35,11 @@ in the patch (`characters`):
   what to paint.
 - With **exactly one** character, IP-Adapter (the project's adapter) guides the patch
   with their reference (`version` honoured) at `ipadapter_weight` (0.45), or the
-  request's `character_weight`. Several: traits only, since one reference would pull
-  every face to one identity.
+  request's `character_weight`. Several: one head count (`1boy, 1girl`) leads their
+  grouped traits, and each reference is masked to that character's band of the crop in
+  the request's `reading_order`, like a panel render (an unmasked reference would pull
+  every face to one identity). Bands cover every named character, so one without a
+  reference keeps their part of the patch.
 - **Only appearance traits are used** (`AppearanceSpec.appearance_tags()`): never
   the character's `default_expression` or `mannerisms`. Stored as identity, Yuki's
   "wide toothed grin" overrode "surprised face, open mouth" even at IP-Adapter weight

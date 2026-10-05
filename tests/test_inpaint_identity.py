@@ -113,12 +113,42 @@ def test_version_selects_that_reference(tmp_path):
     assert "summer.png" in comfy.uploads and r.characters == {"Yuki": "summer"}
 
 
-def test_two_characters_use_traits_only(tmp_path):
+def test_two_characters_each_get_a_masked_reference(tmp_path):
     r, comfy = _inpaint(tmp_path, [{"name": "Yuki"}, {"name": "Akira"}])
-    text = comfy.graphs[0]["2"]["inputs"]["text"]
-    assert "silver hair" in text and "brown hair" in text
-    assert "23" not in comfy.graphs[0]  # no single reference pulling both faces
+    g = comfy.graphs[0]
+    text = g["2"]["inputs"]["text"]
+    # one head count, each character's traits kept together
+    assert "surprised face, 1boy, 1girl, silver hair, snowflake pin, brown hair" in text
+    assert "23" not in g  # no single reference pulling both faces
+    conds = {k: n for k, n in g.items() if n["class_type"] == "IPAdapterRegionalConditioning"}
+    assert len(conds) == 2 and all(k.startswith("ipa_") for k in conds)
+    assert g["5"]["inputs"]["model"] == ["ipa_apply", 0]
+    # the inpaint chain's own nodes are untouched by the regional ids
+    assert g["9"]["class_type"] == "LoadImageMask" and g["10"]["class_type"] == "GrowMask"
+    # RTL: Yuki (first) on the right half of the work canvas, Akira on the left
+    work_w = comfy.sizes[0][0]
+    xs = [g[n["inputs"]["mask"][0].removesuffix("_soft") + "_placed"]["inputs"]["x"]
+          for n in conds.values()]
+    assert xs[0] >= work_w // 2 > xs[1]
     assert set(r.characters) == {"Yuki", "Akira"}
+
+
+def test_two_characters_one_reference_keeps_its_band(tmp_path):
+    identity = _identity(tmp_path)
+    reg = CharacterRegistry.from_path(identity)
+    reg.ensure("Mio")  # no reference image
+    reg.save()
+    src, mask = _images(tmp_path)
+    comfy = FakeComfy()
+    r = inpaint_inline("prj_test01", src, mask, prompt="x", client=comfy,
+                       outputs=tmp_path / "out", identity=identity, reading_order="ltr",
+                       characters=[{"name": "Mio"}, {"name": "Akira"}])
+    g = comfy.graphs[0]
+    conds = [n for n in g.values() if n["class_type"] == "IPAdapterRegionalConditioning"]
+    assert len(conds) == 1 and "23" not in g
+    placed = g[conds[0]["inputs"]["mask"][0].removesuffix("_soft") + "_placed"]
+    assert placed["inputs"]["x"] >= comfy.sizes[0][0] // 2  # LTR: Akira second = right
+    assert r.characters == {"Mio": "traits only", "Akira": "base"}
 
 
 def test_no_characters_is_unchanged_behaviour(tmp_path):

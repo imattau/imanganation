@@ -255,6 +255,7 @@ def with_regional_ipadapter(
     combine_embeds: str = "concat",
     embeds_scaling: str = "V only",
     force_regional: bool = False,
+    id_prefix: str = "",
 ) -> dict:
     """Bind several character references to separate regions of one panel.
 
@@ -268,6 +269,9 @@ def with_regional_ipadapter(
     Falls back to the single-reference path for a one-entry list, unless
     ``force_regional``: in a multi-character panel where only one character has a
     reference, an unmasked IP-Adapter would pull every face towards that one identity.
+
+    ``id_prefix`` namespaces the added node ids, for graphs whose own ids would clash
+    (the inpaint graph uses 8-15). The sampler must still be node ``"5"``.
     """
     if not references:
         raise ValueError("regional IP-Adapter needs at least one reference")
@@ -281,14 +285,15 @@ def with_regional_ipadapter(
         )
 
     graph = {k: {**v, "inputs": dict(v["inputs"])} for k, v in graph.items()}
-    graph["9"] = {"class_type": "IPAdapterModelLoader", "inputs": {"ipadapter_file": ipadapter}}
-    graph["10"] = {"class_type": "CLIPVisionLoader", "inputs": {"clip_name": clip_vision}}
+    loader, vision = f"{id_prefix}9", f"{id_prefix}10"
+    graph[loader] = {"class_type": "IPAdapterModelLoader", "inputs": {"ipadapter_file": ipadapter}}
+    graph[vision] = {"class_type": "CLIPVisionLoader", "inputs": {"clip_name": clip_vision}}
 
     mask_ids: list[str] = []
     params_ids: list[str] = []
     next_id = 12
     for ref in references:
-        img_id, mask_id, cond_id = str(next_id), str(next_id + 1), str(next_id + 2)
+        img_id, mask_id, cond_id = (f"{id_prefix}{next_id + i}" for i in range(3))
         next_id += 3
         graph[img_id] = {"class_type": "LoadImage", "inputs": {"image": ref["image"]}}
         if ref.get("mask_image"):
@@ -357,25 +362,26 @@ def with_regional_ipadapter(
     # Concatenate the per-character params into one IPADAPTER_PARAMS.
     combined = params_ids[0]
     for i, pid in enumerate(params_ids[1:], start=1):
-        out_id = f"combine{i}"
+        out_id = f"{id_prefix}combine{i}"
         graph[out_id] = {
             "class_type": "IPAdapterCombineParams",
             "inputs": {"params_1": [combined, 0], "params_2": [pid, 0]},
         }
         combined = out_id
 
-    graph["apply"] = {
+    apply_id = f"{id_prefix}apply"
+    graph[apply_id] = {
         "class_type": "IPAdapterFromParams",
         "inputs": {
             "model": ["1", 0],
-            "ipadapter": ["9", 0],
+            "ipadapter": [loader, 0],
             "ipadapter_params": [combined, 0],
             "combine_embeds": combine_embeds,
             "embeds_scaling": embeds_scaling,
-            "clip_vision": ["10", 0],
+            "clip_vision": [vision, 0],
         },
     }
-    graph["5"]["inputs"]["model"] = ["apply", 0]
+    graph["5"]["inputs"]["model"] = [apply_id, 0]
     return graph
 
 

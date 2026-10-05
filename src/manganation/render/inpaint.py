@@ -57,20 +57,25 @@ class InpaintResult:
 
 def resolve_characters(
     identity: Path, characters: list[dict] | None,
-) -> tuple[list[str], Path | None, dict[str, str]]:
-    """Traits for the characters named in a patch, and (for exactly one) their
-    reference image. -> (prompt tags, reference or None, {name: version used}).
+) -> tuple[list[str], dict[str, Path], dict[str, str]]:
+    """Traits for the characters named in a patch, and their reference images.
+    -> (prompt tags, {name: reference} for those who have one, {name: version used}),
+    names in the order given.
+
+    With several characters the tags are grouped like a panel prompt: one head count
+    ("1boy, 1girl"), then each character's traits together, so they don't blend.
 
     Unknown characters or versions fail, listing what exists: a typo must not quietly
     produce an off-model face."""
     if not characters:
-        return [], None, {}
+        return [], {}, {}
     from manganation.characters.registry import CharacterRegistry
+    from manganation.render.panel import COUNT_TAG, head_count
 
     reg = CharacterRegistry.from_path(identity)
     known = ", ".join(c.name for c in reg.cast.characters) or "none"
-    tags: list[str] = []
-    refs: list[Path] = []
+    traits: dict[str, list[str]] = {}
+    refs: dict[str, Path] = {}
     used: dict[str, str] = {}
     for c in characters:
         name, version = c["name"], c.get("version")
@@ -79,22 +84,24 @@ def resolve_characters(
             raise InpaintError(f"no character {name!r} in this project (known: {known})")
         # Appearance only: the artist's prompt decides expression and pose. (Stored as
         # identity, Yuki's "wide toothed grin" beat "surprised face, open mouth".)
-        tags += [t for t in character.appearance.appearance_tags() if t not in tags]
+        traits[character.name] = character.appearance.appearance_tags()
         ref = reg.reference_path(character.name, version)
         if version and (ref is None or not ref.exists()):
             versions = ", ".join(v.id for v in character.versions) or "none"
             raise InpaintError(f"{character.name} has no reference version {version!r} "
                                f"(known: {versions})")
         if ref is not None and ref.exists():
-            refs.append(ref)
+            refs[character.name] = ref
             used[character.name] = version or character.default_version or "active"
         else:
             used[character.name] = "traits only"
-    # One character: guide the patch with their reference. Several: traits only (a
-    # regional split inside a small patch isn't worth it, and a single reference would
-    # pull every face towards one identity).
-    ref = refs[0] if len(characters) == 1 and refs else None
-    return tags, ref, used
+    counts = head_count(list(traits), traits) if len(traits) > 1 else []
+    tags = list(counts)
+    for group in traits.values():
+        if counts and group and COUNT_TAG.match(group[0].strip()):
+            group = group[1:]
+        tags += [t for t in group if t not in tags]
+    return tags, refs, used
 
 
 def normalized_mask(path: Path) -> Image.Image:
@@ -188,6 +195,7 @@ def inpaint_panel(
     grow_mask_by: int | None = None, seed: int | None = None,
     negative: str | None = None, client: ComfyClient | None = None,
     characters: list[dict] | None = None, character_weight: float | None = None,
+    reading_order: str = "rtl",
 ) -> InpaintResult:
     """Repaint the masked region of panel ``seq`` (or an explicit ``source``) from
     ``prompt``. ``mask`` and ``source`` must live inside ``project``. Legacy form."""
@@ -203,7 +211,7 @@ def inpaint_panel(
         src, mask_path, prompt=prompt, out=output_path(project, seq), denoise=denoise,
         grow_mask_by=grow_mask_by, seed=seed, negative=negative, client=client,
         tag=f"{project.name}_{seq:03d}", characters=characters, identity=project,
-        character_weight=character_weight,
+        character_weight=character_weight, reading_order=reading_order,
     )
     result.seq = seq
     Path(result.path).with_suffix(".json").write_text(json.dumps(asdict(result), indent=2))
@@ -215,7 +223,7 @@ def inpaint_inline(
     denoise: float | None = None, grow_mask_by: int | None = None, seed: int | None = None,
     client: ComfyClient | None = None, outputs: Path | None = None,
     characters: list[dict] | None = None, identity: Path | None = None,
-    character_weight: float | None = None,
+    character_weight: float | None = None, reading_order: str = "rtl",
 ) -> InpaintResult:
     """Container form (docs/engine-api.md): ``source`` is the exact take, ``mask`` the
     selection export. Output goes to the engine's ``outputs/<project>/`` cache; the
@@ -237,7 +245,7 @@ def inpaint_inline(
     result = inpaint_image(source, mask, prompt=prompt, out=out, denoise=denoise,
                            grow_mask_by=grow_mask_by, seed=seed, client=client,
                            tag=project_id, characters=characters, identity=identity,
-                           character_weight=character_weight)
+                           character_weight=character_weight, reading_order=reading_order)
     out.with_suffix(".json").write_text(json.dumps(asdict(result), indent=2))
     return result
 
@@ -247,13 +255,15 @@ def inpaint_image(
     grow_mask_by: int | None = None, seed: int | None = None, negative: str | None = None,
     client: ComfyClient | None = None, tag: str = "panel",
     characters: list[dict] | None = None, identity: Path | None = None,
-    character_weight: float | None = None,
+    character_weight: float | None = None, reading_order: str = "rtl",
 ) -> InpaintResult:
     """Crop-and-stitch repaint of ``src`` inside ``mask_path``, saved to ``out``.
 
     ``characters`` (``[{"name", "version"}]``, from the ``identity`` registry folder)
-    are the people in the patch: their traits join the prompt, and with exactly one,
-    IP-Adapter guides the patch with their reference so a face stays on-model."""
+    are the people in the patch: their traits join the prompt, and IP-Adapter guides
+    the patch with their references so faces stay on-model. One character's reference
+    covers the patch; with several, each is masked to their band of the crop in
+    ``reading_order`` (as in a panel render), so no one reference pulls every face."""
     settings = load_settings()
     models = load_models()
     d = settings.defaults.inpaint
@@ -288,7 +298,7 @@ def inpaint_image(
     scale = ((work_w * work_h) / (crop_w * crop_h)) ** 0.5
 
     neg = negative if negative is not None else _style_negative()
-    tags, ref, used = resolve_characters(identity, characters) if characters else ([], None, {})
+    tags, refs, used = resolve_characters(identity, characters) if characters else ([], {}, {})
     # The artist's prompt leads: it's what to paint. Traits follow to keep it on-model;
     # placed first they win, e.g. a "wide toothed grin" trait overrode "open mouth".
     positive = _with_style(", ".join([prompt.strip(), *tags]) if tags else prompt)
@@ -301,12 +311,13 @@ def inpaint_image(
         source_up = client.upload_image(str(crop_path))
         mask_up = client.upload_image(str(cmask_path))
     ipa = None
-    if ref is not None:
+    if refs:
         from manganation.render.panel import ipadapter_files
 
         ipa_file, clip_file = ipadapter_files(models, settings.defaults.ipadapter.adapter)
-        ipa = {"ref_image": client.upload_image(str(ref))["name"], "ipadapter_file": ipa_file,
-               "clip_name": clip_file,
+    if len(refs) == 1 and len(used) == 1:
+        ipa = {"ref_image": client.upload_image(str(next(iter(refs.values()))))["name"],
+               "ipadapter_file": ipa_file, "clip_name": clip_file,
                "weight": d.ipadapter_weight if character_weight is None else character_weight}
     graph = graphs.inpaint(
         ckpt=models["checkpoints"]["primary"]["id"],
@@ -317,6 +328,13 @@ def inpaint_image(
         mask_channel="red",  # normalised: opaque greyscale, white = repaint
         sampling=graphs.Sampling(d.steps, d.cfg), ipadapter=ipa,
     )
+    if refs and ipa is None:
+        graph = graphs.with_regional_ipadapter(
+            graph, references=_regional_references(
+                client, list(used), refs, work_w, work_h, reading_order,
+                character_weight),
+            ipadapter=ipa_file, clip_vision=clip_file, force_regional=True,
+            id_prefix="ipa_")
     blobs = client.run(graph)
     if not blobs:
         raise InpaintError("ComfyUI returned no image")
@@ -334,6 +352,25 @@ def inpaint_image(
         width=width, height=height, denoise=denoise, grow_mask_by=grow_mask_by, seed=seed,
         positive=positive, crop=list(box), work_size=[work_w, work_h], characters=used,
     )
+
+
+def _regional_references(
+    client, names: list[str], refs: dict[str, Path], width: int, height: int,
+    reading_order: str, weight: float | None,
+) -> list[dict]:
+    """Each referenced character's reference, masked to their band of the work canvas.
+    Bands are laid out over *every* named character, so one who has no reference
+    still keeps their part of the crop free of the others' faces."""
+    from manganation.layout.regions import assign_regions
+    from manganation.script.schema import ReadingOrder
+
+    ipa = load_settings().defaults.ipadapter
+    regions = assign_regions(len(names), order=ReadingOrder(reading_order), margin=0.05)
+    return [{"image": client.upload_image(str(refs[name]))["name"],
+             "mask": list(region.scaled(width, height)), "canvas_w": width,
+             "canvas_h": height, "weight": ipa.weight_regional if weight is None else weight,
+             "feather": ipa.feather}
+            for name, region in zip(names, regions, strict=True) if name in refs]
 
 
 def _with_style(prompt: str) -> str:

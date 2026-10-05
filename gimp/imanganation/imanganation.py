@@ -1006,6 +1006,11 @@ def _panel_at(image, x, y):
     return walk(image.get_layers())
 
 
+def _name_list(text):
+    """"Yuki, Akira" -> ["Yuki", "Akira"] (blank entries dropped)."""
+    return [name.strip() for name in (text or "").split(",") if name.strip()]
+
+
 def inpaint_selection(procedure, run_mode, image, drawables, config, data):
     _, non_empty, x1, y1, x2, y2 = Gimp.Selection.bounds(image)
     if not non_empty:
@@ -1043,6 +1048,14 @@ def inpaint_selection(procedure, run_mode, image, drawables, config, data):
             body["denoise"] = config.get_property("denoise")
         if config.get_property("grow") >= 0:
             body["grow_mask_by"] = config.get_property("grow")
+        characters = _name_list(config.get_property("characters"))
+        if characters:
+            # Their references keep faces on-model; several split the patch in
+            # reading order, like a panel render.
+            body["characters"] = characters
+            manifest = _manifest_for(root)
+            if manifest is not None:
+                body["reading_order"] = manifest["project"].get("reading_order", "rtl")
         result = _run_job(config.get_property("engine-url").rstrip("/"), "/inpaint", body,
                           f"Inpainting panel {seq:03d}: {prompt[:40]}…")
     except (EngineError, ValueError) as exc:
@@ -3314,6 +3327,10 @@ class Imanganation(Gimp.PlugIn):
             proc.add_int_argument(
                 "grow", "_Blend (px)", "Grow the mask to blend the seam; -1 = engine "
                 "default", -1, 256, -1, GObject.ParamFlags.READWRITE)
+            proc.add_string_argument(
+                "characters", "_Characters", "Who is in the selection, comma-separated "
+                "(e.g. \"Yuki, Akira\"); keeps their faces on-model. Blank = none",
+                "", GObject.ParamFlags.READWRITE)
             proc.add_string_argument(
                 "engine-url", "_Engine URL", "imanganation engine (manganation serve)",
                 ENGINE_URL, GObject.ParamFlags.READWRITE)

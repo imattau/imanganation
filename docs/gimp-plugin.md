@@ -146,7 +146,9 @@ page placement metadata are still being migrated. It adds ten commands under
   in the **take's own pixel space** (takes are shown scaled), sent with the exact take
   to `POST /inpaint`, and the result goes in at the take's exact geometry (so it lines
   up even if you moved or scaled it), with the previous take hidden. Outside the
-  selection the take is pixel-identical.
+  selection the take is pixel-identical. **Characters** (comma-separated, optional)
+  names who is in the selection, so their faces stay on-model; with several, each
+  covers their side of the patch in the project's reading order.
 - **Set Character Reference from Layer…**: select the layer that shows a character
   (optionally drag a selection around them) and type their name or alias. The region
   is grown to a square around its centre on white, with layer masks applied, capped at

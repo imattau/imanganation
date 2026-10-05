@@ -116,7 +116,10 @@ Crop-and-stitch, with outside-mask pixels kept exactly (`docs/inpaint.md`). Outp
 `{"name", "version"}`). Their appearance traits follow the artist's prompt, and with
 exactly one character, IP-Adapter guides the patch with their reference (`version`
 honoured; `character_weight` overrides `defaults.inpaint.ipadapter_weight`, 0.45).
-With several characters, traits only. Only *appearance* traits are used, never the
+With several characters, one head count (`1boy, 1girl`) leads their grouped traits, and
+each reference is masked to that character's band of the patch in `reading_order`
+(`rtl` default), as in a panel render; `character_weight` then overrides
+`defaults.ipadapter.weight_regional`. Only *appearance* traits are used, never the
 character's `default_expression` or `mannerisms`, so the prompt decides the expression.
 Unknown characters or versions fail, listing what exists. Leave `characters` out for
 props and backgrounds. Recommended plug-in default: the panel's characters as choices,

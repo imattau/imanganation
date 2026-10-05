@@ -117,8 +117,8 @@ class InpaintDefaults(BaseModel):
     # Crop-and-stitch: inpaint a crop around the mask at ~1 MP, not the whole take.
     context: float = 0.5  # context added on each side, as a fraction of the mask's size
     min_crop: int = 256  # smallest crop side (source px), so tiny masks see surroundings
-    # Named characters: their traits join the prompt; with exactly one, IP-Adapter uses
-    # their reference so a repainted face stays on-model.
+    # Named characters: their traits join the prompt and IP-Adapter uses their reference
+    # so a repainted face stays on-model (several: each masked to its band of the crop).
     ipadapter_weight: float = 0.45  # live: 0.45 kept identity and followed "surprised face"
     steps: int = 28
     cfg: float = 6.0
