@@ -28,6 +28,19 @@ export LD_LIBRARY_PATH="$LIBS$D/lib:$D/lib/x86_64-linux-gnu:$D/usr/lib/x86_64-li
 # The uninstalled build tree contains compiled resource icons, but not the full icon
 # themes (those are install_data assets). Stage the build under /tmp so GTK can find
 # the complete Default and Legacy themes without installing anything system-wide.
+# `ninja install` rebuilds first, so it gets what a build needs from the dependency
+# prefix, scoped to this step:
+#   PYTHONNOUSERSITE  the system g-ir-scanner imports distutils.msvccompiler; a
+#                     setuptools in ~/.local (pip --user) shadows the system one
+#                     with a distutils that no longer has it
+#   GI_GIR_PATH       .gir files the prefix provides (GExiv2)
+#   CPATH, LIBRARY_PATH  headers and libraries of packages unpacked into the prefix
+#                     (poppler-glib), whose .pc files still say /usr
+PYTHONNOUSERSITE=1 \
+GI_GIR_PATH="$D/share/gir-1.0" \
+CPATH="$D/usr/include/poppler/glib:$D/usr/include/poppler:$D/usr/include" \
+LIBRARY_PATH="$D/usr/lib/x86_64-linux-gnu:$D/lib/x86_64-linux-gnu" \
+PKG_CONFIG_PATH="$D/lib/x86_64-linux-gnu/pkgconfig:$D/lib/pkgconfig:$D/usr/lib/x86_64-linux-gnu/pkgconfig:$D/usr/share/pkgconfig" \
 DESTDIR="$DATA_STAGE" ninja -C "$B" install
 DATA_DIR="$(sed -n 's/^#define GIMPDATADIR "\(.*\)"$/\1/p' "$B/config.h")"
 [ -n "$DATA_DIR" ] || { echo "Could not read GIMPDATADIR from $B/config.h"; exit 1; }
