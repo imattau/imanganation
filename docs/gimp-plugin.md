@@ -84,7 +84,11 @@ queued for a design sheet (`POST /characters`), and Context refreshes as each on
 lands. A character's **Design character** button designs it from its notes, or makes a
 new design version if it has one. In the Project tree, right-click **Characters** for
 **New character…** (name, aliases and a description, designed straight away if you
-like), or a character for **Design character**. The engine has ComfyUI unload its models before an LLM
+like), or a character for **Design character** or **Delete character…** (also on the
+Character Bible's rows). Deleting asks first, then removes them from the cast and from
+every panel that lists them (takes and dialogue stay), and the engine moves their
+designs to `characters/.deleted/` in its identity store, from where they can be restored
+by hand. The engine has ComfyUI unload its models before an LLM
 step and unloads the LLM before a render, so both fit on 16 GB.
 **Speech bubbles.** A placed panel's Context lists its dialogue and SFX lines, each with
 a **Bubble…** button. It opens the bubble picker on the tab for the line's kind (speech,

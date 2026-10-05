@@ -80,3 +80,35 @@ def test_set_reference_rejects_bad_requests(tmp_path):
     assert post(version_id="base") == 409  # would overwrite the original
     assert post(version_id="../escape") == 422
     assert CharacterRegistry.from_path(project).get("Akira") is None
+
+
+def test_delete_character_sets_their_designs_aside(tmp_path):
+    project = _project(tmp_path)
+    reg = CharacterRegistry.from_path(project)
+    reg.ensure("Akira")
+    reg.save()
+    client = _client(tmp_path)
+
+    gone = client.delete("/characters", params={"project_dir": str(project), "name": "yuki"})
+    assert gone.status_code == 200
+    body = gone.json()
+    assert body["name"] == "Yuki" and body["versions"] == ["base"]
+    moved = Path(body["moved_to"])
+    assert moved.parent == project / "characters/.deleted" and (moved / "base.png").exists()
+    assert not (project / "characters/yuki").exists()
+    names = [c["name"] for c in client.get(
+        "/characters", params={"project_dir": str(project)}).json()]
+    assert names == ["Akira"]
+
+    missing = client.delete("/characters", params={"project_dir": str(project), "name": "Yuki"})
+    assert missing.status_code == 404 and "Akira" in missing.json()["detail"]
+    # re-adding the name starts fresh, without the old design
+    reg = CharacterRegistry.from_path(project)
+    reg.ensure("Yuki")
+    reg.save()
+    assert reg.reference_path("Yuki") is None
+
+
+def test_delete_character_needs_one_project_form(tmp_path):
+    response = _client(tmp_path).delete("/characters", params={"name": "Yuki"})
+    assert response.status_code == 422

@@ -62,6 +62,7 @@ try:
     from project_store import (
         ProjectFileError,
         apply_field_edit,
+        delete_character,
         delete_page,
         load_project,
         new_id,
@@ -77,6 +78,7 @@ except ImportError:  # Keep older single-file plug-in installs usable for legacy
     project_from_script = parse_script_text = script_looks_canonical = None
     lettering = bubble_templates = None
     load_project = record_take = save_project = apply_field_edit = None
+    delete_character = None
     new_id = None
     build_docks = None
     character_row_id = None
@@ -121,6 +123,7 @@ DOCK_DESIGN_CHARACTER = "plug-in-imanganation-dock-design-character"
 # Project tree right-click menus (one-string procedures: the row id)
 DOCK_NEW_CHARACTER = "plug-in-imanganation-dock-new-character"
 DOCK_DESIGN_CHARACTER_ITEM = "plug-in-imanganation-dock-design-character-item"
+DOCK_DELETE_CHARACTER = "plug-in-imanganation-dock-delete-character"
 # Page strip / Project tree: right-click Delete page… and drag to reorder
 DOCK_DELETE_PAGE = "plug-in-imanganation-dock-delete-page"
 DOCK_REORDER_PAGES = "plug-in-imanganation-dock-reorder-pages"
@@ -2632,13 +2635,17 @@ def _choose_new_character():
 
 
 def _dock_character_menu(procedure, config, data):
-    """Project tree right-click: New character… (Characters heading) or Design
-    character (a character row, whose id is the item)."""
+    """Project tree right-click: New character… (Characters heading), or Design
+    character / Delete character… (a character row, whose id is the item)."""
     try:
         root = _DOCK_CONTEXT["root"]
         if data == "design":
             _DOCK_CONTEXT["selected_id"] = config.get_property("item")
             _design_selected_character()
+            return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+        if data == "delete":
+            if not _delete_character(root, config.get_property("item")):
+                return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
             return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
         chosen = _choose_new_character()
         if chosen is None:
@@ -2665,6 +2672,57 @@ def _dock_character_menu(procedure, config, data):
     except Exception as exc:
         return _error(procedure, str(exc))
     return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+
+
+def _delete_character(root, row_id):
+    """Delete character…: confirm, take them out of the cast and their panels, and have
+    the engine set their designs aside. -> False if cancelled."""
+    manifest = load_project(root)
+    character = next((c for c in manifest["cast"] if character_row_id(c["name"]) == row_id),
+                     None)
+    if character is None:
+        raise ValueError("That character is no longer in the cast")
+    name = character["name"]
+    if name in _DESIGN_JOBS.values():
+        raise ValueError(f"{name} is being designed; delete them when the design finishes")
+    query = _engine_project(root, manifest)
+    try:
+        known = _http("GET", f"{ENGINE_URL}/characters?{urllib.parse.urlencode(query)}",
+                      timeout=3)
+        record = next((c for c in known
+                       if c.get("name", "").casefold() == name.casefold()), None)
+        engine_down = None
+    except EngineError as exc:
+        record, engine_down = None, exc
+    panels = sum(any(c.get("name", "").casefold() == name.casefold()
+                     for c in p.get("characters", [])) for p in manifest["panels"])
+    detail = f"{name} is removed from the cast"
+    detail += (f" and from {panels} panel{'s' if panels != 1 else ''} (their takes and "
+               "dialogue are kept)." if panels else ".")
+    if record and record.get("versions"):
+        count = len(record["versions"])
+        detail += (f" Their design{'s' if count != 1 else ''} ({count} version"
+                   f"{'s' if count != 1 else ''}) move to the engine's characters/.deleted "
+                   "folder, where they can be restored by hand.")
+    elif engine_down is not None:
+        detail += (f" The engine isn't reachable ({_engine_status(engine_down)}), so any "
+                   f"design stays in the engine and would come back if you add a "
+                   f"character named {name} again.")
+    if not _confirm(f"Delete {name}?", detail, "Delete"):
+        return False
+    delete_character(manifest, name)
+    save_project(root, manifest)
+    if record is not None:
+        try:
+            _http("DELETE", f"{ENGINE_URL}/characters?"
+                            f"{urllib.parse.urlencode({**query, 'name': name})}", timeout=10)
+        except EngineError as exc:
+            Gimp.message(f"{name} was removed from the project, but the engine kept their "
+                         f"design: {_engine_status(exc)}")
+    if _DOCK_CONTEXT.get("selected_id") == row_id:
+        _DOCK_CONTEXT["selected_id"] = None
+    _refresh_project_docks()
+    return True
 
 
 def _confirm(title, text, action):
@@ -2789,6 +2847,7 @@ def _dock_actions(root, manifest):
     return {"design_action": DOCK_DESIGN_CHARACTER,
             "new_character_action": DOCK_NEW_CHARACTER,
             "design_character_menu": DOCK_DESIGN_CHARACTER_ITEM,
+            "delete_character_menu": DOCK_DELETE_CHARACTER,
             "delete_page_action": DOCK_DELETE_PAGE,
             "reorder_pages_action": DOCK_REORDER_PAGES,
             "bubble_line_action": DOCK_BUBBLE_LINE, "bubbled": frozenset(bubbled),
@@ -3040,6 +3099,7 @@ def _add_dock_callbacks(plugin):
         (DOCK_DESIGN_CHARACTER, _dock_action, "design-character", False),
         (DOCK_NEW_CHARACTER, _dock_character_menu, "new", True),
         (DOCK_DESIGN_CHARACTER_ITEM, _dock_character_menu, "design", True),
+        (DOCK_DELETE_CHARACTER, _dock_character_menu, "delete", True),
         (DOCK_DELETE_PAGE, _dock_page_menu, "delete", True),
         (DOCK_REORDER_PAGES, _dock_page_menu, "reorder", True),
         (DOCK_BUBBLE_LINE, _dock_bubble, "line", True),

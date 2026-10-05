@@ -487,6 +487,52 @@ def reorder_pages(document: dict[str, Any], dragged: str, target: str) -> None:
     _renumber_pages(document, first)
 
 
+def find_cast_member(document: dict[str, Any], name: str) -> dict[str, Any] | None:
+    """The cast entry with this name or alias (any case), or None."""
+    target = name.strip().casefold()
+    return next((c for c in document["cast"]
+                 if target in {n.casefold() for n in (c["name"], *c.get("aliases", []))}),
+                None)
+
+
+def panels_with_character(document: dict[str, Any], name: str) -> list[dict[str, Any]]:
+    """Panels that list this cast member (by name or alias) among their characters."""
+    member = find_cast_member(document, name)
+    spellings = {n.casefold() for n in (member["name"], *member.get("aliases", []))} \
+        if member else {name.casefold()}
+    return [panel for panel in document["panels"]
+            if any(c.get("name", "").casefold() in spellings
+                   for c in panel.get("characters", []))]
+
+
+def delete_character(document: dict[str, Any], name: str) -> tuple[dict[str, Any], list[str]]:
+    """Remove a character from the cast and from every panel that lists them (their
+    expressions go too; dialogue lines are script text and stay). Takes are kept.
+    Returns the removed cast entry and the ids of the panels that changed."""
+    member = find_cast_member(document, name)
+    if member is None:
+        raise ProjectFileError(f"{name} is not in this project's cast")
+    spellings = {n.casefold() for n in (member["name"], *member.get("aliases", []))}
+    changed = []
+    for panel in panels_with_character(document, member["name"]):
+        panel["characters"] = [c for c in panel["characters"]
+                               if c.get("name", "").casefold() not in spellings]
+        changed.append(panel["id"])
+    for panel in document["panels"]:
+        expressions = panel.get("expressions") or {}
+        kept = {who: what for who, what in expressions.items()
+                if who.casefold() not in spellings}
+        if kept != expressions:
+            if kept:
+                panel["expressions"] = kept
+            else:
+                panel.pop("expressions", None)
+            if panel["id"] not in changed:
+                changed.append(panel["id"])
+    document["cast"].remove(member)
+    return member, changed
+
+
 def delete_page(document: dict[str, Any], page_id: str) -> tuple[str, list[str]]:
     """Remove a page from the project. Panels placed on it become unplaced (their takes
     are kept). Returns the page's file (relative; the caller disposes of it) and the

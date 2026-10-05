@@ -131,6 +131,13 @@ none preselected for a two-shot.
 `POST /characters/reference` takes `project` instead of `project_dir`. Both accept
 `project_dir` too (legacy). An unmapped project id has an empty cast.
 
+`DELETE /characters?project=prj_…&name=Rin` removes a character (by name or alias)
+from the identity store, synchronously. Their folder of designs and reference versions
+is moved to `characters/.deleted/<slug>-<time>/`, not erased, so it can be restored by
+hand. → `{"name", "versions", "moved_to"}`; 404 lists the known names. Imported
+projects share their identity store with the legacy folder, so the character goes from
+both.
+
 `POST /characters` creates a character and designs it, as a job (`kind: "character"`,
 polled at `GET /jobs/{id}`, queued with renders):
 
@@ -162,6 +169,7 @@ earlier designs are kept. No description and no traits is a `422`.
 | `POST /refine`, `POST /inpaint` | Above |
 | `GET /characters` | The cast, by `project` or legacy `project_dir` |
 | `POST /characters/reference` | Register an image as a character's new active reference version |
+| `DELETE /characters` | Remove a character; their designs move to `characters/.deleted/` |
 | `GET /status` | ComfyUI/GPU health, running/queued/recent jobs (by project + panel id), missing models |
 | `GET /health` | Liveness |
 

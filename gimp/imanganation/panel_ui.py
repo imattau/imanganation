@@ -51,6 +51,13 @@ def _script_panel_label(panel: dict[str, Any]) -> str:
     return f"{title} — {action}" if action else title
 
 
+def _menu(*items: tuple[str, str]) -> str:
+    """A row's right-click menu suffix, "\t!proc:Label|proc2:Label"; items without a
+    procedure are left out, and no items means no menu."""
+    entries = "|".join(f"{proc}:{label}" for proc, label in items if proc)
+    return f"\t!{entries}" if entries else ""
+
+
 def character_row_id(name: str) -> str:
     """Build a collision-safe row key from the engine's character identity name."""
     return "character:" + quote(name, safe="")
@@ -81,6 +88,7 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
                 generate_layout_action: str = "",
                 design_action: str = "", new_character_action: str = "",
                 design_character_menu: str = "", delete_page_action: str = "",
+                delete_character_menu: str = "",
                 reorder_pages_action: str = "", bubble_line_action: str = "",
                 bubbled: frozenset = frozenset(),
                 new_bubble_action: str = "") -> dict[str, str]:
@@ -93,7 +101,8 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
     button for characters (their notes are the description). In the Project tree,
     ``new_character_action`` puts "New character…" on the Characters heading's
     right-click menu, and ``design_character_menu`` puts "Design character" on each
-    character's (both one-string dock procedures). ``delete_page_action`` puts
+    character's (both one-string dock procedures); ``delete_character_menu`` adds
+    "Delete character…" there and on the Character Bible's rows. ``delete_page_action`` puts
     "Delete page…" on page rows and tiles, and ``reorder_pages_action`` lets the page
     strip's tiles be dragged (it gets "dragged id\ttarget id"). ``bubble_line_action``
     gives each of a panel's dialogue and SFX lines a button in Context (item
@@ -166,8 +175,8 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
         if cast or new_character_action:
             heading_menu = (f"\t!{new_character_action}:New character…"
                             if new_character_action else "")
-            row_menu = (f"\t!{design_character_menu}:Design character"
-                        if design_character_menu else "")
+            row_menu = _menu((design_character_menu, "Design character"),
+                             (delete_character_menu, "Delete character…"))
             project_rows.append(f"\t# Characters{heading_menu}")
             project_rows.extend(
                 f"\t\t{character_row_id(character['name'])}\t"
@@ -218,8 +227,10 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
 
     character_rows = ["# Cast"]
     if cast:
+        bible_menu = _menu((delete_character_menu, "Delete character…"))
         character_rows.extend(
             f"{character_row_id(character['name'])}\t{_label(character.get('name'))}"
+            f"{bible_menu}"
             for character in cast)
     else:
         character_rows.append("No characters in this project's cast")

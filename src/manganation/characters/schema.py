@@ -211,6 +211,13 @@ class Cast(BaseModel):
     def names(self) -> list[str]:
         return [c.name for c in self.characters]
 
+    def remove(self, name: str) -> Character | None:
+        """Take the character with this name or alias out of the cast."""
+        character = self.get(name)
+        if character is not None:
+            self.characters.remove(character)
+        return character
+
     def add(self, character: Character) -> Character:
         if self.get(character.name) is not None:
             raise ValueError(f"character {character.name!r} already exists")

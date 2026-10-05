@@ -489,6 +489,22 @@ def create_app(
             for c in reg.cast.characters
         ]
 
+    @app.delete("/characters")
+    def delete_character(name: str, project_dir: str | None = None,
+                         project: str | None = None) -> dict:
+        """Remove a character from the engine's registry. Their designs and reference
+        versions are moved to ``characters/.deleted/``, not erased. Synchronous."""
+        if (project is None) == (project_dir is None):
+            raise HTTPException(422, "send either project (container id) or project_dir")
+        reg = _registry(project_dir, project)
+        removed = reg.remove(name)
+        if removed is None:
+            known = ", ".join(c.name for c in reg.cast.characters) or "none"
+            raise HTTPException(404, f"no character {name!r} (known: {known})")
+        character, moved = removed
+        return {"name": character.name, "versions": [v.id for v in character.versions],
+                "moved_to": str(moved) if moved else None}
+
     @app.post("/characters/reference")
     def set_reference(req: ReferenceRequest) -> dict:
         """Register an image as a character's new active reference (a new version;

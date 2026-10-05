@@ -197,6 +197,17 @@ def test_characters_heading_and_rows_carry_right_click_menus():
     assert "!" not in build_docks(copy.deepcopy(EXAMPLE))["project"]  # no actions, no menus
 
 
+def test_character_rows_offer_delete_in_the_tree_and_the_character_bible():
+    docks = build_docks(copy.deepcopy(EXAMPLE), design_character_menu="design-proc",
+                        delete_character_menu="delete-proc")
+    who = character_row_id("Yuki")
+    assert (f"\t\t{who}\tYuki\t!design-proc:Design character|"
+            "delete-proc:Delete character…") in docks["project"]
+    assert f"{who}\tYuki\t!delete-proc:Delete character…" in docks["characters"]
+    only_delete = build_docks(copy.deepcopy(EXAMPLE), delete_character_menu="delete-proc")
+    assert f"\t\t{who}\tYuki\t!delete-proc:Delete character…" in only_delete["project"]
+
+
 def test_pages_carry_a_delete_menu_and_the_strip_can_be_reordered():
     manifest = copy.deepcopy(EXAMPLE)
     docks = build_docks(manifest, delete_page_action="del", reorder_pages_action="move")

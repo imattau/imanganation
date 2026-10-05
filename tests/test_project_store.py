@@ -12,6 +12,7 @@ import pytest
 from gimp.imanganation.project_store import (
     ProjectFileError,
     apply_field_edit,
+    delete_character,
     load_project,
     new_id,
     record_take,
@@ -224,3 +225,29 @@ def test_pages_reorder_and_delete_keep_the_project_valid(tmp_path):
     with pytest.raises(ProjectFileError, match="no longer"):
         delete_page(document, first["id"])
 
+
+def test_deleting_a_character_takes_them_out_of_the_cast_and_their_panels(tmp_path):
+    document = copy.deepcopy(EXAMPLE)
+    yuki = next(c for c in document["cast"] if c["name"] == "Yuki")
+    yuki["aliases"] = ["Snow"]
+    two_shot = document["panels"][2]
+    two_shot["characters"][0]["version"] = "summer"
+    two_shot["expressions"] = {"snow": "grin", "Akira": "sighs"}
+    takes = {p["id"]: list(p["takes"]) for p in document["panels"]}
+
+    removed, changed = delete_character(document, "SNOW")  # by alias, any case
+    assert removed["name"] == "Yuki"
+    assert [c["name"] for c in document["cast"]] == ["Akira"]
+    assert changed == [document["panels"][1]["id"], two_shot["id"], document["panels"][4]["id"]]
+    assert two_shot["characters"] == [{"name": "Akira", "version": None}]
+    assert two_shot["expressions"] == {"Akira": "sighs"}
+    assert document["panels"][1]["characters"] == []
+    assert {p["id"]: p["takes"] for p in document["panels"]} == takes  # takes are kept
+    assert all(line.get("speaker") for p in document["panels"]
+               for line in p.get("dialogue", []))  # dialogue is script text, untouched
+    save_project(tmp_path, document)
+    jsonschema.validate(load_project(tmp_path), SCHEMA)
+    assert integrity_errors(load_project(tmp_path)) == []
+
+    with pytest.raises(ProjectFileError, match="not in this project's cast"):
+        delete_character(document, "Yuki")

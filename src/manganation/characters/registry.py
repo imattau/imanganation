@@ -92,6 +92,29 @@ class CharacterRegistry:
     def names(self) -> list[str]:
         return self.cast.names()
 
+    def remove(self, name: str) -> tuple[Character, Path | None] | None:
+        """Delete a character from the cast. Their folder (designs, reference versions,
+        manifest) is moved to ``characters/.deleted/<slug>-<time>/`` rather than erased,
+        so a mistaken delete can be undone by hand. -> (the character, where the folder
+        went or None if it had none), or None if there is no such character."""
+        from datetime import datetime
+
+        character = self.cast.remove(name)
+        if character is None:
+            return None
+        folder, moved = self.character_dir(character.name), None
+        if folder.is_dir():
+            stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            moved = self.chars_dir / ".deleted" / f"{folder.name}-{stamp}"
+            n = 2
+            while moved.exists():
+                moved = moved.with_name(f"{folder.name}-{stamp}-{n}")
+                n += 1
+            moved.parent.mkdir(parents=True, exist_ok=True)
+            folder.rename(moved)
+        self.save()
+        return character, moved
+
     # --- versions -----------------------------------------------------------
 
     def add_version(
