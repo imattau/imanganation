@@ -64,7 +64,9 @@ class PanelSpec(BaseModel):
 
     # generation
     color_mode: ColorMode = ColorMode.INHERIT
-    aspect_ratio: str = "1:1"  # e.g. "1:1", "4:3", "16:9", "3:4"
+    # Frame hints ([FRAME: ...]): None / "" = none given. A drawn frame's size wins.
+    aspect_ratio: str | None = Field(default=None, pattern=r"^[0-9]+:[0-9]+$")
+    size: Literal["", "small", "large", "splash"] = ""
     refs: dict[str, str] = Field(default_factory=dict)  # character -> reference image path
     seed: int | None = None
 

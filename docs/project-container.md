@@ -104,7 +104,8 @@ production state.
 | `characters` | `[{"name": "Yuki", "version": "summer"}]`. `version` is optional (the engine's active reference otherwise). This is how story continuity reaches the engine. |
 | `expressions` | `{"Akira": "sighing"}` |
 | `dialogue`, `sfx` | Never rendered. Lettering reference only. |
-| `aspect_ratio` | A hint for panels rendered before a frame exists. A frame's real size wins. |
+| `aspect_ratio` | Frame shape hint from the script's `[FRAME: …]` (`wide` = `2:1`, `tall` = `1:2`). Absent = no hint. Ranks page layouts only; renders always use the selected frame. |
+| `size` | Frame size hint from `[FRAME: …]`: `small`, `large` or `splash`. Absent = no hint (the shot is used). Ranks page layouts. |
 | `seed` | Optional pinned seed. |
 | `status` | `unplaced`, `placed` or `orphaned` |
 | `placement` | `{"page": "pg_…", "frame": [x, y, w, h]}` once placed. The page id is the source of truth for "which page is this panel on". |

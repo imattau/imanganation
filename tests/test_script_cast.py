@@ -194,3 +194,26 @@ def test_a_repeated_page_and_panel_number_is_a_problem():
     assert data["problems"] == [{"line": 8, "message": "PAGE 2 PANEL 1 is already used on "
                                  "line 2 (a new PAGE missing, or a repeated number?)"}]
 
+
+def test_frame_hints_give_shape_and_size():
+    text = ("PAGE 1\nPANEL 1\n[FRAME: wide, large]\n[ACTION]\na\n"
+            "PANEL 2\n[FRAME: 3 : 4]\n[ACTION]\nb\n"
+            "PANEL 3\n[FRAME: splash]\n[ACTION]\nc\n"
+            "PANEL 4\n[ACTION]\nd\n")
+    data = canonical.parse(text)
+    assert [(p["aspect_ratio"], p["size"]) for p in data["panels"]] == [
+        ("2:1", "large"), ("3:4", ""), (None, "splash"), (None, "")]
+    assert not data["problems"]
+    spec = parse_canonical(text).panels[0]
+    assert (spec.aspect_ratio, spec.size) == ("2:1", "large")
+    assert parse_canonical(text).panels[3].aspect_ratio is None  # no default shape
+
+
+def test_bad_frame_hints_are_reported():
+    text = "PAGE 1\nPANEL 1\n[FRAME: huge, wide, tall, 0:3]\n[ACTION]\na\n"
+    data = canonical.parse(text)
+    messages = [p["message"] for p in data["problems"]]
+    assert any("Unknown frame hint 'huge'" in m for m in messages)
+    assert any("two shapes" in m for m in messages)
+    assert any("'0:3'" in m for m in messages)
+    assert all(p["line"] == 3 for p in data["problems"])

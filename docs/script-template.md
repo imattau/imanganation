@@ -27,6 +27,7 @@ PAGE 1
 
 PANEL 1
 [SHOT: wide shot]
+[FRAME: wide, large]
 [CHARACTERS: Name, Other Name]
 [EXPRESSIONS: Name: smiling; Other Name: worried]
 [ACTION]
@@ -61,6 +62,7 @@ PANEL 1
 | `[FLASHBACK START]` / `[FLASHBACK END]` | between panels | panels between them are a flashback |
 | `PANEL n` | own line, under a page | starts a panel, numbered within its page |
 | `[SHOT: …]` | in a panel | the shot (framing) |
+| `[FRAME: …]` | in a panel | the frame's shape and size on the page (optional) |
 | `[CHARACTERS: …]` | in a panel | exactly who is in the picture |
 | `[EXPRESSIONS: …]` | in a panel | each character's expression |
 | `[LOCATION: …]` | in a panel | this panel's place, when it differs from the scene |
@@ -145,6 +147,14 @@ Mio runs along the pier, Kaito trailing far behind her.
   (empty) means nobody, as in an establishing shot. Without it, the panel's speakers
   (not narration) and any cast member named in the action are drawn, except anyone the
   action puts off-panel ("Yuki calls from off-panel"). Giving it is the surest way.
+- **`[FRAME: …]`** describes the panel's frame on the page, so **Generate Page
+  Layout** can recommend a layout that fits: a shape (`wide`, `tall`, `square`, or a
+  ratio such as `3:2`, width first), a size (`small`, `large`, or `splash` for the
+  page's dominant panel), or both: `[FRAME: wide, large]`. Both are optional; without
+  one, the shot decides the size (an establishing shot wants a big, wide frame, a
+  close-up a small one). Frames are matched to panels in reading order, so a large
+  first panel favours a layout that opens big. It only guides the layout choice: a
+  panel is always rendered into the frame you select.
 - **`[EXPRESSIONS: …]`** is `Name: expression; Name: expression`. Without it, each
   character's usual expression from their design is used.
 - **`[ACTION]`** is the picture: one moment that a single still image can show. Every
@@ -195,8 +205,8 @@ script first or go ahead without the reported lines.
 
 ## Set later in GIMP
 
-- **Aspect ratio** of a panel: the frame you render into decides it, or set it in the
-  panel's Context.
+- **Panel frames**: the frame you render into decides a panel's real shape. `[FRAME]`
+  hints can also be changed in the panel's Context (Aspect ratio, Frame size).
 - **Character designs beyond the first**: **Design character** (a new version) or
   *Set Character Reference from Layer*.
 - **Page layouts and panel frames**: you draw these, or choose a layout for a page.

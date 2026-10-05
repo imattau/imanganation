@@ -21,6 +21,8 @@ The format (user guide: docs/script-template.md)::
     [CHARACTERS: Mio, Kaito]           exactly who is in the picture
     [EXPRESSIONS: Mio: grin; Kaito: bored]
     [LOCATION: the boat]
+    [FRAME: wide, large]               shape (wide / tall / square / 3:2) and size
+                                       (small / large / splash), either optional
     [ACTION]                           sections: every line until the next header
     Mio runs along the pier.           is of that kind (colons are just text)
     [DIALOGUE]
@@ -42,7 +44,7 @@ Output (plain dicts, keys as in ``PanelSpec`` / ``CastEntry``)::
     {"cast": [{"name", "aliases", "description"}],
      "panels": [{"page", "panel", "scene_heading", "location", "characters", "action",
                  "camera", "expressions", "dialogue": [{"speaker", "text", "kind"}],
-                 "sfx", "notes", "flashback"}],
+                 "sfx", "notes", "flashback", "aspect_ratio" (None = no hint), "size"}],
      "problems": [{"line": n, "message": "..."}]}
 """
 
@@ -68,7 +70,12 @@ _JOINED_RE = re.compile(r"\s*(?:,|&|\band\b)\s*", re.IGNORECASE)
 KINDS = ("speech", "thought", "whisper", "shout", "narration")
 SECTIONS = {"ACTION": "action", "DIALOGUE": "dialogue", "DIALOG": "dialogue",
             "SFX": "sfx", "NOTES": "notes", "NOTE": "notes"}
-FIELDS = {"SHOT", "CHARACTERS", "EXPRESSIONS", "LOCATION"}
+FIELDS = {"SHOT", "CHARACTERS", "EXPRESSIONS", "LOCATION", "FRAME"}
+# [FRAME: ...] words. A shape is stored as the panel's aspect ratio (width:height), so a
+# word and a written ratio mean the same thing to layout ranking and rendering.
+FRAME_SHAPES = {"wide": "2:1", "tall": "1:2", "square": "1:1"}
+FRAME_SIZES = ("small", "large", "splash")
+_RATIO_RE = re.compile(r"^(\d+)\s*:\s*(\d+)$")
 
 # shots recognised in the action when a panel has no [SHOT: ...]
 _CAMERA_PATTERNS = [
@@ -225,6 +232,27 @@ def add_mentions(cast: list[dict], panels: list[dict]) -> None:
         panel["characters"] = [c for c in characters if c not in off]
 
 
+def parse_frame(value: str) -> tuple[str | None, str, list[str]]:
+    """``"wide, large"`` -> (aspect ratio or None, size or "", problem messages)."""
+    aspect, size, problems = None, "", []
+    for part in (p.strip().lower() for p in value.split(",")):
+        if not part:
+            continue
+        ratio = _RATIO_RE.match(part)
+        if part in FRAME_SHAPES or (ratio and int(ratio[1]) and int(ratio[2])):
+            if aspect is not None:
+                problems.append(f"[FRAME] has two shapes ({part!r} after {aspect})")
+            aspect = FRAME_SHAPES.get(part) or f"{int(ratio[1])}:{int(ratio[2])}"
+        elif part in FRAME_SIZES:
+            if size:
+                problems.append(f"[FRAME] has two sizes ({part!r} after {size!r})")
+            size = part
+        else:
+            problems.append(f"Unknown frame hint {part!r}: use wide, tall, square or a "
+                            f"ratio like 3:2, and small, large or splash")
+    return aspect, size, problems
+
+
 def parse(text: str) -> dict:
     """Parse a script -> ``{"cast", "panels", "problems"}``. Raises ValueError only if
     there is no panel at all."""
@@ -278,7 +306,8 @@ def parse(text: str) -> dict:
             current = {"page": page, "panel": int(m.group(1)), "scene_heading": scene,
                        "location": "", "characters": [], "characters_given": False,
                        "camera": "", "expressions": {}, "action_lines": [],
-                       "dialogue": [], "sfx": [], "notes": [], "flashback": flashback}
+                       "dialogue": [], "sfx": [], "notes": [], "flashback": flashback,
+                       "aspect_ratio": None, "size": ""}
             continue
         header = _HEADER_RE.match(line)
         if header:
@@ -312,6 +341,11 @@ def parse(text: str) -> dict:
                     current["camera"] = value.lower()
                 elif name == "LOCATION":
                     current["location"] = value
+                elif name == "FRAME":
+                    aspect, size, messages = parse_frame(value)
+                    current["aspect_ratio"], current["size"] = aspect, size
+                    for message in messages:
+                        problem(number, message)
                 elif name == "CHARACTERS":
                     current["characters_given"] = True
                     names = []

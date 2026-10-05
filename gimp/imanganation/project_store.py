@@ -266,8 +266,11 @@ def record_take(
 
 
 # Context dock fields: "<row id>.<field>" keys, edited in place in the manifest.
-PANEL_TEXT_FIELDS = {"location", "camera", "action", "notes", "aspect_ratio"}
+PANEL_TEXT_FIELDS = {"location", "camera", "action", "notes", "aspect_ratio", "size"}
 _ASPECT = re.compile(r"^[0-9]+:[0-9]+$")
+# Frame hints ([FRAME: ...] in the script); absent = no hint, never a default shape.
+PANEL_SIZES = ("small", "large", "splash")
+FRAME_SHAPES = {"wide": "2:1", "tall": "1:2", "square": "1:1"}
 
 
 def _names(text: str) -> list[str]:
@@ -322,8 +325,15 @@ def apply_field_edit(document: dict[str, Any], key: str, value: str,
             else:
                 panel.pop("expressions", None)
         elif field in PANEL_TEXT_FIELDS:
-            if field == "aspect_ratio" and value and not _ASPECT.match(value):
-                raise ProjectFileError("aspect ratio must look like 3:2")
+            if field == "aspect_ratio" and value:
+                value = FRAME_SHAPES.get(value.lower(), value)
+                if not _ASPECT.match(value):
+                    raise ProjectFileError("aspect ratio must look like 3:2 (or wide, "
+                                           "tall, square)")
+            if field == "size" and value:
+                value = value.lower()
+                if value not in PANEL_SIZES:
+                    raise ProjectFileError(f"size must be one of {', '.join(PANEL_SIZES)}")
             if value or field == "action":  # action is required, the rest optional
                 panel[field] = value
             else:
@@ -396,7 +406,7 @@ def project_from_script(parsed: dict[str, Any], *, title: str, script_file: str,
             "sfx": list(item.get("sfx", [])),
             "notes": item.get("notes", ""),
             "flashback": bool(item.get("flashback", False)),
-            "aspect_ratio": item.get("aspect_ratio") or "1:1",
+            **{key: item[key] for key in ("aspect_ratio", "size") if item.get(key)},
             "seed": item.get("seed"),
             "status": "unplaced",
             "placement": None,

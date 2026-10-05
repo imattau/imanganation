@@ -140,8 +140,17 @@ def test_context_field_edits_change_only_their_field_and_stay_valid(tmp_path):
     jsonschema.validate(load_project(tmp_path), SCHEMA)
     assert integrity_errors(load_project(tmp_path)) == []
 
+    edit(f"{panel['id']}.aspect_ratio", "Wide")  # a [FRAME] word, stored as its ratio
+    assert panel["aspect_ratio"] == "2:1"
+    edit(f"{panel['id']}.size", "Large")
+    assert panel["size"] == "large"
+    jsonschema.validate(document, SCHEMA)
+    edit(f"{panel['id']}.size", "")
+    assert "size" not in panel
     with pytest.raises(ProjectFileError, match="3:2"):
-        edit(f"{panel['id']}.aspect_ratio", "wide")
+        edit(f"{panel['id']}.aspect_ratio", "widish")
+    with pytest.raises(ProjectFileError, match="small, large, splash"):
+        edit(f"{panel['id']}.size", "huge")
     with pytest.raises(ProjectFileError, match="Name: expression"):
         edit(f"{panel['id']}.expressions", "grinning")
     with pytest.raises(ProjectFileError, match="no editable field"):
@@ -156,7 +165,8 @@ def test_project_from_a_script_is_a_valid_container(tmp_path):
 
     text = ("[CHARACTERS]\nYUKI (aka Snow): silver bob\n\nPAGE 1\n"
             "[SCENE: School rooftop — late afternoon]\n"
-            "PANEL 1\n[SHOT: wide shot]\n[ACTION]\nYuki drags Akira by the wrist.\n"
+            "PANEL 1\n[SHOT: wide shot]\n[FRAME: wide, large]\n[ACTION]\n"
+            "Yuki drags Akira by the wrist.\n"
             "[DIALOGUE]\nAKIRA: Hey!\n"
             "PANEL 2\n[LOCATION: the stairwell]\n[ACTION]\nAkira trips.\n"
             "PAGE 2\n[SCENE: School rooftop - cont.]\nPANEL 1\n[ACTION]\nYuki laughs.\n")
@@ -169,6 +179,9 @@ def test_project_from_a_script_is_a_valid_container(tmp_path):
     first = document["panels"][0]
     assert [c["name"] for c in first["characters"]] == ["Akira", "Yuki"]
     assert document["cursor"]["next_panel"] == first["id"]
+    # frame hints are carried over; a panel without one gets no made-up shape
+    assert (first["aspect_ratio"], first["size"]) == ("2:1", "large")
+    assert "aspect_ratio" not in document["panels"][1] and "size" not in document["panels"][1]
     assert [p["label"] for p in document["panels"]] == [
         {"page": 1, "panel": 1}, {"page": 1, "panel": 2}, {"page": 2, "panel": 1}]
     (tmp_path / "script").mkdir()
@@ -210,3 +223,4 @@ def test_pages_reorder_and_delete_keep_the_project_valid(tmp_path):
     jsonschema.validate(load_project(tmp_path), SCHEMA)
     with pytest.raises(ProjectFileError, match="no longer"):
         delete_page(document, first["id"])
+

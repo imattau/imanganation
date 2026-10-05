@@ -82,7 +82,8 @@ def import_project(src: Path, dest: Path) -> dict:
             "characters": [{"name": c, "version": None} for c in p.characters],
             "action": p.action, "camera": p.camera, "expressions": dict(p.expressions),
             "dialogue": [d.model_dump() for d in p.dialogue], "sfx": list(p.sfx),
-            "notes": p.notes, "flashback": p.flashback, "aspect_ratio": p.aspect_ratio,
+            "notes": p.notes, "flashback": p.flashback,
+            **{key: getattr(p, key) for key in ("aspect_ratio", "size") if getattr(p, key)},
             "seed": p.seed, "status": "unplaced", "placement": None,
             "takes": [], "active_take": None,
         })

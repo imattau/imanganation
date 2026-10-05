@@ -13,6 +13,7 @@ PAGE 1
 
 PANEL 1
 [SHOT: establishing shot]
+[FRAME: wide, large]
 [CHARACTERS: ]
 [ACTION]
 Fog over the harbor, fishing boats tied up at the pier.
@@ -96,6 +97,7 @@ NARRATOR (narration): She said she would come back.
 
 PANEL 2
 [SHOT: close-up]
+[FRAME: tall]
 [CHARACTERS: Mio]
 [EXPRESSIONS: Mio: shocked]
 [ACTION]

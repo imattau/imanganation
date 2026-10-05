@@ -1410,7 +1410,8 @@ def _choose_page_size(width, height):
     return size
 
 
-def _choose_page_layout(combinations, page_width, page_height, page_label):
+def _choose_page_layout(combinations, page_width, page_height, page_label,
+                        recommendation=None):
     dialog = Gtk.Dialog(title="Choose page layout", flags=Gtk.DialogFlags.MODAL)
     dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
                        "Apply", Gtk.ResponseType.OK)
@@ -1423,7 +1424,8 @@ def _choose_page_layout(combinations, page_width, page_height, page_label):
     content.set_margin_end(12)
     content.pack_start(Gtk.Label(
         label=f"{page_label} · {len(combinations[0][0]['regions'])} panels · "
-              "choose a preview, then Apply"), False, False, 0)
+              "script-matched layouts appear first; choose a preview, then Apply"),
+        False, False, 0)
 
     flow = Gtk.FlowBox()
     flow.set_selection_mode(Gtk.SelectionMode.SINGLE)
@@ -1454,7 +1456,9 @@ def _choose_page_layout(combinations, page_width, page_height, page_label):
         pixbuf = loader.get_pixbuf().scale_simple(
             display_width, display_height, GdkPixbuf.InterpType.BILINEAR)
         preview = Gtk.Image.new_from_pixbuf(pixbuf)
-        caption = Gtk.Label(label=f"{layout['name']}\n{style['name']}")
+        prefix = ("Recommended · " if layout["name"] == recommendation
+                  and style["name"] == "Fine ink" else "")
+        caption = Gtk.Label(label=f"{prefix}{layout['name']}\n{style['name']}")
         caption.set_justify(Gtk.Justification.CENTER)
         caption.set_line_wrap(True)
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
@@ -1563,14 +1567,16 @@ def page_layout(procedure, run_mode, image, drawables, config, data):
         if page_id is None:
             raise ValueError("Open a page from the active Imanganation project first")
         page = next(page for page in manifest["pages"] if page["id"] == page_id)
-        availability = page_layout_availability(manifest, page_id)
+        availability = page_layout_availability(
+            manifest, page_id, image.get_width() / image.get_height())
         if not availability["available"]:
             raise ValueError(availability["reason"])
         combinations = availability["combinations"]
         existing_layers = _generated_layout_layers(image)
         selection = _choose_page_layout(
             combinations, image.get_width(), image.get_height(),
-            page.get("label", "Page")) if run_mode == Gimp.RunMode.INTERACTIVE \
+            page.get("label", "Page"), availability.get("recommendation")) \
+            if run_mode == Gimp.RunMode.INTERACTIVE \
             else combinations[0]
         if selection is None:
             return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
@@ -1997,7 +2003,7 @@ def _match_selected_panel():
     merged = dict(orphan)
     merged.update(candidate)
     for key in ("location", "camera", "characters", "expressions", "aspect_ratio",
-                "seed", "notes"):
+                "size", "seed", "notes"):
         if orphan.get(key):
             merged[key] = orphan[key]
     merged["id"] = orphan_id

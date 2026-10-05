@@ -3,13 +3,23 @@ from __future__ import annotations
 from gimp.imanganation.layouts import (
     FRAME_STYLES,
     LAYOUTS,
+    for_reading_order,
     frame_rings,
     layout_preview_rgb,
     layout_style_combinations,
     layouts_for_count,
     page_layout_availability,
     page_panel_count,
+    rank_layouts,
 )
+
+A4 = 1 / 2 ** 0.5  # portrait page width / height
+
+
+def _names(panels, count, order="rtl"):
+    layouts = [for_reading_order(layout, order) for layout in layouts_for_count(count)]
+    ranked, recommended = rank_layouts(layouts, panels, A4)
+    return [layout["name"] for layout in ranked], recommended
 
 
 def test_layout_presets_are_filtered_to_exact_frame_count():
@@ -96,3 +106,53 @@ def test_page_panel_count_matches_label_and_excludes_orphans():
     assert page_panel_count(manifest, "Page 2") == (2, 2)
     assert page_panel_count(manifest, "chapter page 3") == (3, 1)
     assert page_panel_count(manifest, "Untitled") == (None, None)
+
+
+def test_rtl_mirrors_regions_so_the_opener_is_on_the_right():
+    tall = next(layout for layout in LAYOUTS if layout["name"] == "Three: tall opener")
+    assert tall["regions"][0][0] < 0.5  # authored left-to-right
+    rtl = for_reading_order(tall, "rtl")
+    assert rtl["regions"][0][0] > 0.5 and rtl["name"] == tall["name"]
+    assert for_reading_order(tall, "ltr") is tall
+    for x, _, w, _ in rtl["regions"]:
+        assert 0 <= x and x + w <= 1 + 1e-9
+
+
+def test_frames_are_matched_to_panels_in_reading_order():
+    """A big wide opener and a big wide closer used to score the same (sorted lists)."""
+    opener = [{"camera": "establishing shot"}, {"camera": "close-up"},
+              {"camera": "close-up"}, {"camera": "close-up"}]
+    names, recommended = _names(opener, 4)
+    assert recommended == names[0] == "Four: wide opener"
+    names, _ = _names(list(reversed(opener)), 4)
+    assert names[0] != "Four: wide opener"
+
+
+def test_frame_shape_and_size_hints_choose_the_layout():
+    names, recommended = _names([{"aspect_ratio": "1:2", "size": "large"}, {}, {}], 3)
+    assert recommended == "Three: tall opener"
+    names, recommended = _names([{"aspect_ratio": "2:1", "size": "large"}, {}, {}], 3)
+    assert recommended == "Three: wide opener"
+    # an explicit shape beats the wide shot's lean
+    names, recommended = _names([{"camera": "wide shot", "aspect_ratio": "1:2"}, {}, {}], 3)
+    assert recommended == "Three: tall opener"
+
+
+def test_no_hints_means_no_recommendation():
+    names, recommended = _names([{}, {"camera": "medium shot"}, {}], 3)
+    assert recommended is None and len(names) == 3
+
+
+def test_page_availability_ranks_by_script_order_and_project_reading_order():
+    manifest = {"project": {"reading_order": "ltr"},
+                "pages": [{"id": "pg_test01", "label": "Page 1"}],
+                "panels": [
+                    {"id": "pnl_b", "label": {"page": 1, "panel": 2}, "status": "unplaced"},
+                    {"id": "pnl_c", "label": {"page": 1, "panel": 3}, "status": "unplaced"},
+                    {"id": "pnl_a", "label": {"page": 1, "panel": 1}, "status": "unplaced",
+                     "aspect_ratio": "1:2", "size": "large"},
+                ]}
+    available = page_layout_availability(manifest, "pg_test01", A4)
+    assert available["recommendation"] == "Three: tall opener"
+    first = available["layouts"][0]
+    assert first["regions"][0][0] < 0.5  # ltr: the opener stays on the left
