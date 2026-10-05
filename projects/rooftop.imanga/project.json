@@ -7,7 +7,7 @@
     "reading_order": "rtl",
     "default_color_mode": "bw",
     "created": "2026-10-04T02:17:46.722972+00:00",
-    "modified": "2026-10-05T09:02:31+11:00",
+    "modified": "2026-10-05T15:28:19+11:00",
     "imported_from": "rooftop"
   },
   "panels": [
@@ -68,7 +68,7 @@
       "location": "",
       "characters": [
         {
-          "name": "Yuki",
+          "name": "Akira",
           "version": null
         }
       ],
@@ -144,14 +144,24 @@
       "flashback": false,
       "aspect_ratio": "1:1",
       "seed": null,
-      "status": "unplaced",
-      "placement": null,
+      "status": "placed",
+      "placement": {
+        "page": "pg_b10540a4eafd",
+        "frame": [
+          70,
+          102,
+          1460,
+          804
+        ]
+      },
       "takes": [
         "tk_b9eadd76af20",
         "tk_fdb51b90a7a6",
-        "tk_75f018ce23cb"
+        "tk_75f018ce23cb",
+        "tk_c8c5717431d1",
+        "tk_00bf7f1c0f62"
       ],
-      "active_take": "tk_75f018ce23cb"
+      "active_take": "tk_00bf7f1c0f62"
     },
     {
       "id": "pnl_60ddf7e6c584",
@@ -182,24 +192,37 @@
       "flashback": false,
       "aspect_ratio": "1:1",
       "seed": null,
-      "status": "unplaced",
-      "placement": null,
+      "status": "placed",
+      "placement": {
+        "page": "pg_b10540a4eafd",
+        "frame": [
+          70,
+          966,
+          710,
+          1332
+        ]
+      },
       "takes": [
-        "tk_6546e8b427cb"
+        "tk_6546e8b427cb",
+        "tk_9cda797855d3"
       ],
-      "active_take": "tk_6546e8b427cb"
+      "active_take": "tk_9cda797855d3"
     },
     {
       "id": "pnl_824568b3d439",
       "label": {
         "page": 2,
-        "panel": 1
+        "panel": 3
       },
       "scene_heading": "School rooftop — cont.",
       "location": "the stairwell",
       "characters": [
         {
           "name": "Yuki",
+          "version": null
+        },
+        {
+          "name": "Akira",
           "version": null
         }
       ],
@@ -220,10 +243,24 @@
       "flashback": false,
       "aspect_ratio": "1:1",
       "seed": null,
-      "status": "unplaced",
-      "placement": null,
-      "takes": [],
-      "active_take": null
+      "status": "placed",
+      "placement": {
+        "page": "pg_b10540a4eafd",
+        "frame": [
+          820,
+          966,
+          710,
+          1332
+        ]
+      },
+      "takes": [
+        "tk_c724705917ff",
+        "tk_9343226d5027",
+        "tk_20274ed291d5",
+        "tk_ed67631a8619",
+        "tk_b6e4ee10b1d4"
+      ],
+      "active_take": "tk_b6e4ee10b1d4"
     }
   ],
   "pages": [
@@ -231,6 +268,11 @@
       "id": "pg_f6ee9dbdcff7",
       "label": "Page 1",
       "file": "pages/page-001.xcf"
+    },
+    {
+      "id": "pg_b10540a4eafd",
+      "label": "Page 2",
+      "file": "pages/page-002.xcf"
     }
   ],
   "takes": {
@@ -409,6 +451,134 @@
         "height": 896,
         "prompt": "manga panel, anime illustration, solo, 1girl, messy white bob with pink tips, loose pigtails tied with red ribbons, amber eyes, navy blue sailor collar school uniform with red necktie and pleated skirt, white wristwatch, silver hair barrettes, snowflake pin on blazer lapel, slightly messy strands flying, wide toothed grin, close-up, Close-up. Akira's head snaps up, eyes wide., School rooftop — late afternoon"
       }
+    },
+    "tk_c8c5717431d1": {
+      "panel": "pnl_622a14042ddb",
+      "file": "takes/pnl_622a14042ddb-tk_c8c5717431d1.png",
+      "width": 1408,
+      "height": 768,
+      "kind": "render",
+      "parent": null,
+      "origin": "tk_c8c5717431d1",
+      "created": "2026-10-05T09:45:49+11:00",
+      "engine": {
+        "seed": 163484983,
+        "width": 1408,
+        "height": 768,
+        "prompt": "manga panel, anime illustration, 1girl, messy white bob with pink tips, loose pigtails tied with red ribbons, amber eyes, navy blue sailor collar school uniform with red necktie and pleated skirt, white wristwatch, silver hair barrettes, snowflake pin on blazer lapel, slightly messy strands flying, wide toothed grin, 1boy, messy charcoal brown with blue tips, medium length swept to left side covering right eye, amber eyes, white dress shirt tucked into navy pleated trousers, grey blazer and red necktie, silver wristwatch, black canvas backpack strap visible on shoulder, loose collar button undone, small scar above left eyebrow, two-shot, Two-shot. Yuki stands over him, hands on her hips, grinning., School rooftop — cont."
+      }
+    },
+    "tk_9cda797855d3": {
+      "panel": "pnl_60ddf7e6c584",
+      "file": "takes/pnl_60ddf7e6c584-tk_9cda797855d3.png",
+      "width": 704,
+      "height": 1344,
+      "kind": "render",
+      "parent": null,
+      "origin": "tk_9cda797855d3",
+      "created": "2026-10-05T09:47:55+11:00",
+      "engine": {
+        "seed": 2857507766,
+        "width": 704,
+        "height": 1344,
+        "prompt": "manga panel, anime illustration, solo, 1boy, messy charcoal brown with blue tips, medium length swept to left side covering right eye, amber eyes, white dress shirt tucked into navy pleated trousers, grey blazer and red necktie, silver wristwatch, black canvas backpack strap visible on shoulder, loose collar button undone, small scar above left eyebrow, reaction shot, Reaction shot. Akira sighs, shoulders slumping., School rooftop — cont."
+      }
+    },
+    "tk_c724705917ff": {
+      "panel": "pnl_824568b3d439",
+      "file": "takes/pnl_824568b3d439-tk_c724705917ff.png",
+      "width": 704,
+      "height": 1344,
+      "kind": "render",
+      "parent": null,
+      "origin": "tk_c724705917ff",
+      "created": "2026-10-05T09:48:20+11:00",
+      "engine": {
+        "seed": 2584264571,
+        "width": 704,
+        "height": 1344,
+        "prompt": "manga panel, anime illustration, solo, 1girl, messy white bob with pink tips, loose pigtails tied with red ribbons, amber eyes, navy blue sailor collar school uniform with red necktie and pleated skirt, white wristwatch, silver hair barrettes, snowflake pin on blazer lapel, slightly messy strands flying, wide toothed grin, medium shot, Medium shot. Yuki drags Akira by the wrist down the stairs., School rooftop — cont."
+      }
+    },
+    "tk_9343226d5027": {
+      "panel": "pnl_824568b3d439",
+      "file": "takes/pnl_824568b3d439-tk_9343226d5027.png",
+      "width": 704,
+      "height": 1344,
+      "kind": "render",
+      "parent": null,
+      "origin": "tk_9343226d5027",
+      "created": "2026-10-05T09:49:05+11:00",
+      "engine": {
+        "seed": 2939194283,
+        "width": 704,
+        "height": 1344,
+        "prompt": "manga panel, anime illustration, solo, medium shot, Medium shot. Yuki drags Akira by the wrist down the stairs., School rooftop — cont."
+      }
+    },
+    "tk_20274ed291d5": {
+      "panel": "pnl_824568b3d439",
+      "file": "takes/pnl_824568b3d439-tk_20274ed291d5.png",
+      "width": 704,
+      "height": 1344,
+      "kind": "render",
+      "parent": null,
+      "origin": "tk_20274ed291d5",
+      "created": "2026-10-05T09:58:43+11:00",
+      "engine": {
+        "seed": 2939194283,
+        "width": 704,
+        "height": 1344,
+        "prompt": "manga panel, anime illustration, solo, medium shot, Medium shot. Yuki drags Akira by the wrist down the stairs., School rooftop — cont."
+      }
+    },
+    "tk_00bf7f1c0f62": {
+      "panel": "pnl_622a14042ddb",
+      "file": "takes/pnl_622a14042ddb-tk_00bf7f1c0f62.png",
+      "width": 1408,
+      "height": 768,
+      "kind": "render",
+      "parent": null,
+      "origin": "tk_00bf7f1c0f62",
+      "created": "2026-10-05T10:00:03+11:00",
+      "engine": {
+        "seed": 1041524514,
+        "width": 1408,
+        "height": 768,
+        "prompt": "manga panel, anime illustration, 1boy, 1girl, messy white bob with pink tips, loose pigtails tied with red ribbons, amber eyes, navy blue sailor collar school uniform with red necktie and pleated skirt, white wristwatch, silver hair barrettes, snowflake pin on blazer lapel, slightly messy strands flying, wide toothed grin, messy charcoal brown with blue tips, medium length swept to left side covering right eye, amber eyes, white dress shirt tucked into navy pleated trousers, grey blazer and red necktie, silver wristwatch, black canvas backpack strap visible on shoulder, loose collar button undone, small scar above left eyebrow, two-shot, Two-shot. Yuki stands over him, hands on her hips, grinning., School rooftop — cont."
+      }
+    },
+    "tk_ed67631a8619": {
+      "panel": "pnl_824568b3d439",
+      "file": "takes/pnl_824568b3d439-tk_ed67631a8619.png",
+      "width": 704,
+      "height": 1344,
+      "kind": "render",
+      "parent": null,
+      "origin": "tk_ed67631a8619",
+      "created": "2026-10-05T15:27:37+11:00",
+      "engine": {
+        "seed": 2118450964,
+        "width": 704,
+        "height": 1344,
+        "prompt": "manga panel, anime illustration, 1boy, 1girl, messy white bob with pink tips, loose pigtails tied with red ribbons, amber eyes, navy blue sailor collar school uniform with red necktie and pleated skirt, white wristwatch, silver hair barrettes, snowflake pin on blazer lapel, slightly messy strands flying, wide toothed grin, messy charcoal brown with blue tips, medium length swept to left side covering right eye, amber eyes, white dress shirt tucked into navy pleated trousers, grey blazer and red necktie, silver wristwatch, black canvas backpack strap visible on shoulder, loose collar button undone, small scar above left eyebrow, medium shot, Medium shot. Yuki drags Akira by the wrist down the stairs., School rooftop — cont."
+      }
+    },
+    "tk_b6e4ee10b1d4": {
+      "panel": "pnl_824568b3d439",
+      "file": "takes/pnl_824568b3d439-tk_b6e4ee10b1d4.png",
+      "width": 704,
+      "height": 1344,
+      "kind": "render",
+      "parent": null,
+      "origin": "tk_b6e4ee10b1d4",
+      "created": "2026-10-05T15:28:19+11:00",
+      "engine": {
+        "seed": 1428617260,
+        "width": 704,
+        "height": 1344,
+        "prompt": "manga panel, anime illustration, 1boy, 1girl, messy white bob with pink tips, loose pigtails tied with red ribbons, amber eyes, navy blue sailor collar school uniform with red necktie and pleated skirt, white wristwatch, silver hair barrettes, snowflake pin on blazer lapel, slightly messy strands flying, wide toothed grin, messy charcoal brown with blue tips, medium length swept to left side covering right eye, amber eyes, white dress shirt tucked into navy pleated trousers, grey blazer and red necktie, silver wristwatch, black canvas backpack strap visible on shoulder, loose collar button undone, small scar above left eyebrow, medium shot, Medium shot. Yuki drags Akira by the wrist down the stairs., School rooftop — cont."
+      }
     }
   },
   "cast": [
@@ -421,6 +591,9 @@
       "name": "Yuki",
       "aliases": [],
       "notes": ""
+    },
+    {
+      "name": "Yuki and Akira"
     }
   ],
   "locations": [
@@ -438,6 +611,6 @@
     "parser": {
       "kind": "imported"
     },
-    "sha256": "d422fb8c5c30a01fc9a9ed1a8d2c97f0b9eb34a77fb1a81d31e26e050b1d3ae2"
+    "sha256": "4156aab3aec220fab9a0755694e5ec104fd4190edab247d9b62357df66d68822"
   }
 }

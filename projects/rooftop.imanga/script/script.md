@@ -52,7 +52,7 @@ keep his uniform consistent with the character sheet
 [DIALOGUE]
 AKIRA: What do you want, Yuki?
 
-PANEL 1
+PANEL 3
 [SHOT: medium shot]
 [CHARACTERS: Yuki, Akira]
 [LOCATION: the stairwell]

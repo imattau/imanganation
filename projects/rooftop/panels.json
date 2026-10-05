@@ -37,7 +37,7 @@
       "scene_heading": "School rooftop — late afternoon",
       "location": "",
       "characters": [
-        "Yuki"
+        "Akira"
       ],
       "action": "Close-up. Akira's head snaps up, eyes wide.",
       "camera": "close-up",
@@ -121,12 +121,13 @@
     },
     {
       "page": 2,
-      "panel": 1,
+      "panel": 3,
       "reading_order": "rtl",
       "scene_heading": "School rooftop — cont.",
       "location": "the stairwell",
       "characters": [
-        "Yuki"
+        "Yuki",
+        "Akira"
       ],
       "action": "Medium shot. Yuki drags Akira by the wrist down the stairs.",
       "camera": "medium shot",
