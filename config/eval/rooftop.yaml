@@ -35,7 +35,8 @@ cases:
     expect:
       tags: ["hands on own hips|hand on own hip", standing, sitting, "grin|smile", "white hair|grey hair",
              twintails, "sailor collar|serafuku", pleated skirt, brown hair,
-             "streaked hair|multicolored hair|blue hair|two-tone hair", rooftop]
+             "streaked hair|multicolored hair|blue hair|two-tone hair", rooftop,
+             "looking at another|eye contact|facing another"]   # one scene, not two
 
   - id: p2-2-sighs                     # Reaction shot. Akira sighs, shoulders slumping.
     panel: 2-2
