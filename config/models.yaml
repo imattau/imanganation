@@ -1,6 +1,12 @@
 # Model registry.
 # `id` is the filename ComfyUI expects under models/<subdir>/.
-# Download in Phase 0; swap freely — the renderer references models by role, not path.
+# Swap freely — the renderer references models by role, not path.
+#
+# `download` makes an entry fetchable by `manganation setup` (src/manganation/
+# models_setup.py): `url` (pinned to a repo revision, so it never changes under us),
+# optional `mirrors` tried in order, and the file's exact `size` and `sha256`, checked
+# after every download and when linking a file the user already has. `license` is shown
+# before downloading; `feature` says what the file enables.
 
 checkpoints:
   primary:
@@ -8,6 +14,12 @@ checkpoints:
     display: NoobAI-XL (SDXL, anime/manga)
     source: https://huggingface.co/Laxhar/noobai-XL-1.1
     subdir: checkpoints
+    feature: rendering (required)
+    license: {name: FAIR AI Public License 1.0-SD, url: https://freedevproject.org/faipl-1.0-sd/}
+    download:
+      url: https://huggingface.co/Laxhar/noobai-XL-1.1/resolve/814a274af2b8097c0828819d561ec74c7d0c6cea/NoobAI-XL-v1.1.safetensors
+      size: 7105349958
+      sha256: 6681e8e4b134c81f16533acedb0d406d7e5e366e1624b4105178c64d00b05d51
   fallbacks:
     - id: illustriousXL.safetensors
       display: Illustrious-XL
@@ -31,24 +43,51 @@ ipadapter:
   noob_mark1:
     id: noobIPAMARK1_mark1.safetensors
     display: NoobAI IP-Adapter Mark 1 (trained on NoobAI-XL EPS v1.1; ViT-bigG)
-    source: https://huggingface.co/r3gm/noob-ipa (model_G; sha256 5cdb6a00…919a, same in wtz37/sdxl)
+    source: https://huggingface.co/r3gm/noob-ipa (model_G)
     encoder: clip_vision_g
     subdir: ipadapter
+    feature: characters stay on-model (reference images)
+    # Both are third-party mirrors of NoobAI's release; neither states a licence.
+    license: {name: not stated by the mirrors (NoobAI release), url: https://huggingface.co/r3gm/noob-ipa}
+    download:
+      url: https://huggingface.co/r3gm/noob-ipa/resolve/534fdd8fb5a221d67937d5495febd2560a1d395e/model_G/noobIPAMARK1_mark1.safetensors
+      mirrors:
+        - https://huggingface.co/wtz37/sdxl/resolve/feced8eb63a67fd272fb768fafb8b5d7fb0a1403/noobIPAMARK1_mark1.safetensors
+      size: 1405172056
+      sha256: 5cdb6a00be1b12579745b5bed0c7b83f0869073d8a864fa8cd50a9356601919a
   plus:
     id: ip-adapter-plus_sdxl_vit-h.safetensors
     display: IP-Adapter Plus SDXL (ViT-H) - base SDXL; tiles/glows on NoobAI
     source: https://huggingface.co/h94/IP-Adapter
     encoder: clip_vision
     subdir: ipadapter
+    feature: characters stay on-model (base-SDXL adapter, not recommended)
+    license: {name: Apache-2.0, url: https://huggingface.co/h94/IP-Adapter}
+    download:
+      url: https://huggingface.co/h94/IP-Adapter/resolve/018e402774aeeddd60609b4ecdb7e298259dc729/sdxl_models/ip-adapter-plus_sdxl_vit-h.safetensors
+      size: 847517512
+      sha256: 3f5062b8400c94b7159665b21ba5c62acdcd7682262743d7f2aefedef00e6581
   clip_vision:
     id: CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors
     display: CLIP Vision ViT-H
     subdir: ipadapter
+    feature: image encoder for the ViT-H adapter
+    license: {name: Apache-2.0, url: https://huggingface.co/h94/IP-Adapter}
+    download:
+      url: https://huggingface.co/h94/IP-Adapter/resolve/018e402774aeeddd60609b4ecdb7e298259dc729/models/image_encoder/model.safetensors
+      size: 2528373448
+      sha256: 6ca9667da1ca9e0b0f75e46bb030f7e011f44f86cbfb8d5a36590fcd7507b030
   clip_vision_g:
     id: CLIP-ViT-bigG-14-laion2B-39B-b160k.safetensors
     display: CLIP Vision ViT-bigG (vision tower only)
-    source: https://huggingface.co/h94/IP-Adapter (sdxl_models/image_encoder; sha256 657723e0…d64d)
+    source: https://huggingface.co/h94/IP-Adapter (sdxl_models/image_encoder)
     subdir: ipadapter
+    feature: image encoder for character references
+    license: {name: Apache-2.0, url: https://huggingface.co/h94/IP-Adapter}
+    download:
+      url: https://huggingface.co/h94/IP-Adapter/resolve/018e402774aeeddd60609b4ecdb7e298259dc729/sdxl_models/image_encoder/model.safetensors
+      size: 3689912664
+      sha256: 657723e09f46a7c3957df651601029f66b1748afb12b419816330f16ed45d64d
 
 # Multi-character regional conditioning nodes live in custom node packs,
 # not model files: ComfyUI_IPAdapter_plus, ComfyUI-ppm (Attention Couple).
@@ -59,8 +98,14 @@ upscalers:
   realesrgan:
     id: RealESRGAN_x4plus_anime_6B.pth
     display: Real-ESRGAN x4plus anime (6B) — fast detail-preserving upscale
-    source: https://huggingface.co/ai-forever/Real-ESRGAN
+    source: https://github.com/xinntao/Real-ESRGAN (release v0.2.2.4)
     subdir: upscale_models
+    feature: hi-res upscale (Refine)
+    license: {name: BSD-3-Clause, url: https://github.com/xinntao/Real-ESRGAN/blob/master/LICENSE}
+    download:
+      url: https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.2.4/RealESRGAN_x4plus_anime_6B.pth
+      size: 17938799
+      sha256: f872d837d3c90ed2e05227bed711af5671a6fd1c9f7d7e91c911a61f155e99da
 
 # Roles in models.yaml -> upscalers; the active one is settings.yaml -> defaults.refiner.upscaler.
 
@@ -70,6 +115,12 @@ controlnets:
   canny:
     id: noob_sdxl_controlnet_canny.fp16.safetensors
     display: NoobAI-XL ControlNet canny (fp16), edges from ComfyUI's built-in Canny node
-    source: https://huggingface.co/Eugeoter/noob-sdxl-controlnet-canny (sha256 e37bcdb2…fba0)
+    source: https://huggingface.co/Eugeoter/noob-sdxl-controlnet-canny
     subdir: controlnet
+    feature: keep composition (Regenerate)
+    license: {name: FAIR AI Public License 1.0-SD, url: https://freedevproject.org/faipl-1.0-sd/}
+    download:
+      url: https://huggingface.co/Eugeoter/noob-sdxl-controlnet-canny/resolve/3c1b6e45cbd0df09368599c1d205be459a67c552/noob_sdxl_controlnet_canny.fp16.safetensors
+      size: 2502139104
+      sha256: e37bcdb2f4a6d1782daf6a943a326bee6e6d3027c34f6016460a2c937ba9fba0
 

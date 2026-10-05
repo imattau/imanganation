@@ -107,7 +107,7 @@ def inpaint(
 
 @app.command()
 def doctor() -> None:
-    """Check local prerequisites (GPU, ComfyUI, Ollama)."""
+    """Check local prerequisites (GPU, ComfyUI, Ollama, model files)."""
     import httpx
 
     from manganation.config import REPO_ROOT, load_settings
@@ -149,6 +149,125 @@ def doctor() -> None:
             rprint(f"  {label}: {state}")
         except Exception:
             rprint(f"  {label}: [red]down[/red]")
+
+    from manganation.config import load_models
+    from manganation.web.api import required_models
+
+    missing = [m for m in required_models(settings, load_models(),
+                                          REPO_ROOT / settings.paths.models_dir)
+               if not m["present"]]
+    if missing:
+        rprint(f"  models: [yellow]{len(missing)} missing[/yellow] "
+               f"({', '.join(m['role'] for m in missing)}); run: manganation setup")
+    else:
+        rprint("  models: [green]all present[/green]")
+
+
+def _gb(n: int | None) -> str:
+    if n is None:
+        return "? GB"
+    return f"{n / 1e9:.1f} GB" if n >= 1e8 else f"{n / 1e6:.0f} MB"
+
+
+@app.command()
+def setup(
+    check: bool = typer.Option(False, "--check", help="Only report what's missing."),
+    reuse: list[Path] = typer.Option(
+        None, "--from", help="A folder of models you already have (ComfyUI, A1111, …): "
+        "matching files are linked instead of downloaded. Repeatable."),
+    verify: bool = typer.Option(False, "--verify",
+                                help="Also hash files already in place (slow)."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Download without asking."),
+) -> None:
+    """Get the model files the engine needs: link ones you have, download the rest.
+
+    Files are checked by size and SHA-256 (config/models.yaml). Downloads resume if
+    interrupted. HF_TOKEN / HF_ENDPOINT are honoured for Hugging Face."""
+    from rich.progress import (
+        BarColumn,
+        DownloadColumn,
+        Progress,
+        TextColumn,
+        TimeRemainingColumn,
+        TransferSpeedColumn,
+    )
+    from rich.table import Table
+
+    from manganation import models_setup as ms
+    from manganation.config import CONFIG_DIR, REPO_ROOT, load_models, load_settings
+
+    settings = load_settings()
+    root = (REPO_ROOT / settings.paths.models_dir).resolve()
+    models = ms.needed(settings, load_models())
+    states = {m.role: ms.state(m, root, verify=verify) for m in models}
+
+    if not check and reuse:
+        candidates = [m for m in models if states[m.role] != "present"]
+        if candidates:
+            rprint(f"Looking for {len(candidates)} file(s) in "
+                   f"{', '.join(str(f) for f in reuse)} (hashing size matches)…")
+            for role, found in ms.find_existing(candidates, reuse).items():
+                model = next(m for m in models if m.role == role)
+                how = ms.link_into_place(found, model.path(root))
+                states[role] = "present"
+                rprint(f"  [green]linked[/green] {model.file} ← {found} ({how})")
+
+    table = Table(title=f"Models in {root}")
+    table.add_column("For")
+    table.add_column("File", overflow="fold")
+    table.add_column("Size", justify="right", no_wrap=True)
+    table.add_column("State", no_wrap=True)
+    colours = {"present": "green", "missing": "yellow"}
+    for m in models:
+        st = states[m.role]
+        table.add_row(m.feature or m.role, m.file or f"[red]{m.note}[/red]", _gb(m.size),
+                      f"[{colours.get(st, 'red')}]{st}[/]")
+    rprint(table)
+
+    if not check and ms.write_comfy_paths(CONFIG_DIR / "comfyui_extra_model_paths.yaml", root):
+        rprint(f"Pointed ComfyUI's model paths at {root} "
+               "(config/comfyui_extra_model_paths.yaml); restart ComfyUI to pick it up.")
+
+    todo = [m for m in models if states[m.role] != "present"]
+    unfetchable = [m for m in todo if not m.urls]
+    for m in unfetchable:
+        rprint(f"[red]{m.role}: no download source[/red] ({m.note or 'add one to models.yaml'})")
+    todo = [m for m in todo if m.urls]
+    if not todo:
+        rprint("[green]Everything the current settings need is in place.[/green]"
+               if not unfetchable else "")
+        raise typer.Exit(1 if unfetchable else 0)
+    total = sum(m.size or 0 for m in todo)
+    free = ms.free_bytes(root)
+    rprint(f"\n{len(todo)} file(s) to download, {_gb(total)} ({_gb(free)} free).")
+    for m in todo:
+        rprint(f"  {m.file}: {m.license or 'licence unknown'}"
+               + (f" — {m.license_url}" if m.license_url else ""))
+    if check:
+        raise typer.Exit(1)
+    if total > free:
+        rprint(f"[red]Not enough disk space: free up {_gb(total - free)} first.[/red]")
+        raise typer.Exit(1)
+    if not yes and not typer.confirm("Download them now, accepting those licences?"):
+        raise typer.Exit(1)
+
+    failed = []
+    with Progress(TextColumn("{task.description}"), BarColumn(), DownloadColumn(),
+                  TransferSpeedColumn(), TimeRemainingColumn()) as progress:
+        for m in todo:  # most useful first: rendering works once the checkpoint lands
+            task = progress.add_task(m.file, total=m.size)
+            try:
+                ms.download(m, root, progress=lambda done, size, task=task: progress.update(
+                    task, completed=done, total=size))
+            except ms.SetupError as exc:
+                progress.update(task, description=f"[red]{m.file} failed")
+                failed.append((m, exc))
+    for _model, exc in failed:
+        rprint(f"[red]{exc}[/red]")
+    if failed:
+        rprint("Run `manganation setup` again to retry; finished parts are kept.")
+        raise typer.Exit(1)
+    rprint("[green]Done: every model the current settings need is in place.[/green]")
 
 
 @script_app.command("parse")

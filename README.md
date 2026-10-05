@@ -59,14 +59,37 @@ models/     checkpoints, LoRAs, IP-Adapters, ControlNets
 
 ```bash
 uv sync
+uv run manganation setup          # fetch the models (~15 GB; see below)
 ./scripts/comfy.sh start          # launch local ComfyUI (models auto-wired)
-uv run manganation doctor         # check GPU / ComfyUI / Ollama
+uv run manganation doctor         # check GPU / ComfyUI / Ollama / models
 uv run python scripts/phase0_spike.py
 
 # Phase 1: parse a script into panels.json
 uv run manganation script parse tests/fixtures/rooftop_canonical.md -p rooftop
 uv run manganation script parse my_story.md -p my_story   # prose -> LLM parser
 ```
+
+### Models
+
+Models aren't distributed with imanganation. `uv run manganation setup` lists what the
+current settings need (`config/models.yaml`), shows each licence, and downloads what's
+missing, checkpoint first so you can render as soon as it lands:
+
+| For | Size |
+|---|---|
+| Rendering (NoobAI-XL v1.1 checkpoint, required) | 7.1 GB |
+| Characters staying on-model (IP-Adapter Mark 1 + CLIP-ViT-bigG encoder) | 5.1 GB |
+| Keep composition (NoobAI ControlNet canny) | 2.5 GB |
+| Hi-res upscale (Real-ESRGAN anime 6B) | 18 MB |
+
+- Already have some of these in ComfyUI or A1111? `manganation setup --from
+  ~/ComfyUI/models` finds them by content (any file name) and links them in, using no
+  extra disk space.
+- Downloads resume if interrupted, and every file is checked against its SHA-256
+  before it's used. Run `setup` again to retry.
+- `--check` only reports; `--verify` re-hashes files already in place; `-y` skips the
+  question. `HF_TOKEN` and `HF_ENDPOINT` (a Hugging Face mirror) are honoured.
+- Setup also points `config/comfyui_extra_model_paths.yaml` at your models folder.
 
 ## GIMP (the interface)
 

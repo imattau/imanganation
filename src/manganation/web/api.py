@@ -209,34 +209,13 @@ class Job(BaseModel):
 def required_models(settings, models: dict, models_root: Path) -> list[dict]:
     """The model files the current settings need, and whether each is on disk.
 
-    A missing file otherwise only shows up as a cryptic ComfyUI error mid-render."""
-    from manganation.render.panel import RenderError, ipadapter_files
+    A missing file otherwise only shows up as a cryptic ComfyUI error mid-render.
+    ``manganation setup`` fetches the missing ones."""
+    from manganation.models_setup import needed, state
 
-    out: list[dict] = []
-
-    def add(role: str, subdir: str, file: str | None, note: str = "") -> None:
-        present = bool(file) and (models_root / subdir / file).is_file()
-        out.append({"role": role, "file": file, "present": present, "note": note})
-
-    ckpt = models.get("checkpoints", {}).get("primary", {})
-    add("checkpoint", ckpt.get("subdir", "checkpoints"), ckpt.get("id"))
-    adapter = settings.defaults.ipadapter.adapter
-    try:
-        ipa, enc = ipadapter_files(models, adapter)
-        add(f"ip-adapter ({adapter})", models["ipadapter"][adapter].get("subdir", "ipadapter"), ipa)
-        add("clip vision", "ipadapter", enc)
-    except (RenderError, KeyError) as exc:
-        add(f"ip-adapter ({adapter})", "ipadapter", None, str(exc))
-    cn = getattr(settings.defaults, "controlnet", None)
-    if cn is not None:
-        entry = models.get("controlnets", {}).get(cn.model)
-        add(f"controlnet ({cn.model})", (entry or {}).get("subdir", "controlnet"),
-            (entry or {}).get("id"), "" if entry else "not in models.yaml")
-    up = settings.defaults.refiner.upscaler
-    entry = models.get("upscalers", {}).get(up)
-    add(f"upscaler ({up})", (entry or {}).get("subdir", "upscale_models"),
-        (entry or {}).get("id"), "" if entry else "not in models.yaml")
-    return out
+    return [{"role": m.role, "file": m.file or None,
+             "present": state(m, models_root) == "present", "note": m.note}
+            for m in needed(settings, models)]
 
 
 def _comfy_stats(base_url: str) -> dict:

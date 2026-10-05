@@ -1,0 +1,167 @@
+"""manganation setup: which models, linking files the user has, resumable verified downloads."""
+
+from __future__ import annotations
+
+import hashlib
+from pathlib import Path
+
+import httpx
+import pytest
+from typer.testing import CliRunner
+
+from manganation import models_setup as ms
+from manganation.config import load_models, load_settings
+
+PAYLOAD = bytes(range(256)) * 4000  # ~1 MB, not a multiple of the chunk size
+
+
+def _model(urls=("https://huggingface.co/a/b/resolve/r/m.safetensors",), payload=PAYLOAD):
+    return ms.ModelFile(role="checkpoint", feature="rendering", file="m.safetensors",
+                        subdir="checkpoints", size=len(payload),
+                        sha256=hashlib.sha256(payload).hexdigest(), urls=list(urls))
+
+
+def _server(payload=PAYLOAD, *, ignore_range=False, status=None, seen=None):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if seen is not None:
+            seen.append(request)
+        if status:
+            return httpx.Response(status)
+        start = 0
+        if "range" in request.headers and not ignore_range:
+            start = int(request.headers["range"].split("=")[1].rstrip("-"))
+            return httpx.Response(206, content=payload[start:])
+        return httpx.Response(200, content=payload)
+    return httpx.Client(transport=httpx.MockTransport(handler))
+
+
+def test_the_manifest_covers_everything_the_settings_need():
+    models = ms.needed(load_settings(), load_models())
+    assert [m.role for m in models][:3] == ["checkpoint", "ip-adapter (noob_mark1)",
+                                             "clip vision"]  # most useful first
+    for m in models:
+        assert m.urls and m.size and len(m.sha256) == 64 and m.license, m.role
+        assert all("/resolve/main/" not in u for u in m.urls)  # pinned revisions
+    ipa = next(m for m in models if m.role.startswith("ip-adapter"))
+    assert len(ipa.urls) == 2  # a fallback mirror for the third-party upload
+
+
+def test_download_verifies_and_moves_into_place(tmp_path):
+    model, done = _model(), []
+    path = ms.download(model, tmp_path, client=_server(),
+                       progress=lambda d, n: done.append((d, n)))
+    assert path == tmp_path / "checkpoints/m.safetensors" and path.read_bytes() == PAYLOAD
+    assert done[-1] == (len(PAYLOAD), len(PAYLOAD))
+    assert not path.with_name("m.safetensors.part").exists()
+
+
+def test_an_interrupted_download_resumes_with_a_range_request(tmp_path):
+    model, seen = _model(), []
+    part = tmp_path / "checkpoints/m.safetensors.part"
+    part.parent.mkdir(parents=True)
+    part.write_bytes(PAYLOAD[:300_000])
+    path = ms.download(model, tmp_path, client=_server(seen=seen))
+    assert seen[0].headers["range"] == "bytes=300000-"
+    assert path.read_bytes() == PAYLOAD
+
+
+def test_a_server_that_ignores_range_starts_over(tmp_path):
+    model = _model()
+    part = tmp_path / "checkpoints/m.safetensors.part"
+    part.parent.mkdir(parents=True)
+    part.write_bytes(PAYLOAD[:300_000])
+    path = ms.download(model, tmp_path, client=_server(ignore_range=True))
+    assert path.read_bytes() == PAYLOAD
+
+
+def test_a_corrupt_download_is_discarded_and_the_mirror_tried(tmp_path):
+    good = "https://mirror.example/m.safetensors"
+    bad = _model(urls=("https://huggingface.co/x/resolve/r/m.safetensors", good))
+
+    def handler(request):
+        body = PAYLOAD if request.url.host == "mirror.example" else b"x" * len(PAYLOAD)
+        return httpx.Response(200, content=body)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    path = ms.download(bad, tmp_path, client=client)
+    assert path.read_bytes() == PAYLOAD
+
+    only_bad = _model(urls=("https://huggingface.co/x/resolve/r/m.safetensors",))
+    with pytest.raises(ms.SetupError, match="SHA-256 mismatch"):
+        ms.download(only_bad, tmp_path / "b", client=client)
+    assert not (tmp_path / "b/checkpoints/m.safetensors").exists()
+    assert not (tmp_path / "b/checkpoints/m.safetensors.part").exists()  # can't resume junk
+
+
+def test_http_errors_are_reported_per_source(tmp_path):
+    with pytest.raises(ms.SetupError, match="HTTP 404"):
+        ms.download(_model(), tmp_path, client=_server(status=404))
+    with pytest.raises(ms.SetupError, match="no download source"):
+        ms.download(_model(urls=()), tmp_path)
+
+
+def test_hf_token_goes_to_hugging_face_only(tmp_path, monkeypatch):
+    monkeypatch.setenv("HF_TOKEN", "hf_secret")
+    seen = []
+    ms.download(_model(), tmp_path / "a", client=_server(seen=seen))
+    assert seen[-1].headers["authorization"] == "Bearer hf_secret"
+    ms.download(_model(urls=("https://mirror.example/m",)), tmp_path / "b",
+                client=_server(seen=seen))
+    assert "authorization" not in seen[-1].headers
+
+
+def test_hf_endpoint_redirects_hugging_face_urls(tmp_path, monkeypatch):
+    monkeypatch.setenv("HF_ENDPOINT", "https://hf-mirror.example/")
+    seen = []
+    ms.download(_model(), tmp_path, client=_server(seen=seen))
+    assert str(seen[0].url) == "https://hf-mirror.example/a/b/resolve/r/m.safetensors"
+
+
+def test_state_checks_size_and_optionally_hash(tmp_path):
+    model = _model()
+    assert ms.state(model, tmp_path) == "missing"
+    path = model.path(tmp_path)
+    path.parent.mkdir(parents=True)
+    path.write_bytes(PAYLOAD[:-1])
+    assert ms.state(model, tmp_path) == "wrong size"
+    path.write_bytes(bytes(len(PAYLOAD)))
+    assert ms.state(model, tmp_path) == "present"  # size alone is cheap
+    assert ms.state(model, tmp_path, verify=True) == "corrupt"
+
+
+def test_existing_files_are_found_by_content_and_linked(tmp_path):
+    model = _model()
+    library = tmp_path / "ComfyUI/models/checkpoints"
+    library.mkdir(parents=True)
+    (library / "noobai-renamed.safetensors").write_bytes(PAYLOAD)  # any name
+    (library / "same-size-other.safetensors").write_bytes(bytes(len(PAYLOAD)))
+    found = ms.find_existing([model], [tmp_path / "ComfyUI"])
+    assert found == {"checkpoint": library / "noobai-renamed.safetensors"}
+    root = tmp_path / "models"
+    assert ms.link_into_place(found["checkpoint"], model.path(root)) == "hard link"
+    assert ms.state(model, root, verify=True) == "present"
+
+
+def test_comfy_paths_follow_the_models_folder(tmp_path):
+    config = tmp_path / "paths.yaml"
+    config.write_text("imanganation:\n    base_path: /home/someone-else/models\n")
+    assert ms.write_comfy_paths(config, tmp_path / "models")
+    text = config.read_text()
+    assert f"base_path: {(tmp_path / 'models').resolve()}" in text
+    for key in ("checkpoints", "ipadapter", "clip_vision: ipadapter", "controlnet",
+                "upscale_models"):
+        assert key in text
+    assert not ms.write_comfy_paths(config, tmp_path / "models")  # already right
+
+
+def test_cli_check_reports_missing_files_and_exits_nonzero(tmp_path, monkeypatch):
+    from manganation import cli, config
+
+    settings = load_settings().model_copy(deep=True)
+    settings.paths.models_dir = str(tmp_path / "models")
+    monkeypatch.setattr(config, "load_settings", lambda: settings)
+    result = CliRunner().invoke(cli.app, ["setup", "--check"], env={"COLUMNS": "200"})
+    assert result.exit_code == 1
+    assert "missing" in result.output and "to download" in result.output
+    assert "FAIR AI Public License" in result.output
+    assert not Path(tmp_path / "models").exists()  # --check changes nothing
