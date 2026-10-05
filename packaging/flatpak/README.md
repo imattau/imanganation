@@ -1,4 +1,4 @@
-# Imanganation GIMP as a Flatpak
+# Imanganation as a Flatpak
 
 The customised GIMP (`imanganation-gimp`, a GIMP fork) with the Imanganation plug-in,
 engine and ComfyUI built in, as one Flatpak that runs on any Linux distribution. Users
@@ -11,7 +11,7 @@ GIMP compiling.
 flatpak install --user imanganation-gimp.flatpak   # pulls the GNOME runtime from Flathub
 ```
 
-Start GIMP from the desktop menu. **Imanganation → Set Up Models…** opens by itself:
+Start Imanganation from the desktop menu. **Imanganation → Set Up Models…** opens by itself:
 **Download** installs the renderer (ComfyUI and PyTorch for your GPU, about 5.5 GB on
 disk) and then the models (about 15 GB). Already have the models (a ComfyUI or A1111
 folder)? **Use Files I Have…** links them in without using more disk space. Projects

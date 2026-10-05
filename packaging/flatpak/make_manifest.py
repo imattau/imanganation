@@ -5,7 +5,8 @@ It starts from the fork's own upstream manifest (``imanganation-gimp/build/linux
 flatpak/org.gimp.GIMP-nightly.json``), so GIMP's dependency list stays whatever the
 fork's GIMP version needs, and changes only what makes it ours:
 
-- **App:** our app id, a stable GNOME runtime instead of nightly, our build id.
+- **App:** our app id, a stable GNOME runtime instead of nightly, our build id, and
+  the fork's ``imanganation`` icon (not GIMP's) exported under the app id.
 - **Meson and CMake modules** install into ``lib`` (they default to ``lib64`` here).
 - **babl / GEGL:** pinned to the releases the fork is tested with (upstream builds
   their moving git master).
@@ -50,6 +51,7 @@ PINNED = {  # module -> git tag and commit (what ~/.local/gimp-deps was built fr
              "commit": "3ed6237faa44bc64bdff8dcb2750c734ac680d40"},
 }
 PLUGIN_DIR = "/app/lib/gimp/3.0/plug-ins/imanganation"
+ICON = "imanganation"  # the fork's app icon (branding/), named so by its desktop entry
 # .git/modules: the gimp-data submodule's git data, also rewritten by every git status.
 GIT_CHURN = [".git/index", ".git/FETCH_HEAD", ".git/ORIG_HEAD", ".git/logs", ".git/modules"]
 ENGINE_DIR = "/app/share/imanganation"  # REPO_ROOT inside the Flatpak
@@ -200,7 +202,8 @@ def make(upstream: dict, *, fork: Path | None, fork_git: str | None, fork_commit
     them; tests can leave them out)."""
     manifest = json.loads(json.dumps(upstream))  # a deep copy
     manifest.update({"app-id": app_id, "branch": "stable",
-                     "runtime-version": RUNTIME_VERSION, "tags": ["GTK+3"]})
+                     "runtime-version": RUNTIME_VERSION, "tags": ["GTK+3"],
+                     "rename-icon": ICON})
     manifest.pop("desktop-file-name-prefix", None)  # no "(Nightly)" in the menu
     finish = manifest.setdefault("finish-args", [])
     if "--talk-name=org.freedesktop.Flatpak" not in finish:

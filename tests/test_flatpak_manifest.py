@@ -40,6 +40,7 @@ def test_the_manifest_is_ours_with_pinned_deps_and_the_plugin(tmp_path):
     assert (out["app-id"], out["branch"], out["runtime-version"]) == (
         "io.github.imattau.Imanganation", "stable", mm.RUNTIME_VERSION)
     assert "desktop-file-name-prefix" not in out and out["tags"] == ["GTK+3"]
+    assert out["rename-icon"] == "imanganation"  # the fork's icon, as its desktop entry says
     assert "--talk-name=org.freedesktop.Flatpak" in out["finish-args"]  # starts the engine
     modules = {m["name"]: m for m in out["modules"] if isinstance(m, dict)}
     assert modules["babl"]["sources"] == [{"type": "git", **mm.PINNED["babl"]}]
