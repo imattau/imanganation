@@ -2805,7 +2805,7 @@ def _dock_page_menu(procedure, config, data):
 
 
 def _new_project_run(procedure, config, data):
-    """Imanganation > New Project from Script: the extension shows the dialog."""
+    """File > Create > New Project from Script: the extension shows the dialog."""
     try:
         _dock_pdb_call(DOCK_NEW_PROJECT, {})
     except Exception:
@@ -3168,7 +3168,7 @@ def _register_project_docks(plugin):
              contents["project_selected"], "Add page", DOCK_ACTIONS[DOCK_PROJECT],
              DOCK_ITEMS[DOCK_PROJECT]),
             (DOCK_INSPECTOR, "Context", "properties", contents["inspector"],
-             "", "Generate", DOCK_ACTIONS[DOCK_INSPECTOR], DOCK_ITEMS[DOCK_INSPECTOR]),
+             "", "Generate panel", DOCK_ACTIONS[DOCK_INSPECTOR], DOCK_ITEMS[DOCK_INSPECTOR]),
             (DOCK_FILMSTRIP, "Pages", "strip", contents["filmstrip"],
              contents["filmstrip_selected"], "Add page", DOCK_ACTIONS[DOCK_FILMSTRIP],
              DOCK_ITEMS[DOCK_FILMSTRIP]),
@@ -3302,7 +3302,7 @@ class Imanganation(Gimp.PlugIn):
             proc.add_enum_argument("run-mode", "Run mode", "How to run the procedure",
                                    Gimp.RunMode, Gimp.RunMode.INTERACTIVE,
                                    GObject.ParamFlags.READWRITE)
-            proc.add_menu_path("<Image>/Imanganation")
+            proc.add_menu_path("<Image>/File/Create")
             proc.set_documentation(
                 "New Imanganation project from a script",
                 "Build a project (panels, pages, cast, locations) from a script and "
@@ -3316,7 +3316,7 @@ class Imanganation(Gimp.PlugIn):
             proc.add_enum_argument("run-mode", "Run mode", "How to run the procedure",
                                    Gimp.RunMode, Gimp.RunMode.INTERACTIVE,
                                    GObject.ParamFlags.READWRITE)
-            proc.add_menu_path("<Image>/Imanganation")
+            proc.add_menu_path("<Image>/File")
             proc.set_documentation(
                 "Open the Imanganation project docks",
                 "Open or switch the project shown in the startup Imanganation workspace.", name)

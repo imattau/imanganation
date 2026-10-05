@@ -55,7 +55,7 @@ navigator (pages, script panels, assets) sits left of a compact toolbox; on the 
 **Context** shows whatever is selected (project, page, panel or character), with a
 **Script** tab beside it, above GIMP's Layers; **Pages**, the page strip, runs along the
 bottom: one thumbnail per page (drawn from the open page when it is open, so unsaved
-work shows), click to open a page, **Add page** to add one, drag a page onto another to
+work shows), click to open a page, **+** after the last page to add one, drag a page onto another to
 move it there, and right-click a page (here or in Project) for **Delete page…**: after a
 confirmation its document goes to the system trash, and panels placed on it go back to
 unplaced with their takes kept. Default "Page N" labels follow the new order. With a panel
@@ -106,13 +106,13 @@ installed, else a bold sans; the size follows the page (1/64 of its height).
 
 On first launch, the Project dock offers **Open project…**; the
 chosen project folder is remembered in GIMP's user settings and its docks are restored on
-later launches. The **Open / Switch Project…** command remains available under
-*Imanganation*. A dock you close stays closed on later launches; reopen it from
+later launches. **Open / Switch Project…** is in GIMP's **File** menu. A dock you close
+stays closed on later launches; reopen it from
 *Windows → Imanganation*. Row callbacks carry stable IDs.
 For container projects, generated and imported images are
 copied into immutable `takes/` files and linked through take IDs; XCF parasites and
-page placement metadata are still being migrated. It adds ten commands under
-*Imanganation*:
+page placement metadata are still being migrated. The image procedures remain under
+the top-level *Imanganation* menu:
 
 - **Open / Switch Project…**: choose a folder containing `project.json` to populate the
   workspace docks. Select project rows to

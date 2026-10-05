@@ -313,6 +313,13 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
         ])
         if open_page_action and (panel.get("placement") or {}).get("page") in page_by_id:
             inspector_rows.append(f"!{open_page_action}\tOpen page")
+        placement = panel.get("placement") or {}
+        if placement and placement.get("page") in page_by_id:
+            page_label = _label(page_by_id[placement["page"]].get("label")) or "its page"
+            inspector_rows.append(f"Generate\tCreates a new take in the saved frame on {page_label}")
+        else:
+            inspector_rows.append(
+                "Next\tOpen a project page, select a frame, then generate this panel")
         lines = [(str(i), _label(d.get("speaker")) or "—", _label(d.get("text")))
                  for i, d in enumerate(panel.get("dialogue", []))]
         lines += [(f"sfx{i}", "SFX", _label(sfx)) for i, sfx in enumerate(panel.get("sfx", []))]
@@ -379,6 +386,7 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
             inspector_rows.append(
                 f"Layout status\t{script_panel_count} script panels · "
                 f"{option_count} preview choices")
+            inspector_rows.append("Layout note\tCreates frame lines only; panels render separately")
             if generate_layout_action:
                 inspector_rows.append(f"!{generate_layout_action}\tChoose layout…")
         if open_page_action:
