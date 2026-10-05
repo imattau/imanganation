@@ -150,3 +150,47 @@ def test_the_plug_in_imports_the_same_file_standard_library_only():
                if line.startswith(("import", "from"))]
     assert not any("manganation" in line for line in imports)
     assert module.parse(SCRIPT)["cast"][0]["name"] == "Mio"
+
+
+def test_off_panel_characters_are_heard_not_drawn():
+    script = SCRIPT.replace("[CHARACTERS: Mio]\n", "")
+    panels = canonical.parse(script)["panels"]
+    # Kaito speaks in panel 2, but the action puts him off-panel
+    assert panels[1]["characters"] == ["Mio"]
+    text = ("[CHARACTERS]\nAKIRA: boy\nYUKI: girl\n\n"
+            "PAGE 1\nPANEL 1\n[ACTION]\nAkira's head snaps up. Yuki calls from off-panel.\n"
+            "[DIALOGUE]\nYUKI: There you are!\n"
+            "PANEL 2\n[ACTION]\nFrom off-screen, Yuki shouts at Akira.\n")
+    first, second = canonical.parse(text)["panels"]
+    assert first["characters"] == ["Akira"] and second["characters"] == ["Akira"]
+
+
+def test_joined_names_are_split_into_known_characters():
+    text = ("[CHARACTERS]\nAKIRA: boy\nYUKI: girl\n\nPAGE 1\nPANEL 1\n"
+            "[CHARACTERS: Yuki and Akira]\n[ACTION]\nThey run.\n")
+    data = canonical.parse(text)
+    assert data["panels"][0]["characters"] == ["Yuki", "Akira"] and not data["problems"]
+    # an unknown pair stays as written, and is reported
+    data = canonical.parse(text.replace("Yuki and Akira", "Yuki and Bob"))
+    assert data["panels"][0]["characters"] == ["Yuki and Bob"] and data["problems"]
+
+    class Fake:  # the LLM lists the pair as one character
+        def chat_json(self, messages, *, schema=None):
+            return {"panels": [{"action": "They run down the stairs.",
+                                "characters": ["Yuki & akira"]}]}
+
+        def unload(self):
+            pass
+
+    prose = "[CHARACTERS]\nAKIRA: boy\nYUKI: girl\n\nYuki and Akira run down the stairs."
+    assert parse(prose, client=Fake(), force_llm=True).panels[0].characters == [
+        "Yuki", "Akira"]
+
+
+def test_a_repeated_page_and_panel_number_is_a_problem():
+    text = "PAGE 2\nPANEL 1\n[ACTION]\na\nPANEL 2\n[ACTION]\nb\nPANEL 1\n[ACTION]\nc\n"
+    data = canonical.parse(text)
+    assert len(data["panels"]) == 3
+    assert data["problems"] == [{"line": 8, "message": "PAGE 2 PANEL 1 is already used on "
+                                 "line 2 (a new PAGE missing, or a repeated number?)"}]
+

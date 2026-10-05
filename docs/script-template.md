@@ -143,8 +143,8 @@ Mio runs along the pier, Kaito trailing far behind her.
   used.
 - **`[CHARACTERS: …]`** is exactly who is drawn, comma-separated; `[CHARACTERS: ]`
   (empty) means nobody, as in an establishing shot. Without it, the panel's speakers
-  (not narration) and any cast member named in the action are drawn. Giving it is the
-  surest way: someone speaking off-panel is then not drawn.
+  (not narration) and any cast member named in the action are drawn, except anyone the
+  action puts off-panel ("Yuki calls from off-panel"). Giving it is the surest way.
 - **`[EXPRESSIONS: …]`** is `Name: expression; Name: expression`. Without it, each
   character's usual expression from their design is used.
 - **`[ACTION]`** is the picture: one moment that a single still image can show. Every

@@ -34,8 +34,8 @@ The format (user guide: docs/script-template.md)::
 Sections need no end marker (``[END DIALOGUE]`` is accepted). Nothing is guessed: a
 line the format does not allow is reported in ``problems`` with its line number.
 Without ``[CHARACTERS: ...]`` a panel's characters are its speakers (not narration)
-plus known characters named in its action; without ``[SHOT: ...]`` the shot is read
-from the action.
+plus known characters named in its action, minus anyone the action puts off-panel
+("Yuki calls from off-panel"); without ``[SHOT: ...]`` the shot is read from the action.
 
 Output (plain dicts, keys as in ``PanelSpec`` / ``CastEntry``)::
 
@@ -59,6 +59,12 @@ _DIALOGUE_RE = re.compile(
 _CAST_ENTRY_RE = re.compile(
     r"^(?P<name>[^\s:(][^:(]*?)\s*(?:\((?:aka|a\.k\.a\.?)\s+(?P<aliases>[^)]*)\))?"
     r"\s*:\s*(?P<description>.*?)\s*$", re.IGNORECASE)
+# "Yuki calls from off-panel": the nearest name before the phrase (else after) is heard,
+# not seen.
+_OFF_PANEL_RE = re.compile(
+    r"\b(?:off[- ]?(?:panel|screen|frame|camera)|offscreen|out of (?:frame|shot|view))\b"
+    r"|\(o\.s\.\)", re.IGNORECASE)
+_JOINED_RE = re.compile(r"\s*(?:,|&|\band\b)\s*", re.IGNORECASE)
 KINDS = ("speech", "thought", "whisper", "shout", "narration")
 SECTIONS = {"ACTION": "action", "DIALOGUE": "dialogue", "DIALOG": "dialogue",
             "SFX": "sfx", "NOTES": "notes", "NOTE": "notes"}
@@ -151,11 +157,37 @@ def _resolver(cast: list[dict]):
     return lambda name: known.get(name.casefold(), name)
 
 
+def split_joined(name: str, lookup) -> list[str]:
+    """``"Yuki and Akira"`` -> ``["Yuki", "Akira"]`` when every part is a known name
+    (``lookup``: spelling -> name or None); otherwise the name as it is. An LLM, or a
+    writer, sometimes lists a pair as one character."""
+    if lookup(name) is not None:
+        return [lookup(name)]
+    parts = [lookup(part) for part in _JOINED_RE.split(name) if part.strip()]
+    return parts if len(parts) > 1 and None not in parts else [name]
+
+
+def _off_panel(action: str, mentions: re.Pattern, name_of) -> set[str]:
+    """Names the action puts off-panel: per sentence, the mention nearest before an
+    off-panel phrase, or the first after it ("From off-panel, Yuki calls")."""
+    off: set[str] = set()
+    for sentence in re.split(r"(?<=[.!?;])\s+", action):
+        found = [(m.start(), name_of(m.group(1))) for m in mentions.finditer(sentence)]
+        for marker in _OFF_PANEL_RE.finditer(sentence):
+            before = [n for at, n in found if at < marker.start()]
+            after = [n for at, n in found if at > marker.start()]
+            if before or after:
+                off.add(before[-1] if before else after[0])
+    return off
+
+
 def add_mentions(cast: list[dict], panels: list[dict]) -> None:
     """For panels without an explicit character list (``characters_given`` false), add
     known characters named in the action: the cast (names and aliases) and everyone who
-    speaks somewhere (not narration). Whole words, as written or in capitals. Edits
-    ``panels`` in place."""
+    speaks somewhere (not narration). Whole words, as written or in capitals. Anyone
+    the action puts off-panel is left out (they may still speak), and a joined entry
+    ("Yuki and Akira", from an LLM) is split into its known names. Edits ``panels`` in
+    place."""
     known: dict[str, str] = {}
     for entry in cast:
         for spelling in (entry["name"], *entry.get("aliases", [])):
@@ -170,14 +202,27 @@ def add_mentions(cast: list[dict], panels: list[dict]) -> None:
     pattern = re.compile(r"(?<![\w-])(" + "|".join(
         re.escape(s) + "|" + re.escape(s.upper()) for s in spellings) + r")(?![\w-])")
     by_upper = {s.upper(): name for s, name in known.items()}
+    by_fold = {s.casefold(): name for s, name in known.items()}
+
+    def name_of(spelling: str) -> str:
+        return known.get(spelling) or by_upper[spelling.upper()]
+
     for panel in panels:
+        characters = []
+        for entry in panel.get("characters", []):
+            for name in split_joined(entry, lambda s: by_fold.get(s.casefold())):
+                if name not in characters:
+                    characters.append(name)
+        panel["characters"] = characters
         if panel.get("characters_given"):
             continue
-        characters = panel.setdefault("characters", [])
-        for m in pattern.finditer(panel.get("action", "")):
-            name = known.get(m.group(1)) or by_upper[m.group(1).upper()]
+        action = panel.get("action", "")
+        for m in pattern.finditer(action):
+            name = name_of(m.group(1))
             if name not in characters:
                 characters.append(name)
+        off = _off_panel(action, pattern, name_of)
+        panel["characters"] = [c for c in characters if c not in off]
 
 
 def parse(text: str) -> dict:
@@ -193,6 +238,7 @@ def parse(text: str) -> dict:
     page: int | None = None
     scene = ""
     flashback = False
+    labels: dict[tuple[int, int], int] = {}  # (page, panel) -> line it was first used
 
     def problem(number, message):
         problems.append({"line": number, "message": message})
@@ -223,6 +269,12 @@ def parse(text: str) -> dict:
             if page is None:
                 problem(number, "PANEL before any PAGE (assumed PAGE 1)")
                 page = 1
+            label = (page, int(m.group(1)))
+            if label in labels:
+                problem(number, f"PAGE {page} PANEL {label[1]} is already used on line "
+                                f"{labels[label]} (a new PAGE missing, or a repeated "
+                                f"number?)")
+            labels.setdefault(label, number)
             current = {"page": page, "panel": int(m.group(1)), "scene_heading": scene,
                        "location": "", "characters": [], "characters_given": False,
                        "camera": "", "expressions": {}, "action_lines": [],
@@ -262,7 +314,11 @@ def parse(text: str) -> dict:
                     current["location"] = value
                 elif name == "CHARACTERS":
                     current["characters_given"] = True
+                    names = []
                     for who in (canonical_name(n) for n in value.split(",") if n.strip()):
+                        names += split_joined(who, lambda s: resolve(s) if resolve(s)
+                                              in declared else None) if declared else [who]
+                    for who in names:
                         who = resolve(who)
                         if declared and who not in declared:
                             problem(number, f"{who} is not in the [CHARACTERS] block")
