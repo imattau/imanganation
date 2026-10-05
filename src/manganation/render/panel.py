@@ -50,6 +50,8 @@ class RenderResult:
     placements: dict[str, str] = field(default_factory=dict)  # character -> mask file used
     guide: str | None = None  # the take whose composition this render kept (ControlNet)
     warnings: list[str] = field(default_factory=list)  # e.g. a character rendered untagged
+    # character -> their own masked prompt (defaults.ipadapter.regional_prompts)
+    character_prompts: dict[str, str] = field(default_factory=dict)
 
 
 def fit_resolution(
@@ -173,10 +175,12 @@ def shot_tags(camera: str) -> str:
 
 def build_prompt(
     spec: PanelSpec, style: dict, character_tags: dict[str, list[str]] | None = None,
-    staging: Staging | None = None,
+    staging: Staging | None = None, *, characters: bool = True,
 ) -> str:
     """The positive prompt. With ``staging`` (render/staging.py) the action and setting
-    are tags; without it, the script's prose."""
+    are tags; without it, the script's prose. ``characters=False`` leaves out each
+    character's own tags, for renders that give them masked prompts of their own
+    (``character_prompt``)."""
     parts = [style.get("prompt_prefix", "").strip().rstrip(",")]
     # Without a head count, wide frames tempt SDXL to add a second copy of the figure,
     # and two-shots to drop or duplicate one.
@@ -203,7 +207,7 @@ def build_prompt(
         place = ", ".join(staging.setting) or setting(spec)
     parts += [shot_tags(spec.camera), action, place]
     # Names mean nothing to SDXL; their registered appearance tags do.
-    for name in spec.characters:
+    for name in spec.characters if characters else []:
         parts += character_group(
             spec, name, (character_tags or {}).get(name, []), counted=bool(counts),
             pose=staging.pose(name) if staging is not None and not solo else None)
@@ -212,6 +216,14 @@ def build_prompt(
     if spec.flashback:
         parts.append("flashback, soft focus")
     return ", ".join(p.strip() for p in parts if p and p.strip())
+
+
+def character_prompt(spec: PanelSpec, name: str, tags: list[str],
+                     staging: Staging | None = None) -> str:
+    """One character's masked prompt: their tags (own count tag kept), face, pose."""
+    group = character_group(spec, name, tags,
+                            pose=staging.pose(name) if staging is not None else None)
+    return ", ".join(group) or name
 
 
 def build_negative(spec: PanelSpec, style: dict) -> str:
@@ -496,8 +508,12 @@ def _render(
                 for name in spec.characters if not tags_by_char.get(name)]
     for warning in warnings:
         log.warning("%s (identity %s)", warning, identity)
-    prompt = build_prompt(spec, style, tags_by_char, staging)
+    ipa = settings.defaults.ipadapter
     width, height = fit_resolution(frame_w, frame_h)
+    masked = len(spec.characters) > 1 and (
+        ipa.regional_prompts == "always"
+        or (ipa.regional_prompts == "wide" and width > height))
+    prompt = build_prompt(spec, style, tags_by_char, staging, characters=not masked)
     seed = seed if seed is not None else (spec.seed if spec.seed is not None
                                           else random.randrange(2**32))
     d = settings.defaults.panel
@@ -510,7 +526,7 @@ def _render(
     )
     refs = find_references(identity, spec)
     ref_used: str | None = None
-    ipa = settings.defaults.ipadapter
+    own_texts: dict[str, str] = {}
     ipa_file, clip_file = ipadapter_files(models, ipa.adapter)
     if len(refs) == 1 and len(spec.characters) == 1:
         name, ref = next(iter(refs.items()))
@@ -529,10 +545,11 @@ def _render(
         regions = assign_regions(len(spec.characters), order=reading_order, margin=0.05)
         references = []
         region_text = []
+        own_prompts: list[dict] = []
         for name, region in zip(spec.characters, regions, strict=True):
             box = (region.x, region.y, region.w, region.h)
             mask_name = None
-            if name in placements and (name in refs or ipa.regional_text > 0):
+            if name in placements and (name in refs or ipa.regional_text > 0 or masked):
                 mask_name, box = _upload_placement(client, placements[name], width, height)
             if name in refs:
                 uploaded = client.upload_image(str(refs[name]))
@@ -544,11 +561,23 @@ def _render(
                 references.append(entry)
             group = character_group(spec, name, tags_by_char.get(name, []))
             region_text.append({"text": ", ".join(group) or name, "box": box})
+            if masked:
+                own = {"text": character_prompt(spec, name, tags_by_char.get(name, []),
+                                                 staging),
+                       "mask": list(region.scaled(width, height)), "canvas_w": width,
+                       "canvas_h": height, "feather": ipa.feather}
+                if mask_name:
+                    own["mask_image"] = mask_name
+                own_prompts.append(own)
         # Optional per-character text bands (off by default: they split two-shots into
         # side-by-side pictures; the regional references hold each face instead).
         if ipa.regional_text > 0:
             graph = graphs.with_regional_conditioning(
                 graph, regions=[{**r, "strength": ipa.regional_text} for r in region_text])
+        if own_prompts:
+            graph = graphs.with_masked_prompts(graph, regions=own_prompts)
+            own_texts = {name: own["text"]
+                         for name, own in zip(spec.characters, own_prompts, strict=True)}
         if references:
             graph = graphs.with_regional_ipadapter(
                 graph, references=references, ipadapter=ipa_file, clip_vision=clip_file,
@@ -571,6 +600,7 @@ def _render(
         prompt=prompt, reference=ref_used,
         placements={n: str(p) for n, p in placements.items()},
         guide=str(guide) if guide is not None else None, warnings=warnings,
+        character_prompts=own_texts,
     )
     out.with_suffix(".json").write_text(json.dumps(asdict(result), indent=2))
     return result

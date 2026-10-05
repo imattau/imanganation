@@ -246,6 +246,61 @@ def with_ipadapter(
     return graph
 
 
+def _soft_mask(graph: dict, region: dict, mask_id: str) -> str:
+    """Add a region's mask to ``graph``; -> the id of its (feathered) mask node.
+
+    ``region`` has ``mask_image`` (an uploaded canvas-sized placement, white = this
+    character) or ``mask`` (a pixel box ``[x, y, w, h]``) with ``canvas_w``/``canvas_h``,
+    and ``feather`` (px, default 48)."""
+    if region.get("mask_image"):
+        # The artist's placement: already canvas-sized, white = this character.
+        placed_id = f"{mask_id}_placed"
+        graph[placed_id] = {
+            "class_type": "LoadImageMask",
+            "inputs": {"image": region["mask_image"], "channel": "red"},
+        }
+    else:
+        x, y, w, h = region["mask"]
+        # A solid box mask, positioned by MaskComposite onto an empty canvas.
+        graph[mask_id] = {
+            "class_type": "SolidMask",
+            "inputs": {"value": 1.0, "width": w, "height": h},
+        }
+        empty_id = f"{mask_id}_base"
+        placed_id = f"{mask_id}_placed"
+        graph[empty_id] = {
+            "class_type": "SolidMask",
+            "inputs": {"value": 0.0, "width": region["canvas_w"],
+                       "height": region["canvas_h"]},
+        }
+        graph[placed_id] = {
+            "class_type": "MaskComposite",
+            "inputs": {
+                "destination": [empty_id, 0],
+                "source": [mask_id, 0],
+                "x": x,
+                "y": y,
+                "operation": "add",
+            },
+        }
+    # Soften the region's own edges so neighbouring characters blend instead of
+    # meeting at a hard seam. (ComfyUI's FeatherMask can't do this: it fades a mask
+    # towards the *canvas* borders, which left the inner boundary a hard cut.)
+    feather = region.get("feather", 48)
+    if feather:
+        as_image, blurred, soft = (f"{mask_id}_img", f"{mask_id}_blur", f"{mask_id}_soft")
+        graph[as_image] = {"class_type": "MaskToImage", "inputs": {"mask": [placed_id, 0]}}
+        graph[blurred] = {
+            "class_type": "ImageBlur",
+            "inputs": {"image": [as_image, 0], "blur_radius": max(1, min(31, feather)),
+                       "sigma": min(10.0, max(1.0, feather / 3))},  # node max 10
+        }
+        graph[soft] = {"class_type": "ImageToMask",
+                       "inputs": {"image": [blurred, 0], "channel": "red"}}
+        placed_id = soft
+    return placed_id
+
+
 def with_regional_ipadapter(
     graph: dict,
     *,
@@ -296,52 +351,7 @@ def with_regional_ipadapter(
         img_id, mask_id, cond_id = (f"{id_prefix}{next_id + i}" for i in range(3))
         next_id += 3
         graph[img_id] = {"class_type": "LoadImage", "inputs": {"image": ref["image"]}}
-        if ref.get("mask_image"):
-            # The artist's placement: already canvas-sized, white = this character.
-            placed_id = f"{mask_id}_placed"
-            graph[placed_id] = {
-                "class_type": "LoadImageMask",
-                "inputs": {"image": ref["mask_image"], "channel": "red"},
-            }
-        else:
-            x, y, w, h = ref["mask"]
-            # A solid box mask, positioned by MaskComposite onto an empty canvas.
-            graph[mask_id] = {
-                "class_type": "SolidMask",
-                "inputs": {"value": 1.0, "width": w, "height": h},
-            }
-            empty_id = f"{mask_id}_base"
-            placed_id = f"{mask_id}_placed"
-            graph[empty_id] = {
-                "class_type": "SolidMask",
-                "inputs": {"value": 0.0, "width": ref["canvas_w"], "height": ref["canvas_h"]},
-            }
-            graph[placed_id] = {
-                "class_type": "MaskComposite",
-                "inputs": {
-                    "destination": [empty_id, 0],
-                    "source": [mask_id, 0],
-                    "x": x,
-                    "y": y,
-                    "operation": "add",
-                },
-            }
-        # Soften the region's own edges so neighbouring characters blend instead of
-        # meeting at a hard seam. (ComfyUI's FeatherMask can't do this: it fades a mask
-        # towards the *canvas* borders, which left the inner boundary a hard cut.)
-        feather = ref.get("feather", 48)
-        if feather:
-            as_image, blurred, soft = (f"{mask_id}_img", f"{mask_id}_blur",
-                                       f"{mask_id}_soft")
-            graph[as_image] = {"class_type": "MaskToImage", "inputs": {"mask": [placed_id, 0]}}
-            graph[blurred] = {
-                "class_type": "ImageBlur",
-                "inputs": {"image": [as_image, 0], "blur_radius": max(1, min(31, feather)),
-                           "sigma": min(10.0, max(1.0, feather / 3))},  # node max 10
-            }
-            graph[soft] = {"class_type": "ImageToMask",
-                           "inputs": {"image": [blurred, 0], "channel": "red"}}
-            placed_id = soft
+        placed_id = _soft_mask(graph, ref, mask_id)
         graph[cond_id] = {
             "class_type": "IPAdapterRegionalConditioning",
             "inputs": {
@@ -382,6 +392,39 @@ def with_regional_ipadapter(
         },
     }
     graph["5"]["inputs"]["model"] = [apply_id, 0]
+    return graph
+
+
+def with_masked_prompts(graph: dict, *, regions: list[dict]) -> dict:
+    """Give each character their own prompt, bound to their region.
+
+    ``regions`` is a list of ``{"text", "strength"}`` plus the mask fields of
+    ``_soft_mask`` (the same box or placement, and feather, as the character's
+    reference). Each text is encoded and masked with ``ConditioningSetMask``, then
+    combined with the sampler's positive conditioning (the scene: style, head count,
+    shot, shared action, setting).
+
+    With every costume in one global prompt, the only thing keeping Yuki's skirt off
+    Akira was their separate bands, so the bands couldn't overlap; masked, each
+    character's tags act only where that character is.
+    """
+    if not regions:
+        return graph
+    graph = {k: {**v, "inputs": dict(v["inputs"])} for k, v in graph.items()}
+    combined = graph["5"]["inputs"]["positive"]
+    for i, region in enumerate(regions):
+        enc, masked, comb = f"mp{i}_text", f"mp{i}_cond", f"mp{i}_combine"
+        graph[enc] = {"class_type": "CLIPTextEncode",
+                      "inputs": {"text": region["text"], "clip": ["1", 1]}}
+        mask = _soft_mask(graph, region, f"mp{i}_mask")
+        graph[masked] = {"class_type": "ConditioningSetMask",
+                         "inputs": {"conditioning": [enc, 0], "mask": [mask, 0],
+                                    "strength": region.get("strength", 1.0),
+                                    "set_cond_area": "default"}}
+        graph[comb] = {"class_type": "ConditioningCombine",
+                       "inputs": {"conditioning_1": combined, "conditioning_2": [masked, 0]}}
+        combined = [comb, 0]
+    graph["5"]["inputs"]["positive"] = combined
     return graph
 
 

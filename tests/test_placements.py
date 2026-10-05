@@ -54,12 +54,12 @@ def _blob(path, size, box, alpha=True):
     return path
 
 
-def _render(tmp_path, characters, placements=None):
+def _render(tmp_path, characters, placements=None, frame=(1040, 640)):
     tmp_path.mkdir(parents=True, exist_ok=True)
     fake = Fake()
     panel = {"id": "pnl_abc123", "characters": [{"name": c} for c in characters],
              "action": "Yuki stands over Akira"}
-    r = P.render_inline(panel, "prj_test01", 1040, 640, seed=1, client=fake,
+    r = P.render_inline(panel, "prj_test01", *frame, seed=1, client=fake,
                         identity=_cast(tmp_path), outputs=tmp_path / "out",
                         placements=placements)
     return r, fake.graphs[0], fake
@@ -97,7 +97,9 @@ def test_placements_replace_bands_and_are_scaled_to_the_canvas(tmp_path):
     yuki = _blob(tmp_path / "yuki.png", (520, 320), (20, 10, 200, 310))
     akira = _blob(tmp_path / "akira.png", (520, 320), (300, 40, 500, 320), alpha=False)
     r, g, fake = _render(tmp_path, ["Yuki", "Akira"], {"yuki": yuki, "Akira": akira})
-    masks = [n["inputs"]["image"] for n in g.values() if n["class_type"] == "LoadImageMask"]
+    # the references' masks (the "mp" nodes are the masked character prompts' copies)
+    masks = [n["inputs"]["image"] for k, n in g.items()
+             if n["class_type"] == "LoadImageMask" and not k.startswith("mp")]
     assert len(masks) == 2
     canvas = (r.width, r.height)
     for m in masks:
@@ -112,8 +114,31 @@ def test_placements_replace_bands_and_are_scaled_to_the_canvas(tmp_path):
 def test_characters_without_a_placement_keep_their_band(tmp_path):
     yuki = _blob(tmp_path / "yuki.png", (520, 320), (20, 10, 200, 310))
     _, g, _ = _render(tmp_path, ["Yuki", "Akira"], {"Yuki": yuki})
-    assert sum(n["class_type"] == "LoadImageMask" for n in g.values()) == 1
-    assert sum(n["class_type"] == "MaskComposite" for n in g.values()) == 1
+    refs = {k: n for k, n in g.items() if not k.startswith("mp")}
+    assert sum(n["class_type"] == "LoadImageMask" for n in refs.values()) == 1
+    assert sum(n["class_type"] == "MaskComposite" for n in refs.values()) == 1
+
+
+def test_wide_two_shots_give_each_character_a_masked_prompt(tmp_path):
+    # Wide frames (520x320) split two-shots into two pictures unless each character's
+    # tags are bound to their own region; the shared prompt keeps only the scene.
+    yuki = _blob(tmp_path / "yuki.png", (520, 320), (20, 10, 200, 310))
+    r, g, _ = _render(tmp_path, ["Yuki", "Akira"], {"Yuki": yuki})
+    masked = [n for n in g.values() if n["class_type"] == "ConditioningSetMask"]
+    assert len(masked) == 2
+    assert set(r.character_prompts) == {"Yuki", "Akira"}
+    # Yuki's prompt mask is her placement, the same one her reference uses
+    placed = [n["inputs"]["image"] for k, n in g.items()
+              if n["class_type"] == "LoadImageMask"]
+    assert len(placed) == 2 and placed[0] == placed[1]
+    assert g["5"]["inputs"]["positive"] == ["mp1_combine", 0]
+
+
+def test_tall_two_shots_keep_one_prompt(tmp_path):
+    # Tall frames already compose as one scene; masking there lost the wrist-drag.
+    r, g, _ = _render(tmp_path, ["Yuki", "Akira"], {}, frame=(320, 520))
+    assert not any(n["class_type"] == "ConditioningSetMask" for n in g.values())
+    assert r.character_prompts == {}
 
 
 def test_one_referenced_character_in_a_two_shot_stays_masked(tmp_path):

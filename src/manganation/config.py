@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from pydantic import BaseModel
@@ -70,6 +71,13 @@ class IPAdapterDefaults(BaseModel):
     # composition and each face is held by its own regional reference. Raise it to trade
     # composition for fine per-character traits (e.g. Akira's blue hair tips).
     regional_text: float = 0.0
+    # Each character's own tags (appearance, face, pose) as a prompt masked to their
+    # region (graphs.with_masked_prompts); the shared prompt keeps only the scene.
+    # "wide" (frames wider than tall): there each band is a portrait of its own and
+    # two-shots came out as two pictures (7 of 8 seeds; 1-2 of 8 masked). Tall frames
+    # already compose as one scene, and masking there lost the wrist-drag.
+    # docs/quality/2026-10-06_two_shots.md. "off" | "wide" | "always".
+    regional_prompts: Literal["off", "wide", "always"] = "wide"
 
 
 class RefinerDefaults(BaseModel):
