@@ -50,3 +50,8 @@ outputs/
 
 # Engine log when GIMP starts it (the workspace extension)
 engine.log
+
+# Flatpak packaging: builder state, local repo and the bundles it produces
+packaging/flatpak/.build/
+.flatpak-builder/
+dist/

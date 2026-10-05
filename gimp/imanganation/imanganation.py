@@ -159,10 +159,32 @@ TAKE_PARASITE = "imanganation-take"
 CURSOR_FILE = "gimp_cursor.json"  # per project: which panel comes next
 ENGINE_URL = "http://127.0.0.1:8790"
 RENDER_TIMEOUT = 600  # seconds
-# The checkout the plug-in files are symlinked from: the workspace starts the engine and
-# ComfyUI from it. IMANGANATION_HOME overrides; IMANGANATION_AUTOSTART=0 turns it off.
-ENGINE_HOME = Path(os.environ.get("IMANGANATION_HOME")
-                   or Path(__file__).resolve().parents[2])
+# Inside the Flatpak build the plug-in is sandboxed; host processes go through
+# flatpak-spawn --host (the manifest grants org.freedesktop.Flatpak).
+IN_FLATPAK = Path("/.flatpak-info").exists()
+
+
+def _find_engine_home():
+    """The engine checkout the workspace starts the engine and ComfyUI from:
+    IMANGANATION_HOME; else the checkout these plug-in files are symlinked from (a
+    developer install); else where the engine last said it lives (it writes
+    ~/.config/imanganation/engine-home when it runs, which is how a packaged GIMP
+    finds it). None if none of those is an engine checkout."""
+    candidates = [os.environ.get("IMANGANATION_HOME"), Path(__file__).resolve().parents[2]]
+    try:
+        candidates.append((Path.home() / ".config/imanganation/engine-home")
+                          .read_text().strip())
+    except OSError:
+        pass
+    for candidate in candidates:
+        if candidate and (Path(candidate) / "pyproject.toml").is_file():
+            return Path(candidate)
+    return None
+
+
+# IMANGANATION_AUTOSTART=0 stops the workspace starting the engine and ComfyUI.
+ENGINE_FOUND = _find_engine_home()
+ENGINE_HOME = ENGINE_FOUND or Path.home() / "imanganation"
 COMFY_URL = f"http://127.0.0.1:{os.environ.get('COMFY_PORT', '8188')}"
 
 _DOCK_PLUGIN = None
@@ -1635,14 +1657,23 @@ def _die_with_parent():
         pass
 
 
+def _host_command(command, cwd):
+    """Run ``command`` on the host, not in the Flatpak sandbox: the engine and ComfyUI
+    need the host's GPU, CUDA and Python. --watch-bus ends the host process when
+    flatpak-spawn (which dies with GIMP) does."""
+    if not IN_FLATPAK:
+        return command
+    return ["flatpak-spawn", "--host", "--watch-bus", f"--directory={cwd}", *command]
+
+
 def _start_service(name, command, cwd, log):
     import subprocess
 
     try:
         with open(log, "wb") as out:
             _SERVICES[name] = subprocess.Popen(
-                command, cwd=cwd, stdin=subprocess.DEVNULL, stdout=out,
-                stderr=subprocess.STDOUT, preexec_fn=_die_with_parent)
+                _host_command(command, cwd), cwd=cwd, stdin=subprocess.DEVNULL,
+                stdout=out, stderr=subprocess.STDOUT, preexec_fn=_die_with_parent)
     except OSError as exc:
         Gimp.message(f"Could not start {name}: {exc} (see {log})")
 
@@ -2911,7 +2942,11 @@ def _update_setup_dialog(widgets, report):
     widgets["link"].set_sensitive(actions["link_enabled"])
     widgets["cancel"].set_sensitive(actions["cancel_enabled"])
     if report is None:
-        widgets["headline"].set_text("Waiting for the Imanganation engine to start…")
+        widgets["headline"].set_text(
+            "Waiting for the Imanganation engine to start…" if ENGINE_FOUND else
+            "GIMP can't find the Imanganation engine. Install it (see its README), then "
+            "run `uv run manganation serve` once in its folder so GIMP finds it, and "
+            "restart GIMP.")
         widgets["details"].set_text("")
         widgets["bar"].hide()
         return

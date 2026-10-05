@@ -160,11 +160,14 @@ def test_cli_check_reports_missing_files_and_exits_nonzero(tmp_path, monkeypatch
     settings = load_settings().model_copy(deep=True)
     settings.paths.models_dir = str(tmp_path / "models")
     monkeypatch.setattr(config, "load_settings", lambda: settings)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))  # setup notes the engine's home
     result = CliRunner().invoke(cli.app, ["setup", "--check"], env={"COLUMNS": "200"})
     assert result.exit_code == 1
     assert "missing" in result.output and "to download" in result.output
     assert "FAIR AI Public License" in result.output
     assert not Path(tmp_path / "models").exists()  # --check changes nothing
+    assert (tmp_path / "home/.config/imanganation/engine-home").read_text().strip() == str(
+        config.REPO_ROOT)  # how a packaged GIMP finds this checkout
 
 
 # --- the engine's /setup endpoints --------------------------------------------

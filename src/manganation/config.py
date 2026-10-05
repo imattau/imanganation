@@ -166,3 +166,15 @@ def load_settings() -> Settings:
 
 def load_models() -> dict:
     return yaml.safe_load((CONFIG_DIR / "models.yaml").read_text()) or {}
+
+
+def remember_engine_home() -> None:
+    """Note where this engine checkout lives, in ~/.config/imanganation/engine-home: a
+    packaged GIMP (the Flatpak) reads it to start the engine and ComfyUI. Best-effort."""
+    try:
+        note = Path.home() / ".config" / "imanganation" / "engine-home"
+        if not note.is_file() or note.read_text().strip() != str(REPO_ROOT):
+            note.parent.mkdir(parents=True, exist_ok=True)
+            note.write_text(f"{REPO_ROOT}\n")
+    except OSError:
+        pass

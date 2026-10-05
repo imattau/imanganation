@@ -112,6 +112,10 @@ missing, checkpoint first so you can render as soon as it lands:
 
 ## GIMP (the interface)
 
+Imanganation runs in a customised GIMP (`imanganation-gimp`). Users get it as a Flatpak
+with the plug-in built in: see [`packaging/flatpak/README.md`](./packaging/flatpak/README.md).
+For development, with a stock or self-built GIMP:
+
 ```bash
 ln -s "$PWD/gimp/imanganation" ~/.config/GIMP/3.2/plug-ins/imanganation   # once
 uv run manganation serve          # engine API on 127.0.0.1:8790 (needs ComfyUI)

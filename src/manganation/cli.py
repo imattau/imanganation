@@ -35,7 +35,10 @@ def serve(
     """Run the local engine API (used by the GIMP plug-in)."""
     import uvicorn
 
+    from manganation.config import remember_engine_home
     from manganation.web.api import create_app
+
+    remember_engine_home()  # how a packaged (Flatpak) GIMP finds this checkout
 
     uvicorn.run(create_app(), host="127.0.0.1", port=port)
 
@@ -194,8 +197,15 @@ def setup(
     from rich.table import Table
 
     from manganation import models_setup as ms
-    from manganation.config import CONFIG_DIR, REPO_ROOT, load_models, load_settings
+    from manganation.config import (
+        CONFIG_DIR,
+        REPO_ROOT,
+        load_models,
+        load_settings,
+        remember_engine_home,
+    )
 
+    remember_engine_home()
     settings = load_settings()
     root = (REPO_ROOT / settings.paths.models_dir).resolve()
     models = ms.needed(settings, load_models())
@@ -286,8 +296,15 @@ def install_comfyui(
     PyTorch for this GPU, the custom nodes, imanganation's patches. Safe to re-run."""
     from manganation import comfy_setup as cs
     from manganation import models_setup as ms
-    from manganation.config import CONFIG_DIR, REPO_ROOT, load_models, load_settings
+    from manganation.config import (
+        CONFIG_DIR,
+        REPO_ROOT,
+        load_models,
+        load_settings,
+        remember_engine_home,
+    )
 
+    remember_engine_home()
     settings = load_settings()
     comfy = (target or REPO_ROOT / settings.paths.comfyui_dir).resolve()
     installer = cs.Installer(comfy, cs.load_pins(), log=rprint)
