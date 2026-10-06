@@ -64,7 +64,8 @@ def test_eval_tagger_is_registered_but_not_needed_to_render():
     from manganation import models_setup as ms
     from manganation.config import load_settings
 
-    model, tags, detector = ms.evaluation(load_models())
+    model, tags, detector, faces = ms.evaluation(load_models())
+    assert faces.file.endswith(".onnx") and faces.sha256
     assert model.file.endswith(".onnx") and model.urls and model.sha256
     assert tags.file.endswith(".csv") and tags.urls and tags.sha256
     assert detector.file.endswith(".onnx") and detector.urls and detector.sha256

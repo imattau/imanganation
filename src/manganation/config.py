@@ -176,6 +176,17 @@ class RendererDefaults(BaseModel):
     checkpoint: str = ""
 
 
+class FacePassDefaults(BaseModel):
+    """Repaint each character's face with the panel's expression after the render
+    (render/facepass.py). ``checkpoint``: a models.yaml trials group (Animagine paints
+    the cleanest expressions; NoobAI left smudges). 0.7: expressions show and identity
+    holds; 0.55 barely changed them, 0.8 let hair drift."""
+
+    enabled: bool = False
+    denoise: float = 0.7
+    checkpoint: str = "animagine_4_opt"
+
+
 class Defaults(BaseModel):
     color_mode: str = "color"  # recorded only; engine renders colour (docs/color-policy.md)
     reading_order: str = "rtl"
@@ -188,6 +199,7 @@ class Defaults(BaseModel):
     staging: StagingDefaults = StagingDefaults()
     layered: LayeredDefaults = LayeredDefaults()
     renderer: RendererDefaults = RendererDefaults()
+    face_pass: FacePassDefaults = FacePassDefaults()
 
 
 class Settings(BaseModel):

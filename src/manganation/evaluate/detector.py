@@ -83,16 +83,18 @@ class Detector:
         return sorted(suppress(boxes, self.overlap), key=lambda b: b.center_x)
 
 
-def default_detector() -> Detector:
-    """The detector ``models.yaml`` registers, from the model store."""
+def default_detector(name: str | None = None) -> Detector:
+    """A detector ``models.yaml`` registers (default: people; ``anime_face``: faces),
+    from the model store."""
     from manganation import models_setup as ms
     from manganation.config import load_models, models_root
 
     root = models_root()
     models = load_models()
-    *_, model = ms.evaluation(models)
+    name = name or ms.DEFAULT_DETECTOR
+    model = ms.detector(models, name)
     if ms.state(model, root) != "present":
         raise RuntimeError(f"detector missing ({model.file or model.note}): run "
                            "`manganation setup --eval`")
-    entry = models.get("detectors", {}).get(ms.DEFAULT_DETECTOR, {})
+    entry = models.get("detectors", {}).get(name, {})
     return Detector(model.path(root), threshold=float(entry.get("threshold", 0.324)))

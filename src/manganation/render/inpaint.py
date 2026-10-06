@@ -256,8 +256,10 @@ def inpaint_image(
     client: ComfyClient | None = None, tag: str = "panel",
     characters: list[dict] | None = None, identity: Path | None = None,
     character_weight: float | None = None, reading_order: str = "rtl",
+    checkpoint: str | None = None,
 ) -> InpaintResult:
     """Crop-and-stitch repaint of ``src`` inside ``mask_path``, saved to ``out``.
+    ``checkpoint`` (a file name) paints with another SDXL model than the primary one.
 
     ``characters`` (``[{"name", "version"}]``, from the ``identity`` registry folder)
     are the people in the patch: their traits join the prompt, and IP-Adapter guides
@@ -320,7 +322,7 @@ def inpaint_image(
                "ipadapter_file": ipa_file, "clip_name": clip_file,
                "weight": d.ipadapter_weight if character_weight is None else character_weight}
     graph = graphs.inpaint(
-        ckpt=models["checkpoints"]["primary"]["id"],
+        ckpt=checkpoint or models["checkpoints"]["primary"]["id"],
         image=source_up["name"], mask=mask_up["name"],
         prompt=positive, negative=neg, seed=seed,
         prefix=f"imanganation_{tag}_inpaint",

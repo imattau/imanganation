@@ -93,6 +93,7 @@ def needed(settings, models: dict) -> list[ModelFile]:
 
 DEFAULT_TAGGER = "wd_swinv2_v3"
 DEFAULT_DETECTOR = "anime_person"
+FACE_DETECTOR = "anime_face"
 
 
 def evaluation(models: dict, tagger: str = DEFAULT_TAGGER) -> list[ModelFile]:
@@ -107,9 +108,16 @@ def evaluation(models: dict, tagger: str = DEFAULT_TAGGER) -> list[ModelFile]:
         out.append(_entry("tagger tags", taggers.get(entry.get("tags", "")), "taggers",
                           f"tagger {tagger!r} names no tag list that's in models.yaml"))
     detectors = models.get("detectors", {})
-    out.append(_entry(f"detector ({DEFAULT_DETECTOR})", detectors.get(DEFAULT_DETECTOR),
-                      "taggers", f"no detectors.{DEFAULT_DETECTOR} in models.yaml"))
+    for name in (DEFAULT_DETECTOR, FACE_DETECTOR):
+        out.append(_entry(f"detector ({name})", detectors.get(name), "taggers",
+                          f"no detectors.{name} in models.yaml"))
     return out
+
+
+def detector(models: dict, name: str) -> ModelFile:
+    """One ``models.yaml -> detectors`` entry."""
+    return _entry(f"detector ({name})", models.get("detectors", {}).get(name), "taggers",
+                  f"no detectors.{name} in models.yaml")
 
 
 def trial(models: dict, name: str) -> list[ModelFile]:

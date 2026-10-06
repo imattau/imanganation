@@ -166,6 +166,18 @@ detectors:
       url: https://huggingface.co/deepghs/anime_person_detection/resolve/e39c744c22432ad01f91dd254fe2b02c8d878b8c/person_detect_v1.3_s/model.onnx
       size: 44583231
       sha256: 6da88929438cd442e31e45ff4f934dd2d7eb9cf7a423c22885d650ee52550f90
+  anime_face:
+    id: anime-face-detect-v1.4-s.onnx
+    display: Anime face detector v1.4 (YOLOv8s, ONNX, runs on the CPU)
+    source: https://huggingface.co/deepghs/anime_face_detection (face_detect_v1.4_s)
+    subdir: taggers
+    threshold: 0.307     # the release's F1-optimal confidence
+    feature: face pass (finds each face) and render-accuracy eval
+    license: {name: MIT, url: https://huggingface.co/deepghs/anime_face_detection}
+    download:
+      url: https://huggingface.co/deepghs/anime_face_detection/resolve/784dc4c0bb692351ddcdbe6131a050b17d3025d5/face_detect_v1.4_s/model.onnx
+      size: 44583229
+      sha256: 403b5bc93b6ff789b7d183418df4a1364049bac00c24acd927604a7ff6891483
 
 # Trial models: candidates being compared with the eval (docs/eval.md), not used to
 # render. `manganation setup --trial <name>` fetches one group.

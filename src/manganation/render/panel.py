@@ -761,6 +761,18 @@ def _render(
         raise RenderError("ComfyUI returned no image")
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(blobs[0])
+    fp = settings.defaults.face_pass
+    if fp.enabled and spec.characters:
+        from manganation.render.facepass import face_pass
+
+        try:
+            done = face_pass(out, spec, identity, out, client=client, seed=seed,
+                             denoise=fp.denoise,
+                             checkpoint=trial_files(models, fp.checkpoint)["model"]
+                             if fp.checkpoint else None, settings=settings)
+            warnings += done.warnings
+        except Exception as exc:  # noqa: BLE001 - the panel itself is fine without it
+            warnings.append(f"face pass skipped: {exc}")
 
     result = RenderResult(
         path=str(out), seq=seq, seed=seed, width=width, height=height,
