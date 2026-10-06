@@ -166,6 +166,16 @@ class LayeredDefaults(BaseModel):
     denoise: float = 0.85
 
 
+class RendererDefaults(BaseModel):
+    """Which model renders panels. "sdxl" is the tuned pipeline (tags, regional
+    references); the others are trials being compared with the eval (models.yaml ->
+    trials), prompted in prose. ``checkpoint`` swaps the SDXL file (a models.yaml
+    trials group, e.g. illustrious_v2); empty = checkpoints.primary."""
+
+    engine: Literal["sdxl", "qwen_image_21", "z_anime"] = "sdxl"
+    checkpoint: str = ""
+
+
 class Defaults(BaseModel):
     color_mode: str = "color"  # recorded only; engine renders colour (docs/color-policy.md)
     reading_order: str = "rtl"
@@ -177,6 +187,7 @@ class Defaults(BaseModel):
     controlnet: ControlNetDefaults = ControlNetDefaults()
     staging: StagingDefaults = StagingDefaults()
     layered: LayeredDefaults = LayeredDefaults()
+    renderer: RendererDefaults = RendererDefaults()
 
 
 class Settings(BaseModel):

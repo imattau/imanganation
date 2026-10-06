@@ -112,6 +112,17 @@ def evaluation(models: dict, tagger: str = DEFAULT_TAGGER) -> list[ModelFile]:
     return out
 
 
+def trial(models: dict, name: str) -> list[ModelFile]:
+    """A trial model group (``models.yaml`` -> ``trials``): a candidate the eval compares,
+    fetched only when asked (``setup --trial``)."""
+    group = models.get("trials", {}).get(name)
+    if not group:
+        known = ", ".join(sorted(models.get("trials", {}))) or "none"
+        return [_entry(f"trial {name}", None, "", f"unknown trial {name!r} (known: {known})")]
+    return [_entry(f"{name} {part}", entry, entry.get("subdir", ""))
+            for part, entry in group.items()]
+
+
 # --- state -----------------------------------------------------------------
 
 

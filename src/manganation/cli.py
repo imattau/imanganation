@@ -209,6 +209,8 @@ def setup(
     yes: bool = typer.Option(False, "--yes", "-y", help="Download without asking."),
     evaluation: bool = typer.Option(False, "--eval",
                                     help="Also the tagger `manganation eval` judges with."),
+    trial: str = typer.Option("", "--trial", help="Also a trial model group "
+                              "(models.yaml -> trials), e.g. qwen_image_21."),
 ) -> None:
     """Get the model files the engine needs: link ones you have, download the rest.
 
@@ -239,6 +241,8 @@ def setup(
     models = ms.needed(settings, load_models())
     if evaluation:
         models += ms.evaluation(load_models())
+    if trial:
+        models += ms.trial(load_models(), trial)
     states = {m.role: ms.state(m, root, verify=verify) for m in models}
 
     if not check and reuse:

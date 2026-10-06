@@ -676,3 +676,85 @@ def layered_per_character(
     graph["7"] = {"class_type": "SaveImage", "inputs": {"filename_prefix": prefix,
                                                         "images": ["6", 0]}}
     return graph
+
+
+# --- trial renderers with LLM text encoders (compared with the eval) -------------------
+
+
+def qwen_image21(*, unet: str, clip: str, vae: str, prompt: str, refs: list[str],
+                 width: int, height: int, seed: int, prefix: str, steps: int = 30,
+                 resolution: int = 1024) -> dict:
+    """Qwen-Image 2.1: text plus reference images (``refs``: uploaded names, referred to
+    in the prompt as ``<image1>``, ``<image2>``…). As ComfyUI's template: cfg 1, euler,
+    simple; the canvas is ours, not the first reference's."""
+    graph: dict = {
+        "unet": {"class_type": "UNETLoader",
+                 "inputs": {"unet_name": unet, "weight_dtype": "default"}},
+        "cache": {"class_type": "QwenImage21Cache",
+                  "inputs": {"model": ["unet", 0], "device": "auto", "dtype": "default"}},
+        "clip": {"class_type": "CLIPLoader",
+                 "inputs": {"clip_name": clip, "type": "qwen_image", "device": "default"}},
+        "vae": {"class_type": "VAELoader", "inputs": {"vae_name": vae}},
+        "encode": {"class_type": "TextEncodeQwenImage21",
+                   "inputs": {"clip": ["clip", 0], "prompt": prompt, "negative_prompt": "",
+                              "vae": ["vae", 0], "resolution": resolution}},
+        "4": {"class_type": "EmptyLatentImage",
+              "inputs": {"width": width, "height": height, "batch_size": 1}},
+        "5": {"class_type": "KSampler",
+              "inputs": {"seed": seed, "steps": steps, "cfg": 1.0, "sampler_name": "euler",
+                         "scheduler": "simple", "denoise": 1.0, "model": ["cache", 0],
+                         "positive": ["encode", 0], "negative": ["encode", 1],
+                         "latent_image": ["4", 0]}},
+        "6": {"class_type": "VAEDecode", "inputs": {"samples": ["5", 0], "vae": ["vae", 0]}},
+        "7": {"class_type": "SaveImage", "inputs": {"filename_prefix": prefix,
+                                                    "images": ["6", 0]}},
+    }
+    for i, name in enumerate(refs, start=1):
+        graph[f"ref{i}"] = {"class_type": "LoadImage", "inputs": {"image": name}}
+        graph["encode"]["inputs"][f"images.image_{i}"] = [f"ref{i}", 0]
+    return graph
+
+
+def z_image(*, unet: str, clip: str, vae: str, prompt: str, negative: str, width: int,
+            height: int, seed: int, prefix: str, steps: int = 30, cfg: float = 4.0,
+            sampler: str = "euler_ancestral", scheduler: str = "beta",
+            shift: float = 3.0) -> dict:
+    """Z-Image (Z-Anime Base): text only. Settings from the Z-Anime card (28-50 steps,
+    cfg 3-5, euler_ancestral/beta), shift as in ComfyUI's Z-Image template."""
+    return {
+        "unet": {"class_type": "UNETLoader",
+                 "inputs": {"unet_name": unet, "weight_dtype": "default"}},
+        "shift": {"class_type": "ModelSamplingAuraFlow",
+                  "inputs": {"model": ["unet", 0], "shift": shift}},
+        "clip": {"class_type": "CLIPLoader",
+                 "inputs": {"clip_name": clip, "type": "lumina2", "device": "default"}},
+        "vae": {"class_type": "VAELoader", "inputs": {"vae_name": vae}},
+        "2": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["clip", 0]}},
+        "3": {"class_type": "CLIPTextEncode", "inputs": {"text": negative, "clip": ["clip", 0]}},
+        "4": {"class_type": "EmptySD3LatentImage",
+              "inputs": {"width": width, "height": height, "batch_size": 1}},
+        "5": {"class_type": "KSampler",
+              "inputs": {"seed": seed, "steps": steps, "cfg": cfg, "sampler_name": sampler,
+                         "scheduler": scheduler, "denoise": 1.0, "model": ["shift", 0],
+                         "positive": ["2", 0], "negative": ["3", 0],
+                         "latent_image": ["4", 0]}},
+        "6": {"class_type": "VAEDecode", "inputs": {"samples": ["5", 0], "vae": ["vae", 0]}},
+        "7": {"class_type": "SaveImage", "inputs": {"filename_prefix": prefix,
+                                                    "images": ["6", 0]}},
+    }
+
+
+def with_init_image(graph: dict, *, image: str, width: int, height: int,
+                    denoise: float) -> dict:
+    """Start the sampler (node "5") from ``image`` instead of noise: img2img at
+    ``denoise``. For a two-stage render (another model composes, this one restyles),
+    every other hook on node "5" (references, masked prompts) still applies."""
+    graph = {k: {**v, "inputs": dict(v["inputs"])} for k, v in graph.items()}
+    graph["init_image"] = {"class_type": "LoadImage", "inputs": {"image": image}}
+    graph["init_scaled"] = {"class_type": "ImageScale",
+                            "inputs": {"image": ["init_image", 0], "upscale_method": "lanczos",
+                                       "width": width, "height": height, "crop": "center"}}
+    graph["4"] = {"class_type": "VAEEncode",
+                  "inputs": {"pixels": ["init_scaled", 0], "vae": ["1", 2]}}
+    graph["5"]["inputs"]["denoise"] = denoise
+    return graph

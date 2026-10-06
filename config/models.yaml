@@ -166,3 +166,100 @@ detectors:
       url: https://huggingface.co/deepghs/anime_person_detection/resolve/e39c744c22432ad01f91dd254fe2b02c8d878b8c/person_detect_v1.3_s/model.onnx
       size: 44583231
       sha256: 6da88929438cd442e31e45ff4f934dd2d7eb9cf7a423c22885d650ee52550f90
+
+# Trial models: candidates being compared with the eval (docs/eval.md), not used to
+# render. `manganation setup --trial <name>` fetches one group.
+trials:
+  qwen_image_21:
+    model:
+      id: qwen_image_2.1_int8_convrot.safetensors
+      display: Qwen-Image 2.1 (7B DiT, int8) — text-to-image and multi-reference editing
+      source: https://huggingface.co/Qwen/Qwen-Image-2.1 (repackaged by Comfy-Org)
+      subdir: diffusion_models
+      feature: trial renderer (references for characters and places)
+      # Non-commercial: evaluation is allowed; shipping it needs a licence from Alibaba.
+      license: {name: Qwen Research License (non-commercial), url: https://huggingface.co/Qwen/Qwen-Image-2.1/blob/main/LICENSE}
+      download:
+        url: https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/cb504a4090723e43f17ad01cec0359490e2de613/diffusion_models/qwen_image_2.1_int8_convrot.safetensors
+        size: 7256783064
+        sha256: cb74113cb03faecd79611b01fd7fd642f0aa60d6f0b95086abee214d75eaa57d
+    text_encoder:
+      id: qwen3vl_8b_int8_convrot.safetensors
+      display: Qwen3-VL 8B (int8) — Qwen-Image 2.1's text and image encoder
+      source: https://huggingface.co/Comfy-Org/Qwen-Image-2.1
+      subdir: text_encoders
+      feature: trial renderer (text encoder)
+      license: {name: Qwen Research License (non-commercial), url: https://huggingface.co/Qwen/Qwen-Image-2.1/blob/main/LICENSE}
+      download:
+        url: https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/cb504a4090723e43f17ad01cec0359490e2de613/text_encoders/qwen3vl_8b_int8_convrot.safetensors
+        size: 9350798360
+        sha256: 8bfd0f6e12abf2d2d697ecc888e5e90b0d6741d6708f05799f53afa560452e8f
+    vae:
+      id: qwen_image_2.1_vae_bf16.safetensors
+      display: Qwen-Image 2.1 VAE
+      source: https://huggingface.co/Comfy-Org/Qwen-Image-2.1
+      subdir: vae
+      feature: trial renderer (VAE)
+      license: {name: Qwen Research License (non-commercial), url: https://huggingface.co/Qwen/Qwen-Image-2.1/blob/main/LICENSE}
+      download:
+        url: https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/cb504a4090723e43f17ad01cec0359490e2de613/vae/qwen_image_2.1_vae_bf16.safetensors
+        size: 675509688
+        sha256: bb21f7473051e1ac368515dd3f2e15cd44d7a11748ee8823e1ddca3e4876b7c9
+  illustrious_v2:
+    model:
+      id: Illustrious-XL-v2.0.safetensors
+      display: Illustrious-XL v2.0 (SDXL anime; NoobAI's parent)
+      source: https://huggingface.co/OnomaAIResearch/Illustrious-XL-v2.0
+      subdir: checkpoints
+      feature: trial checkpoint (drop-in for NoobAI-XL)
+      license: {name: CreativeML OpenRAIL-M, url: https://huggingface.co/OnomaAIResearch/Illustrious-XL-v2.0}
+      download:
+        url: https://huggingface.co/OnomaAIResearch/Illustrious-XL-v2.0/resolve/69459c1fe6f46db41ab31e6114f05acc0e06bcaa/Illustrious-XL-v2.0.safetensors
+        size: 6938040674
+        sha256: c2a1a3eaa13d4c107dc7e00c3fe830cab427aa026362740ea094745b3422a331
+  animagine_4_opt:
+    model:
+      id: animagine-xl-4.0-opt.safetensors
+      display: Animagine XL 4.0 Opt (SDXL anime)
+      source: https://huggingface.co/cagliostrolab/animagine-xl-4.0
+      subdir: checkpoints
+      feature: trial checkpoint (drop-in for NoobAI-XL)
+      license: {name: CreativeML OpenRAIL++-M, url: https://huggingface.co/cagliostrolab/animagine-xl-4.0}
+      download:
+        url: https://huggingface.co/cagliostrolab/animagine-xl-4.0/resolve/2b7c1b397761bf5bd3cc42e5b39ec99314a75a96/animagine-xl-4.0-opt.safetensors
+        size: 6938350040
+        sha256: 6327eca98bfb6538dd7a4edce22484a1bbc57a8cff6b11d075d40da1afb847ac
+  z_anime:
+    model:
+      id: z-anime-base-fp8.safetensors
+      display: Z-Anime Base (Z-Image 6B anime fine-tune, fp8)
+      source: https://huggingface.co/SeeSee21/Z-Anime
+      subdir: diffusion_models
+      feature: trial renderer (natural-language prompts)
+      license: {name: Apache-2.0, url: https://huggingface.co/SeeSee21/Z-Anime}
+      download:
+        url: https://huggingface.co/SeeSee21/Z-Anime/resolve/0f5fb51464638a2f7328a1d74590281e63e1fde2/diffusion_models/z-anime-base-fp8.safetensors
+        size: 6154966640
+        sha256: 3d2faf5f7e223ecf4942b52b55d816b026afdb7a447cb98cf7cd297240ffad96
+    text_encoder:
+      id: qwen_3_4b-fp8.safetensors
+      display: Qwen3 4B (fp8) — Z-Image's text encoder
+      source: https://huggingface.co/SeeSee21/Z-Anime
+      subdir: text_encoders
+      feature: trial renderer (text encoder)
+      license: {name: Apache-2.0, url: https://huggingface.co/SeeSee21/Z-Anime}
+      download:
+        url: https://huggingface.co/SeeSee21/Z-Anime/resolve/0f5fb51464638a2f7328a1d74590281e63e1fde2/text_encoder/qwen_3_4b-fp8.safetensors
+        size: 4022515040
+        sha256: 38a245fc197f16c4025467ef46dce247d076af8f013bb8b1617013beea46d0e4
+    vae:
+      id: ae.safetensors
+      display: Z-Image VAE
+      source: https://huggingface.co/SeeSee21/Z-Anime
+      subdir: vae
+      feature: trial renderer (VAE)
+      license: {name: Apache-2.0, url: https://huggingface.co/SeeSee21/Z-Anime}
+      download:
+        url: https://huggingface.co/SeeSee21/Z-Anime/resolve/0f5fb51464638a2f7328a1d74590281e63e1fde2/vae/ae.safetensors
+        size: 167666902
+        sha256: f5b59a26851551b67ae1fe58d32e76486e1e812def4696a4bea97f16604d40a3

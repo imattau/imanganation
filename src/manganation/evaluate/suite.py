@@ -273,9 +273,11 @@ def _snapshot() -> dict:
             "ipadapter": defaults.ipadapter.model_dump(), "git": _git()}
 
 
-def render_all(suite: Suite, out_dir: Path, *, client=None, log=print) -> None:
+def render_all(suite: Suite, out_dir: Path, *, client=None, log=print,
+               init_dir: Path | None = None, init_denoise: float = 0.45) -> None:
     """Render every case at every seed into ``out_dir`` (skipping images already there,
-    so an interrupted run resumes)."""
+    so an interrupted run resumes). ``init_dir``: another run's renders, each one the
+    starting image of the same case and seed here (a two-stage pipeline)."""
     from manganation.render.panel import _render
     from manganation.script.schema import ReadingOrder
 
@@ -287,9 +289,11 @@ def render_all(suite: Suite, out_dir: Path, *, client=None, log=print) -> None:
             if out.exists():
                 continue
             log(f"rendering {case.id} seed {seed}")
+            init = init_dir / out.name if init_dir is not None else None
             result = _render(specs[case.id], suite.identity, *case.frame,
                              reading_order=ReadingOrder(suite.reading_order), seed=seed,
-                             client=client, out=out, seq=None)
+                             client=client, out=out, seq=None, init=init,
+                             init_denoise=init_denoise)
             for warning in result.warnings:
                 log(f"  warning: {warning}")
 

@@ -226,6 +226,106 @@ def character_prompt(spec: PanelSpec, name: str, tags: list[str],
     return ", ".join(group) or name
 
 
+# Shots as framing instructions: Qwen-Image and Z-Anime read "Shot: close-up." as a
+# passing remark and drew full figures (close-up framing 0% / 12% in the model trial).
+SHOT_PROSE = {
+    "extreme close-up": "Extreme close-up: the face fills the whole frame.",
+    "close-up": "Close-up: the head and shoulders fill the frame.",
+    "reaction shot": "Reaction shot: framed from the chest up, on the face.",
+    "medium shot": "Medium shot: framed from the waist up.",
+    "two-shot": "Two-shot: both characters framed together from the thighs up.",
+    "full shot": "Full shot: the whole body in frame.",
+    "wide shot": "Wide shot: whole figures, small in the frame, with the surroundings "
+                 "around them.",
+    "establishing shot": "Establishing shot: the place fills the frame; any people are "
+                         "small.",
+    "over-the-shoulder": "Over-the-shoulder shot: seen past one character's shoulder.",
+    "over the shoulder": "Over-the-shoulder shot: seen past one character's shoulder.",
+    "low angle": "Low angle: seen from below.",
+    "worm's-eye": "Worm's-eye view: seen from the ground, looking up.",
+    "high angle": "High angle: seen from above.",
+    "bird's-eye": "Bird's-eye view: seen from directly above.",
+    "dutch angle": "Dutch angle: the camera tilted.",
+    "pov": "Point of view shot: seen through a character's eyes.",
+}
+
+
+def shot_prose(camera: str) -> str:
+    low = camera.strip().lower()
+    for shot in sorted(SHOT_PROSE, key=len, reverse=True):
+        if shot in low:
+            return SHOT_PROSE[shot]
+    return f"Shot: {camera.strip()}." if camera.strip() else ""
+
+
+def prose_prompt(spec: PanelSpec, appearances: dict[str, list[str]],
+                 refs: dict[str, int] | None = None) -> str:
+    """A panel in plain English, for models with an LLM text encoder (Qwen-Image,
+    Z-Image): the script's own sentences, each character introduced by name with their
+    look, and (``refs``: name -> image number) a pointer to their reference image."""
+    count = len(spec.characters)
+    who = {0: "no people", 1: "exactly one person", 2: "exactly two people",
+           3: "exactly three people"}.get(count, f"exactly {count} people")
+    parts = ["A full-colour anime illustration for a single manga panel, clean line art "
+             f"and cel shading, showing {who}. No text, no speech bubbles, no panel borders."]
+    if spec.camera:
+        parts.append(shot_prose(spec.camera))
+    place = setting(spec)
+    if place:
+        parts.append(f"Setting: {place}.")
+    for name in spec.characters:
+        tags = appearances.get(name, [])
+        kind = {"1boy": "a boy", "1girl": "a girl"}.get(tags[0].strip() if tags else "",
+                                                       "a person")
+        looks = ", ".join(t for t in tags if not COUNT_TAG.match(t.strip()))
+        # Qwen copied the reference's whole picture (its pose, neutral face and framing)
+        # unless told to take only the identity from it.
+        ref = (f" (take only the face, hair and outfit from <image{refs[name]}>; draw a new "
+               "pose, expression and framing as this panel describes)"
+               if refs and name in refs else "")
+        line = f"{name} is {kind}{ref}" + (f": {looks}." if looks else ".")
+        face = spec.expressions.get(name)
+        parts.append(line + (f" {name}'s expression: {face}." if face else ""))
+    if spec.action:
+        parts.append(f"What happens: {action_text(spec)}")
+    if spec.flashback:
+        parts.append("It is a flashback: soft focus, faded colours.")
+    return " ".join(parts)
+
+
+def trial_files(models: dict, group: str) -> dict[str, str]:
+    """{part: file} for a models.yaml trials group (model, text_encoder, vae)."""
+    entry = models.get("trials", {}).get(group)
+    if not entry:
+        raise RenderError(f"no trial {group!r} in models.yaml "
+                          f"(known: {', '.join(models.get('trials', {})) or 'none'})")
+    return {part: e["id"] for part, e in entry.items()}
+
+
+def _prose_graph(engine: str, spec: PanelSpec, identity: Path, client, models: dict,
+                 width: int, height: int, seed: int, prefix: str, style: dict):
+    """Graph, prompt and references used, for a trial engine (prose prompt)."""
+    names = {n: "" for n in spec.characters}  # appearance only: the action sets the face
+    appearances = character_tags(identity, spec.characters, names)
+    if engine == "qwen_image_21":
+        files = trial_files(models, "qwen_image_21")
+        refs = find_references(identity, spec)
+        uploaded = [client.upload_image(str(path))["name"] for path in refs.values()]
+        prompt = prose_prompt(spec, appearances, {n: i for i, n in enumerate(refs, 1)})
+        graph = graphs.qwen_image21(unet=files["model"], clip=files["text_encoder"],
+                                    vae=files["vae"], prompt=prompt, refs=uploaded,
+                                    width=width, height=height, seed=seed, prefix=prefix)
+        return graph, prompt, ",".join(refs) or None
+    files = trial_files(models, "z_anime")
+    prompt = prose_prompt(spec, appearances)
+    negative = (style.get("negative", "") + ", comic, multiple panels, border, "
+                "speech bubble, extra people" if spec.characters else style.get("negative", ""))
+    graph = graphs.z_image(unet=files["model"], clip=files["text_encoder"], vae=files["vae"],
+                           prompt=prompt, negative=negative, width=width, height=height,
+                           seed=seed, prefix=prefix)
+    return graph, prompt, None
+
+
 # Danbooru angles that hold for an empty background too ("cowboy shot" doesn't).
 ANGLE_TAGS = ("from above", "from below", "dutch angle", "pov", "from behind")
 
@@ -491,8 +591,12 @@ def _render(
     reading_order: ReadingOrder, seed: int | None, client: ComfyClient | None,
     out: Path, seq: int | None, placements: dict[str, Path] | None = None,
     guide: Path | None = None, guide_strength: float | None = None,
+    init: Path | None = None, init_denoise: float = 0.45,
 ) -> RenderResult:
     """Render ``spec`` with characters from ``identity`` (a character registry folder).
+
+    ``init`` starts the SDXL render from an existing image at ``init_denoise`` instead
+    of noise: a second stage that restyles another model's composition.
 
     ``placements`` maps characters to mask images (the artist's placement layers, any
     size with the frame's proportions; white or opaque = this character). They replace
@@ -511,7 +615,10 @@ def _render(
     style = load_style()
     warnings: list[str] = []
     staging = None
-    if settings.defaults.staging.enabled and (spec.action or spec.characters):
+    engine = settings.defaults.renderer.engine
+    if engine != "sdxl":  # trial engines read the script's prose; see _prose_graph
+        pass
+    elif settings.defaults.staging.enabled and (spec.action or spec.characters):
         try:
             staging = stage(spec, setting(spec), settings=settings)
         except Exception as exc:  # noqa: BLE001 - any LLM trouble: the prose still works
@@ -539,8 +646,12 @@ def _render(
                                           else random.randrange(2**32))
     d = settings.defaults.panel
 
+    prefix = f"imanganation_{seq:03d}" if seq else "imanganation_inline"
+    checkpoint = models["checkpoints"]["primary"]["id"]
+    if settings.defaults.renderer.checkpoint:  # an SDXL trial, e.g. illustrious_v2
+        checkpoint = trial_files(models, settings.defaults.renderer.checkpoint)["model"]
     graph = graphs.txt2img(
-        ckpt=models["checkpoints"]["primary"]["id"], prompt=prompt,
+        ckpt=checkpoint, prompt=prompt,
         negative=build_negative(spec, style), width=width, height=height, seed=seed,
         prefix=f"imanganation_{seq:03d}" if seq else "imanganation_inline",
         sampling=graphs.Sampling(d.steps, d.cfg, d.sampler, d.scheduler),
@@ -548,8 +659,13 @@ def _render(
     refs = find_references(identity, spec)
     ref_used: str | None = None
     own_texts: dict[str, str] = {}
+    if engine != "sdxl":
+        graph, prompt, ref_used = _prose_graph(engine, spec, identity, client, models,
+                                               width, height, seed, prefix, style)
     ipa_file, clip_file = ipadapter_files(models, ipa.adapter)
-    if len(refs) == 1 and len(spec.characters) == 1:
+    if engine != "sdxl":
+        pass  # the SDXL reference and region steps below don't apply
+    elif len(refs) == 1 and len(spec.characters) == 1:
         name, ref = next(iter(refs.items()))
         uploaded = client.upload_image(str(ref))
         graph = graphs.with_ipadapter(
@@ -636,6 +752,9 @@ def _render(
     if guide is not None:
         graph = _with_guide(graph, client, settings, models, Path(guide), width, height,
                             guide_strength)
+    if init is not None and engine == "sdxl":
+        graph = graphs.with_init_image(graph, image=client.upload_image(str(init))["name"],
+                                       width=width, height=height, denoise=init_denoise)
 
     blobs = client.run(graph)
     if not blobs:
