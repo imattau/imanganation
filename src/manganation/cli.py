@@ -768,16 +768,22 @@ def eval_compare(
                "scores don't compare: re-score one with `eval score <run> --suite …`."
                "[/yellow]")
     table = Table(title=f"{a.get('label') or before}  ->  {b.get('label') or after}")
-    for col in ("", "Before", "After", "Change"):
+    for col in ("", "Before", "After", "Change", "Noise"):
         table.add_column(col, justify="left" if not col else "right", overflow="fold")
     fmt = lambda v: "-" if v is None else f"{v:.0%}"  # noqa: E731
-    for i, (row, x, y) in enumerate(ev.compare(a, b)):
+    for i, (row, x, y, margin) in enumerate(ev.compare(a, b)):
         is_check = ": " in row and row not in a["summary"]["by_case"]
         if is_check and x == y and not all_rows:
             continue
-        change = "" if x is None or y is None else f"{y - x:+.0%}"
-        colour = "green" if change.startswith("+") and change != "+0%" else (
-            "red" if change.startswith("-") else "")
+        change, colour = "", ""
+        if x is not None and y is not None:
+            change = f"{y - x:+.0%}"
+            if margin is not None and abs(y - x) <= margin:
+                colour = "dim"  # within the noise: not a result
+            elif y != x:
+                colour = "green" if y > x else "red"
         table.add_row(row, fmt(x), fmt(y), f"[{colour}]{change}[/]" if colour else change,
-                      end_section=i == 0)
+                      "" if margin is None else f"±{margin:.0%}", end_section=i == 0)
     rprint(table)
+    rprint("[dim]Grey changes are within the noise (two standard errors): more seeds, or "
+           "don't read anything into them.[/dim]")

@@ -98,6 +98,28 @@ EXAMPLES = [
 ]
 
 
+# Places that settle indoors/outdoors, whatever the LLM says (it has called the
+# school rooftop "indoors").
+OUTDOOR_PLACES = ("rooftop", "pier", "beach", "street", "park", "field", "forest",
+                  "garden", "balcony", "playground", "schoolyard", "shore", "harbor",
+                  "train station", "platform", "bridge", "mountain", "city")
+INDOOR_PLACES = ("classroom", "bedroom", "kitchen", "hallway", "corridor", "stairwell",
+                 "office", "library", "living room", "bathroom", "gym", "cafeteria",
+                 "infirmary", "shop", "restaurant", "train interior")
+
+
+def settle_indoors(place: list[str]) -> list[str]:
+    """Make indoors/outdoors agree with the place named, or drop a contradiction."""
+    outdoor = any(p in t for t in place for p in OUTDOOR_PLACES)
+    indoor = any(p in t for t in place for p in INDOOR_PLACES)
+    rest = [t for t in place if t not in ("indoors", "outdoors")]
+    if outdoor != indoor:  # the place decides
+        return rest + ["outdoors" if outdoor else "indoors"]
+    if "indoors" in place and "outdoors" in place:  # a contradiction helps neither
+        return rest
+    return place
+
+
 @dataclass
 class Staging:
     # name -> {"pose": [...], "expression": [...]}
@@ -139,9 +161,10 @@ def from_answer(data: Any, spec: PanelSpec) -> Staging:
             continue
         characters[name] = {"pose": clean_tags(entry.get("pose"), spec.characters),
                             "expression": clean_tags(entry.get("expression"), spec.characters)}
-    place = clean_tags(data.get("setting"), spec.characters)
-    if "indoors" in place and "outdoors" in place:  # a contradiction helps neither
-        place = [t for t in place if t not in ("indoors", "outdoors")]
+    place = settle_indoors(clean_tags(data.get("setting"), spec.characters))
+    # An interaction the LLM files under one character's pose ("pulling") stays there:
+    # moved to the shared tags it made the pair merge into one figure more often
+    # (docs/quality/2026-10-06_poses_and_noise.md).
     return Staging(characters=characters,
                    shared=clean_tags(data.get("shared"), spec.characters), setting=place)
 
@@ -183,7 +206,9 @@ def stage(spec: PanelSpec, place: str, *, client=None, settings=None,
     hit = folder / f"{cache_key(model, text)}.json"
     if hit.is_file():
         try:
-            return Staging(**json.loads(hit.read_text())["staging"])
+            cached = Staging(**json.loads(hit.read_text())["staging"])
+            cached.setting = settle_indoors(cached.setting)  # entries from before the guard
+            return cached
         except (OSError, ValueError, KeyError, TypeError):
             pass  # a damaged entry is just a miss
     active = client or OllamaClient(settings.llm.base_url, model)

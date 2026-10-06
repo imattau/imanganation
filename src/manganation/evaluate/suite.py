@@ -397,11 +397,47 @@ def contact_sheet(results: list[dict], out_dir: Path, *, thumb: int = 320) -> Pa
     return path
 
 
-def compare(a: dict, b: dict) -> list[tuple[str, float | None, float | None]]:
-    """(row, score in a, score in b) for the overall, kind, case and check scores."""
-    rows = [("overall", a["summary"]["score"], b["summary"]["score"])]
-    for section in ("by_kind", "by_case", "by_check"):
-        sa, sb = a["summary"][section], b["summary"][section]
-        for key in dict.fromkeys([*sa, *sb]):
-            rows.append((key, sa.get(key), sb.get(key)))
+def _margin(xs: list[float], ys: list[float]) -> float | None:
+    """Two standard errors of the difference of two means: a change smaller than this
+    is noise. Any prompt change re-rolls every image, so the samples are unpaired;
+    measured: dropping one word ("daytime") moved a panel's 8-seed score by 7 points."""
+    if len(xs) < 2 or len(ys) < 2:
+        return None
+
+    def var(v: list[float]) -> float:
+        m = sum(v) / len(v)
+        return sum((x - m) ** 2 for x in v) / (len(v) - 1)
+    return 2 * (var(xs) / len(xs) + var(ys) / len(ys)) ** 0.5
+
+
+def _pass_margin(a: list[bool], b: list[bool]) -> float | None:
+    """``_margin`` for a pass rate, smoothed so 3/3 against 2/3 isn't "certain"."""
+    if not a or not b:
+        return None
+    pa, pb = (sum(a) + 1) / (len(a) + 2), (sum(b) + 1) / (len(b) + 2)
+    return 2 * (pa * (1 - pa) / len(a) + pb * (1 - pb) / len(b)) ** 0.5
+
+
+def compare(a: dict, b: dict) -> list[tuple[str, float | None, float | None, float | None]]:
+    """(row, score in a, score in b, noise margin) for the overall, kind, case and check
+    scores. A change within the margin (two standard errors) is noise."""
+    def images(report, case=None):
+        return [r["score"] for r in report["results"] if case in (None, r["case"])]
+
+    def outcomes(report, label, kind=False):
+        return [c["ok"] for r in report["results"] for c in r["checks"]
+                if (c["kind"] == label if kind else f"{r['case']}: {c['label']}" == label)]
+
+    rows = [("overall", a["summary"]["score"], b["summary"]["score"],
+             _margin(images(a), images(b)))]
+    for key in dict.fromkeys([*a["summary"]["by_kind"], *b["summary"]["by_kind"]]):
+        rows.append((key, a["summary"]["by_kind"].get(key), b["summary"]["by_kind"].get(key),
+                     _pass_margin(outcomes(a, key, True), outcomes(b, key, True))))
+    for key in dict.fromkeys([*a["summary"]["by_case"], *b["summary"]["by_case"]]):
+        rows.append((key, a["summary"]["by_case"].get(key), b["summary"]["by_case"].get(key),
+                     _margin(images(a, key), images(b, key))))
+    for key in dict.fromkeys([*a["summary"]["by_check"], *b["summary"]["by_check"]]):
+        rows.append((key, a["summary"]["by_check"].get(key),
+                     b["summary"]["by_check"].get(key),
+                     _pass_margin(outcomes(a, key), outcomes(b, key))))
     return rows

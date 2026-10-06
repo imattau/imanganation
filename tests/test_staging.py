@@ -24,7 +24,7 @@ def test_answer_is_cleaned_to_tags():
                                      "expression": ["grin"]}}
     assert s.pose("Akira") == [] and s.expression("Akira") == []
     assert s.shared == ["bento"]                    # sentences dropped
-    assert s.setting == ["rooftop", "sunset"]       # a contradiction helps neither
+    assert s.setting == ["rooftop", "sunset", "outdoors"]  # the place decides
 
 
 def test_stage_asks_once_then_uses_the_cache(tmp_path):
@@ -45,3 +45,10 @@ def test_stage_asks_once_then_uses_the_cache(tmp_path):
     edited = SPEC.model_copy(update={"action": "Yuki sits beside him."})
     staging.stage(edited, "Roof", client=FakeLLM(), cache=tmp_path)
     assert FakeLLM.calls == 2  # new text, new tags
+
+
+def test_the_place_settles_indoors_or_outdoors():
+    assert staging.settle_indoors(["rooftop", "indoors"]) == ["rooftop", "outdoors"]
+    assert staging.settle_indoors(["stairwell", "outdoors"]) == ["stairwell", "indoors"]
+    assert staging.settle_indoors(["warehouse", "indoors"]) == ["warehouse", "indoors"]
+    assert staging.settle_indoors(["somewhere", "indoors", "outdoors"]) == ["somewhere"]

@@ -60,7 +60,7 @@ panel and IP-Adapter settings and the git commit, so `compare` can tell you what
 name: rooftop
 script: projects/rooftop.imanga/script/script.md   # panels come from the real parser
 identity: projects/_gimp_smoke                     # character registry to render with
-seeds: [101, 202, 303]
+seeds: [101, 202, 303, 404, 505, 606, 707, 808]
 characters:                                        # checked on each one's own figure
   Akira: {tags: ["1boy|male focus", brown hair], forbid: [skirt, twintails]}
   Yuki: {tags: [1girl, twintails], forbid: [pants, brown hair]}
@@ -85,5 +85,8 @@ not what the current renders happen to show.
 - Scores depend on the checks: adding checks to a suite changes every run's total.
   Re-score an older run (`eval score <run> --suite …`) before comparing; `compare`
   warns when two reports were scored with different checks.
-- Three seeds is a small sample. Treat a change of a check or two as noise, and look
-  at the sheet before believing it.
+- **Noise.** Any prompt change re-rolls every image, even at the same seeds: removing
+  one word ("daytime") moved a panel's 8-seed score by 7 points and single checks by
+  25-38. `eval compare` shows a noise margin (two standard errors) per row and greys
+  out changes within it. Use 8 seeds at least, and 24 on the panels a change targets,
+  before believing a few points.

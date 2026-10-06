@@ -114,14 +114,27 @@ def test_score_all_writes_a_report_and_sheet(tmp_path):
     assert report["unknown_tags"] == ["rooftp"]  # a typo can never pass
 
 
-def test_compare_lines_up_two_reports():
-    a = {"summary": {"score": 0.5, "by_kind": {"tag": 0.5}, "by_case": {"sit": 0.5},
-                     "by_check": {"sit: sitting": 0.5}}}
-    b = {"summary": {"score": 0.75, "by_kind": {"tag": 1.0}, "by_case": {"sit": 0.75},
-                     "by_check": {"sit: sitting": 1.0, "sit: new": 0.0}}}
-    rows = ev.compare(a, b)
-    assert rows[0] == ("overall", 0.5, 0.75)
-    assert ("sit: new", None, 0.0) in rows
+def _report(scores_ok: list[list[bool]]) -> dict:
+    results = [{"case": "sit", "score": sum(oks) / len(oks),
+                "checks": [{"label": f"c{i}", "kind": "tag", "ok": ok}
+                           for i, ok in enumerate(oks)]} for oks in scores_ok]
+    return {"results": results, "summary": ev.summarize(results)}
+
+
+def test_compare_lines_up_two_reports_with_a_noise_margin():
+    a = _report([[True, False], [False, False], [True, True]])
+    b = _report([[True, True], [True, False], [True, True]])
+    rows = {row: rest for row, *rest in ev.compare(a, b)}
+    before, after, margin = rows["overall"]
+    assert (before, after) == (0.5, 0.833)
+    assert margin is not None and margin > after - before  # 3 images: it's noise
+    assert rows["sit: c1"][:2] == [0.333, 0.667]  # summaries round to 3 places
+
+
+def test_noise_margin_shrinks_with_more_images():
+    few = ev._margin([0.5, 1.0, 0.75], [0.75, 1.0, 0.5])
+    many = ev._margin([0.5, 1.0, 0.75] * 8, [0.75, 1.0, 0.5] * 8)
+    assert many < few / 2
 
 
 # --- per-figure checks ------------------------------------------------------------
