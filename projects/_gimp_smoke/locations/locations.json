@@ -1,0 +1,33 @@
+{
+  "locations": [
+    {
+      "key": "school rooftop",
+      "name": "School rooftop — late afternoon",
+      "image": "school-rooftop.png",
+      "details": [
+        "rooftop",
+        "late afternoon",
+        "chain-link fence",
+        "outdoors",
+        "daytime"
+      ],
+      "prompt": "A full-colour anime background illustration for a manga: an establishing view of School rooftop — late afternoon, with rooftop, late afternoon, chain-link fence, daytime. An outdoor scene seen at eye level, wide enough to show the whole place and its surroundings. No people, no characters, no text. Clean line art and cel-shaded colour, detailed background art.",
+      "seed": 7,
+      "created_at": "2026-10-06T18:44:24+00:00"
+    },
+    {
+      "key": "stairwell",
+      "name": "the stairwell",
+      "image": "stairwell.png",
+      "details": [
+        "stairs",
+        "stairwell",
+        "concrete walls",
+        "indoors"
+      ],
+      "prompt": "A full-colour anime background illustration for a manga: an establishing view of the stairwell, with stairs, stairwell, concrete walls. An interior seen at eye level, wide enough to show the whole place and its surroundings. No people, no characters, no text. Clean line art and cel-shaded colour, detailed background art.",
+      "seed": 7,
+      "created_at": "2026-10-06T18:44:53+00:00"
+    }
+  ]
+}

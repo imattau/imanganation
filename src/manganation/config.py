@@ -174,6 +174,9 @@ class RendererDefaults(BaseModel):
 
     engine: Literal["sdxl", "qwen_image_21", "z_anime"] = "sdxl"
     checkpoint: str = ""
+    # Qwen-Image: the location reference's share of a character reference's pixels.
+    # At full size (1.0) it pulled a lone boy toward female; see 2026-10-07_locations.md.
+    location_scale: float = 0.25
 
 
 class FacePassDefaults(BaseModel):

@@ -35,7 +35,8 @@ def test_prose_prompt_introduces_each_character_and_keeps_the_script():
                      action="Medium shot. Yuki drags Akira by the wrist down the stairs.")
     looks = {"Yuki": ["1girl", "white hair"], "Akira": ["1boy", "brown hair"]}
     text = prose_prompt(spec, looks, {"Yuki": 1, "Akira": 2})
-    assert "exactly two people" in text and "Setting: the stairwell." in text
+    assert "showing exactly two people: a girl and a boy." in text
+    assert "Setting: the stairwell." in text
     assert "Medium shot: framed from the waist up." in text
     assert "Yuki is a girl (take only the face, hair and outfit from <image1>" in text
     assert ": white hair." in text

@@ -60,3 +60,6 @@ dist/
 
 # Engine caches (e.g. LLM panel staging, render/staging.py)
 cache/
+
+# Location reference images (the manifest locations.json is tracked)
+projects/*/locations/*.png

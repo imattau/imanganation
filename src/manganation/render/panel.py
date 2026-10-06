@@ -259,19 +259,32 @@ def shot_prose(camera: str) -> str:
 
 
 def prose_prompt(spec: PanelSpec, appearances: dict[str, list[str]],
-                 refs: dict[str, int] | None = None) -> str:
+                 refs: dict[str, int] | None = None, location_ref: int | None = None,
+                 ) -> str:
     """A panel in plain English, for models with an LLM text encoder (Qwen-Image,
     Z-Image): the script's own sentences, each character introduced by name with their
     look, and (``refs``: name -> image number) a pointer to their reference image."""
     count = len(spec.characters)
     who = {0: "no people", 1: "exactly one person", 2: "exactly two people",
            3: "exactly three people"}.get(count, f"exactly {count} people")
+    # Who they are, up front: with a location image to follow as well, Qwen let a lone
+    # boy drift female when "a boy" came only in his own sentence.
+    kinds = [{"1boy": "a boy", "1girl": "a girl"}.get(
+        (appearances.get(n) or [""])[0].strip(), "") for n in spec.characters]
+    if count and all(kinds):
+        who += ": " + (kinds[0] if count == 1 else ", ".join(kinds[:-1]) + " and "
+                       + kinds[-1])
     parts = ["A full-colour anime illustration for a single manga panel, clean line art "
              f"and cel shading, showing {who}. No text, no speech bubbles, no panel borders."]
     if spec.camera:
         parts.append(shot_prose(spec.camera))
     place = setting(spec)
-    if place:
+    if place and location_ref is not None:
+        # locations.py: the place's establishing view, so every panel there matches
+        parts.append(f"Setting: {place}, exactly the place shown in <image{location_ref}> "
+                     "(keep its layout, materials, colours and light; frame it as this "
+                     "panel's shot describes).")
+    elif place:
         parts.append(f"Setting: {place}.")
     for name in spec.characters:
         tags = appearances.get(name, [])
@@ -303,18 +316,46 @@ def trial_files(models: dict, group: str) -> dict[str, str]:
 
 
 def _prose_graph(engine: str, spec: PanelSpec, identity: Path, client, models: dict,
-                 width: int, height: int, seed: int, prefix: str, style: dict):
+                 width: int, height: int, seed: int, prefix: str, style: dict,
+                 settings=None):
     """Graph, prompt and references used, for a trial engine (prose prompt)."""
+    settings = settings or load_settings()
     names = {n: "" for n in spec.characters}  # appearance only: the action sets the face
     appearances = character_tags(identity, spec.characters, names)
     if engine == "qwen_image_21":
         files = trial_files(models, "qwen_image_21")
         refs = find_references(identity, spec)
         uploaded = [client.upload_image(str(path))["name"] for path in refs.values()]
-        prompt = prose_prompt(spec, appearances, {n: i for i, n in enumerate(refs, 1)})
+        from manganation.locations import LocationRegistry
+
+        place_ref = LocationRegistry.from_path(identity).reference_path(setting(spec))
+        location_ref = None
+        resolution = 1024
+        if place_ref is not None:
+            scale = settings.defaults.renderer.location_scale
+            if scale != 1.0:
+                import tempfile
+
+                from PIL import Image
+
+                # every reference at its own size, the location's shrunk
+                resolution = 0
+                with Image.open(place_ref) as im, tempfile.TemporaryDirectory() as tmp:
+                    side = (scale ** 0.5) * (1024 * 1024 / (im.width * im.height)) ** 0.5
+                    small = Path(tmp) / f"location-{place_ref.stem}.png"
+                    im.convert("RGB").resize((max(32, round(im.width * side)),
+                                              max(32, round(im.height * side))),
+                                             Image.LANCZOS).save(small)
+                    uploaded.append(client.upload_image(str(small))["name"])
+            else:
+                uploaded.append(client.upload_image(str(place_ref))["name"])
+            location_ref = len(uploaded)
+        prompt = prose_prompt(spec, appearances, {n: i for i, n in enumerate(refs, 1)},
+                              location_ref)
         graph = graphs.qwen_image21(unet=files["model"], clip=files["text_encoder"],
                                     vae=files["vae"], prompt=prompt, refs=uploaded,
-                                    width=width, height=height, seed=seed, prefix=prefix)
+                                    width=width, height=height, seed=seed, prefix=prefix,
+                                    resolution=resolution)
         return graph, prompt, ",".join(refs) or None
     files = trial_files(models, "z_anime")
     prompt = prose_prompt(spec, appearances)
@@ -661,7 +702,8 @@ def _render(
     own_texts: dict[str, str] = {}
     if engine != "sdxl":
         graph, prompt, ref_used = _prose_graph(engine, spec, identity, client, models,
-                                               width, height, seed, prefix, style)
+                                               width, height, seed, prefix, style,
+                                               settings)
     ipa_file, clip_file = ipadapter_files(models, ipa.adapter)
     if engine != "sdxl":
         pass  # the SDXL reference and region steps below don't apply

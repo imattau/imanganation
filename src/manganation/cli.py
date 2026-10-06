@@ -21,6 +21,8 @@ app.add_typer(character_app, name="character")
 project_app = typer.Typer(help="Project container commands (docs/project-container.md).")
 app.add_typer(project_app, name="project")
 eval_app = typer.Typer(help="Render-accuracy evaluation (docs/eval.md).")
+location_app = typer.Typer(help="Location references (locations.py).")
+app.add_typer(location_app, name="location")
 app.add_typer(eval_app, name="eval")
 
 
@@ -683,6 +685,9 @@ def _print_report(report: dict) -> None:
                       ", ".join(f"{k} ({n})" for k, n in fails.items()))
     rprint(table)
     rprint("By kind: " + ", ".join(f"{k} {v:.0%}" for k, v in summary["by_kind"].items()))
+    if summary.get("continuity"):
+        rprint("Continuity (same place, same look; 0-1): " + ", ".join(
+            f"{k} {v:.2f}" for k, v in summary["continuity"].items()))
     if report["unknown_tags"]:
         rprint(f"[yellow]Not tags the tagger knows (fix the suite):[/yellow] "
                f"{', '.join(report['unknown_tags'])}")
@@ -776,7 +781,8 @@ def eval_compare(
         table.add_column(col, justify="left" if not col else "right", overflow="fold")
     fmt = lambda v: "-" if v is None else f"{v:.0%}"  # noqa: E731
     for i, (row, x, y, margin) in enumerate(ev.compare(a, b)):
-        is_check = ": " in row and row not in a["summary"]["by_case"]
+        is_check = (": " in row and row not in a["summary"]["by_case"]
+                    and not row.startswith("continuity: "))
         if is_check and x == y and not all_rows:
             continue
         change, colour = "", ""
@@ -791,3 +797,30 @@ def eval_compare(
     rprint(table)
     rprint("[dim]Grey changes are within the noise (two standard errors): more seeds, or "
            "don't read anything into them.[/dim]")
+
+
+# --- locations --------------------------------------------------------------------
+
+
+@location_app.command("design")
+def location_design(
+    identity: Path = typer.Argument(..., help="Identity folder (the character registry)."),
+    script: Path = typer.Argument(..., help="The script whose locations to design."),
+    force: bool = typer.Option(False, "--force", help="Redesign locations that exist."),
+    seed: int = typer.Option(7, "--seed"),
+) -> None:
+    """Design a reference image for every location the script uses (Qwen-Image 2.1)."""
+    from manganation import locations as lc
+    from manganation.script.formats.canonical import parse
+    from manganation.script.schema import PanelSpec
+
+    fields = set(PanelSpec.model_fields)
+    panels = [PanelSpec(**{k: v for k, v in p.items() if k in fields})
+              for p in parse(script.read_text())["panels"]]
+    registry = lc.LocationRegistry.from_path(identity)
+    for key, found in lc.gather(panels).items():
+        if key in registry.locations and not force:
+            rprint(f"{key}: exists ({registry.locations[key].image})")
+            continue
+        loc = lc.design(identity, key, found["name"], found["details"], seed=seed)
+        rprint(f"{key}: {registry.root / loc.image}  ({', '.join(loc.details)})")

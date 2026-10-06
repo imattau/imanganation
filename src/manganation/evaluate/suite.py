@@ -249,6 +249,77 @@ def unknown_tags(suite: Suite, vocabulary: set[str]) -> list[str]:
     return sorted(wanted - vocabulary)
 
 
+# --- continuity: do panels set in one place look like one place? -----------------
+
+# Words of tags that describe the surroundings (matched whole, so "hair" never counts).
+BACKGROUND_WORDS = {"sky", "cloud", "sunset", "sunrise", "evening", "night", "day",
+                    "twilight", "fence", "railing", "building", "city", "cityscape",
+                    "rooftop", "roof", "stairs", "staircase", "wall", "window", "door",
+                    "floor", "ceiling", "tree", "outdoors", "indoors", "horizon",
+                    "scenery", "lamp", "hallway", "classroom", "skyscraper"}
+
+
+def background_tags(probs: dict[str, float], floor: float = 0.05) -> dict[str, float]:
+    return {t: round(p, 3) for t, p in probs.items()
+            if p >= floor and BACKGROUND_WORDS & set(t.replace("-", " ").split())}
+
+
+def palette(image: Path, boxes: list[list[int]], bins: tuple[int, int, int] = (8, 3, 3),
+            ) -> list[float]:
+    """Hue/saturation/value histogram of everything outside the people's boxes."""
+    from PIL import Image
+
+    with Image.open(image) as im:
+        im = im.convert("RGB")
+        scale = 128 / max(im.size)
+        small = im.resize((max(1, round(im.width * scale)), max(1, round(im.height * scale))))
+    hsv = small.convert("HSV")
+    keep = [[True] * small.width for _ in range(small.height)]
+    for x0, y0, x1, y1 in boxes:
+        for y in range(max(0, int(y0 * scale)), min(small.height, int(y1 * scale) + 1)):
+            for x in range(max(0, int(x0 * scale)), min(small.width, int(x1 * scale) + 1)):
+                keep[y][x] = False
+    hist = [0.0] * (bins[0] * bins[1] * bins[2])
+    for y in range(small.height):
+        for x in range(small.width):
+            if keep[y][x]:
+                h, sat, v = hsv.getpixel((x, y))
+                i = (h * bins[0] // 256) * bins[1] * bins[2] + (sat * bins[1] // 256) * \
+                    bins[2] + v * bins[2] // 256
+                hist[i] += 1
+    total = sum(hist) or 1.0
+    return [round(c / total, 4) for c in hist]
+
+
+def _cosine(a: dict[str, float], b: dict[str, float]) -> float:
+    dot = sum(v * b.get(k, 0.0) for k, v in a.items())
+    na = sum(v * v for v in a.values()) ** 0.5
+    nb = sum(v * v for v in b.values()) ** 0.5
+    return dot / (na * nb) if na and nb else 0.0
+
+
+def background_similarity(a: dict, b: dict) -> float:
+    """Mean of tag cosine and palette overlap (histogram intersection), 0..1."""
+    overlap = sum(min(x, y) for x, y in zip(a["palette"], b["palette"], strict=True))
+    return (_cosine(a["background"], b["background"]) + overlap) / 2
+
+
+def continuity(results: list[dict], locations: dict[str, str]) -> dict[str, list[float]]:
+    """Location -> one score per seed: the mean background similarity of every pair of
+    panels set there (from different cases) at that seed."""
+    out: dict[str, list[float]] = {}
+    seeds = sorted({r["seed"] for r in results})
+    for place in sorted(set(locations.values())):
+        for seed in seeds:
+            group = [r for r in results if r["seed"] == seed
+                     and locations.get(r["case"]) == place and "palette" in r]
+            pairs = [(a, b) for i, a in enumerate(group) for b in group[i + 1:]]
+            if pairs:
+                out.setdefault(place, []).append(round(sum(
+                    background_similarity(a, b) for a, b in pairs) / len(pairs), 4))
+    return out
+
+
 # --- running ------------------------------------------------------------------
 
 
@@ -321,9 +392,14 @@ def score_all(suite: Suite, out_dir: Path, tagger, *, label: str = "",
                                               tagger, detector)
                 checks += more
             top = sorted(probs.items(), key=lambda kv: -kv[1])[:30]
+            boxes = [f["box"] for f in figures]
+            if detector is not None and not boxes:
+                boxes = [[round(b.x0), round(b.y0), round(b.x1), round(b.y1)]
+                         for b in detector.figures(image)]
             results.append({
                 "case": case.id, "seed": seed, "image": image.name, "prompt": prompt,
                 "checks": checks, "figures": figures,
+                "background": background_tags(probs), "palette": palette(image, boxes),
                 "score": sum(c["ok"] for c in checks) / len(checks) if checks else 1.0,
                 "top_tags": {t: round(p, 3) for t, p in top if p >= 0.2}})
     report = {"suite": suite.name, "suite_path": str(suite.path), "label": label,
@@ -332,6 +408,14 @@ def score_all(suite: Suite, out_dir: Path, tagger, *, label: str = "",
               "unknown_tags": unknown_tags(suite, tagger.vocabulary),
               "config": snapshot if snapshot is not None else _snapshot(),
               "results": results, "summary": summarize(results)}
+    from manganation.locations import location_key
+    from manganation.render.panel import setting
+
+    places = {cid: location_key(setting(spec)) for cid, spec in specs.items()}
+    by_seed = continuity(results, places)
+    report["summary"]["continuity_by_seed"] = by_seed
+    report["summary"]["continuity"] = {
+        place: round(sum(v) / len(v), 3) for place, v in by_seed.items()}
     (out_dir / "report.json").write_text(json.dumps(report, indent=2, ensure_ascii=False))
     contact_sheet(results, out_dir)
     return report
@@ -440,6 +524,11 @@ def compare(a: dict, b: dict) -> list[tuple[str, float | None, float | None, flo
     for key in dict.fromkeys([*a["summary"]["by_case"], *b["summary"]["by_case"]]):
         rows.append((key, a["summary"]["by_case"].get(key), b["summary"]["by_case"].get(key),
                      _margin(images(a, key), images(b, key))))
+    ca, cb = (r["summary"].get("continuity_by_seed", {}) for r in (a, b))
+    for place in dict.fromkeys([*ca, *cb]):
+        xs, ys = ca.get(place, []), cb.get(place, [])
+        rows.append((f"continuity: {place}", sum(xs) / len(xs) if xs else None,
+                     sum(ys) / len(ys) if ys else None, _margin(xs, ys)))
     for key in dict.fromkeys([*a["summary"]["by_check"], *b["summary"]["by_check"]]):
         rows.append((key, a["summary"]["by_check"].get(key),
                      b["summary"]["by_check"].get(key),
