@@ -154,6 +154,18 @@ class StagingDefaults(BaseModel):
     enabled: bool = True
 
 
+class LayeredDefaults(BaseModel):
+    """Multi-character panels painted in layers (prototype, off: measured below the
+    one-pass render; docs/quality/2026-10-06_layered.md). "per_character": the
+    background without people first, then one inpaint pass per character with only
+    their own prompt and reference active."""
+
+    mode: Literal["off", "per_character"] = "off"
+    # How much of the plate the character passes repaint inside their areas. 1.0
+    # redraws the whole box, background too, and left box-shaped seams.
+    denoise: float = 0.85
+
+
 class Defaults(BaseModel):
     color_mode: str = "color"  # recorded only; engine renders colour (docs/color-policy.md)
     reading_order: str = "rtl"
@@ -164,6 +176,7 @@ class Defaults(BaseModel):
     inpaint: InpaintDefaults = InpaintDefaults()
     controlnet: ControlNetDefaults = ControlNetDefaults()
     staging: StagingDefaults = StagingDefaults()
+    layered: LayeredDefaults = LayeredDefaults()
 
 
 class Settings(BaseModel):

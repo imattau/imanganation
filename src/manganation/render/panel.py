@@ -226,6 +226,26 @@ def character_prompt(spec: PanelSpec, name: str, tags: list[str],
     return ", ".join(group) or name
 
 
+# Danbooru angles that hold for an empty background too ("cowboy shot" doesn't).
+ANGLE_TAGS = ("from above", "from below", "dutch angle", "pov", "from behind")
+
+
+def background_prompt(spec: PanelSpec, style: dict, staging: Staging | None) -> str:
+    """The panel's place without anyone in it (a layered render's plate)."""
+    place = ", ".join(staging.setting) if staging is not None and staging.setting \
+        else setting(spec)
+    shot = shot_tags(spec.camera)
+    angles = [a for a in ANGLE_TAGS if a in shot]
+    parts = [style.get("prompt_prefix", "").strip().rstrip(","), "no humans", "scenery",
+             place, *angles]
+    return ", ".join(p.strip() for p in parts if p and p.strip())
+
+
+def background_negative(style: dict) -> str:
+    return (style.get("negative", "") + ", 1girl, 1boy, people, person, crowd, "
+            "multiple girls, multiple boys")
+
+
 def build_negative(spec: PanelSpec, style: dict) -> str:
     negative = style.get("negative", "")
     if len(spec.characters) == 1:
@@ -510,8 +530,9 @@ def _render(
         log.warning("%s (identity %s)", warning, identity)
     ipa = settings.defaults.ipadapter
     width, height = fit_resolution(frame_w, frame_h)
+    layered = settings.defaults.layered.mode if len(spec.characters) > 1 else "off"
     masked = len(spec.characters) > 1 and (
-        ipa.regional_prompts == "always"
+        ipa.regional_prompts == "always" or layered != "off"
         or (ipa.regional_prompts == "wide" and width > height))
     prompt = build_prompt(spec, style, tags_by_char, staging, characters=not masked)
     seed = seed if seed is not None else (spec.seed if spec.seed is not None
@@ -584,6 +605,33 @@ def _render(
                 force_regional=True,
             )
             ref_used = ",".join(n for n in spec.characters if n in refs)
+        areas = [{k: own[k] for k in ("mask", "canvas_w", "canvas_h", "feather",
+                                      "mask_image") if k in own} for own in own_prompts]
+        if layered == "per_character":
+            # One pass each: the character as a solo panel, painted in their own area.
+            passes = []
+            for name, area in zip(spec.characters, areas, strict=True):
+                alone = spec.model_copy(update={
+                    "characters": [name],
+                    "expressions": {n: f for n, f in spec.expressions.items() if n == name}})
+                text = build_prompt(alone, style, {name: tags_by_char.get(name, [])},
+                                    staging)
+                ref = next((e["image"] for e, n in zip(
+                    references, [c for c in spec.characters if c in refs], strict=True)
+                    if n == name), None)
+                passes.append({**area, "prompt": text, "ref": ref,
+                               "weight": ipa.weight_single})
+                own_texts[name] = text
+            graph = graphs.layered_per_character(
+                ckpt=models["checkpoints"]["primary"]["id"],
+                background=background_prompt(spec, style, staging),
+                background_negative=background_negative(style),
+                negative=build_negative(spec.model_copy(update={"characters": ["x"]}), style),
+                width=width, height=height, seed=seed,
+                prefix=f"imanganation_{seq:03d}" if seq else "imanganation_inline",
+                passes=passes, ipadapter=ipa_file, clip_vision=clip_file,
+                sampling=graphs.Sampling(d.steps, d.cfg, d.sampler, d.scheduler),
+                denoise=settings.defaults.layered.denoise)
 
     if guide is not None:
         graph = _with_guide(graph, client, settings, models, Path(guide), width, height,

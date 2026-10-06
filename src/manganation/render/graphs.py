@@ -602,3 +602,77 @@ def upscale_refine(
         "inputs": {"filename_prefix": prefix, "images": ["22", 0]},
     }
     return graph
+
+
+# --- layered renders: background plate first, characters painted into it -------------
+#
+# Two-shots split into two pictures because each character's region was drawn as a
+# picture of its own, background included. With the background rendered first and
+# fixed, the characters are painted into one scene. Everything stays in latent space
+# (one decode at the end), so the plate isn't redrawn by VAE round trips.
+# Prototype, off by default: docs/quality/2026-10-06_layered.md.
+
+
+def layered_per_character(
+    *, ckpt: str, background: str, background_negative: str, negative: str,
+    width: int, height: int, seed: int, prefix: str, passes: list[dict],
+    ipadapter: str | None = None, clip_vision: str | None = None,
+    sampling: Sampling = Sampling(), denoise: float = 1.0,
+) -> dict:
+    """Background plate, then one inpaint pass per character, in order.
+
+    Each pass is ``{"prompt", "ref" (uploaded reference or None), "weight"}`` plus the
+    mask fields of ``_soft_mask``: only that character's prompt and reference are
+    active, painting only inside their mask, so nothing of theirs can land on anyone
+    else. A later character sees the earlier ones (they're in the latent already)."""
+    graph: dict = {
+        "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": ckpt}},
+        "3": {"class_type": "CLIPTextEncode", "inputs": {"text": negative, "clip": ["1", 1]}},
+        "4": {"class_type": "EmptyLatentImage",
+              "inputs": {"width": width, "height": height, "batch_size": 1}},
+        "bg_pos": {"class_type": "CLIPTextEncode",
+                   "inputs": {"text": background, "clip": ["1", 1]}},
+        "bg_neg": {"class_type": "CLIPTextEncode",
+                   "inputs": {"text": background_negative, "clip": ["1", 1]}},
+    }
+
+    def sampler(model, positive, latent, step_seed, strength=1.0):
+        return {"class_type": "KSampler",
+                "inputs": {"seed": step_seed, "steps": sampling.steps, "cfg": sampling.cfg,
+                           "sampler_name": sampling.sampler,
+                           "scheduler": sampling.scheduler, "denoise": strength,
+                           "model": model, "positive": positive, "negative": ["3", 0],
+                           "latent_image": latent}}
+
+    graph["bg_sampler"] = sampler(["1", 0], ["bg_pos", 0], ["4", 0], seed)
+    graph["bg_sampler"]["inputs"]["negative"] = ["bg_neg", 0]
+    latent = ["bg_sampler", 0]
+    if ipadapter and any(p.get("ref") for p in passes):
+        graph["ipa_loader"] = {"class_type": "IPAdapterModelLoader",
+                               "inputs": {"ipadapter_file": ipadapter}}
+        graph["ipa_vision"] = {"class_type": "CLIPVisionLoader",
+                               "inputs": {"clip_name": clip_vision}}
+    for i, p in enumerate(passes):
+        pos, noise, ks = f"c{i}_pos", f"c{i}_noise", f"c{i}_sampler"
+        graph[pos] = {"class_type": "CLIPTextEncode",
+                      "inputs": {"text": p["prompt"], "clip": ["1", 1]}}
+        mask = _soft_mask(graph, p, f"c{i}_mask")
+        graph[noise] = {"class_type": "SetLatentNoiseMask",
+                        "inputs": {"samples": latent, "mask": [mask, 0]}}
+        model = ["1", 0]
+        if p.get("ref") and ipadapter:
+            graph[f"c{i}_ref"] = {"class_type": "LoadImage", "inputs": {"image": p["ref"]}}
+            graph[f"c{i}_ipa"] = {
+                "class_type": "IPAdapterAdvanced",
+                "inputs": {"model": ["1", 0], "ipadapter": ["ipa_loader", 0],
+                           "image": [f"c{i}_ref", 0], "clip_vision": ["ipa_vision", 0],
+                           "weight": p.get("weight", 0.45), "weight_type": "linear",
+                           "combine_embeds": "concat", "start_at": 0.0, "end_at": 1.0,
+                           "embeds_scaling": "V only", "attn_mask": [mask, 0]}}
+            model = [f"c{i}_ipa", 0]
+        graph[ks] = sampler(model, [pos, 0], [noise, 0], seed + 1 + i, denoise)
+        latent = [ks, 0]
+    graph["6"] = {"class_type": "VAEDecode", "inputs": {"samples": latent, "vae": ["1", 2]}}
+    graph["7"] = {"class_type": "SaveImage", "inputs": {"filename_prefix": prefix,
+                                                        "images": ["6", 0]}}
+    return graph
