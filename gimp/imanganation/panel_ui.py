@@ -380,13 +380,22 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
         inspector_rows.append("# Page layout")
         if not availability["available"]:
             inspector_rows.append(f"Layout status\t{availability['reason']}")
+        elif availability.get("cover"):
+            inspector_rows.append(
+                f"Layout status\t{availability['cover']} cover · "
+                f"{len(availability['combinations'])} guide layouts")
+            inspector_rows.append(
+                "Layout note\tColored safe-area and typography guides; hide before export")
+            if generate_layout_action:
+                inspector_rows.append(f"!{generate_layout_action}\tChoose cover layout…")
         else:
             script_panel_count = availability["panel_count"]
             option_count = len(availability["combinations"])
             inspector_rows.append(
                 f"Layout status\t{script_panel_count} script panels · "
                 f"{option_count} preview choices")
-            inspector_rows.append("Layout note\tCreates frame lines only; panels render separately")
+            inspector_rows.append(
+                "Layout note\tCyan borderless guides; overlapping panels layer above frame ink")
             if generate_layout_action:
                 inspector_rows.append(f"!{generate_layout_action}\tChoose layout…")
         if open_page_action:

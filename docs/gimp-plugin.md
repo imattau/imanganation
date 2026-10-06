@@ -69,9 +69,10 @@ and a character's aliases and notes are fields. Enter or leaving a field saves i
 (case-insensitive, aliases too), and a new name joins the cast, so a parser miss such as
 a missing character is fixed in place, then regenerated. **Open page** opens the page a
 panel is placed on.
-With a page selected, Context reports the matching script-panel count and available
-layouts, then offers **Generate layout** when a built-in frame count matches. That
-action opens the selected page and layout picker in one step.
+With a numbered page selected, Context reports the matching script-panel count and
+available layouts, then offers **Generate layout** when a built-in frame count matches.
+Pages named **Cover**, **Front Cover**, or **Back Cover** instead offer cover-composition
+guides. The action opens the selected page and layout picker in one step.
 **New project from script…** (Context, before a project is open, or *Filters →
 imanganation*) builds a project from a script file: panels, the cast (with the script's
 `[CHARACTERS]` descriptions as their notes), locations from scene headings, and one page
@@ -135,8 +136,13 @@ the top-level *Imanganation* menu:
 - **Generate Page Panel Layout…**: on an open project page, chooses among built-in
   layouts with exactly the number of non-orphaned script panels matching the number in
   the page label, then lets the artist choose Fine ink, Classic ink, Bold ink, Slanted
-  frames, or Double rule treatment. Adds transparent frame-line art as a selectable
-  `Template` layer and preserves the other page layers. It does not render or place panels.
+  frames, or Double rule treatment. Layouts include regular grids, cinematic beats,
+  overlapping insets and borderless overlays. Cyan guides mark borderless regions for
+  selection; rendered overlay panels sit above and clear the base frame ink, while their
+  own frame ink stays in the foreground. Pages named **Cover**, **Front Cover**, or
+  **Back Cover** offer colored safe-area, title, art, credits, blurb, issue-mark, or
+  barcode guides instead. Cover guides do not create panels and should be hidden before
+  export. All generated layers are editable and existing page artwork is preserved.
 - **Regenerate Panel…**: select a placed panel (its layer or group). It is re-rendered
   from the **current** `panels.json`, so script edits apply, at its frame's size. The
   new take (`003_take02.png`…) goes into the same group, cover-fitted to the frame
@@ -297,8 +303,8 @@ GIMP (flatpak)                         host
 
 Each one is a PDB procedure, so you can also script it from Python-Fu or batch mode.
 
-Only **Generate Page Panel Layout** creates frame borders; page creation and composition
-remain artist-directed.
+**Generate Page Panel Layout** creates page frames or cover guides; page creation,
+composition, and final cover typography remain artist-directed.
 
 1. **Render Panel into Frame** ✅ (built).
 2. **Place Next Panel** ✅ (built).

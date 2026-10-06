@@ -8,9 +8,9 @@ imanganation engine (``manganation serve``); the plug-in is a thin HTTP client.
 Workflow: the artist builds every page in GIMP — by hand or from an imanganation
 panel layout template. They click into a frame (Fuzzy Select on the template),
 run "Render Panel into Frame", and the engine renders the next script panel at
-that frame's proportions; the plug-in drops it in, clipped to the frame, below the
-template's frame lines. Then the next frame, and so on. Generated layouts provide
-editable frame borders only; panel generation and page composition remain artist-led.
+that frame's proportions. Regular panels sit below the frame template; overlapping
+and borderless panels sit above it so they cover the underlying frame ink. Cover
+layouts are colored safe-area and typography guides, not script panels.
 
 Panels are identified by their 1-based position in the script (``seq``), not
 page/panel, because scripts can repeat panel numbers within a page (e.g. after
@@ -18,11 +18,11 @@ page/panel, because scripts can repeat panel numbers within a page (e.g. after
 inline form (project id + panel object); a legacy folder through ``panels.json`` +
 ``seq``, with images at ``panels/{seq:03d}*.png``.
 
-Template convention: a layer whose name starts with "template" holds the frame
-lines. New panels go directly beneath it (a Normal-mode template is switched to
-Multiply so its white areas let panels show through), and it is re-selected after
-each placement so the next Fuzzy Select click samples the frames, not the last
-render.
+Template convention: a layer whose name starts with "template" holds selectable
+frame lines/guides. Normal panels go directly beneath it (a Normal-mode template is
+switched to Multiply); overlay panels are inserted above it but below foreground
+frame ink. The template is re-selected after each placement so the next Fuzzy Select
+click samples the frames, not the last render.
 """
 
 import json
@@ -154,6 +154,7 @@ DOCK_ITEMS = {
 }
 REF_MAX = 1024  # reference export cap; the CLIP encoder only sees 224-448 px anyway
 PARASITE = "imanganation-panelspec"
+LAYOUT_PARASITE = "imanganation-layout"
 PROJECT_PARASITE = "imanganation-project"
 PANEL_PARASITE = "imanganation-panel"
 TAKE_PARASITE = "imanganation-take"
@@ -234,6 +235,25 @@ def _dialog(procedure, config, name):
 
 
 def _find_template(image):
+    def layout_template(layers):
+        for layer in layers:
+            parasite = layer.get_parasite(LAYOUT_PARASITE)
+            if parasite is not None:
+                try:
+                    if json.loads(bytes(parasite.get_data())).get("role") == "selection-template":
+                        return layer
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    pass
+            if layer.is_group():
+                found = layout_template(layer.get_children())
+                if found:
+                    return found
+        return None
+
+    generated = layout_template(image.get_layers())
+    if generated is not None:
+        return generated
+
     def walk(layers):
         for layer in layers:
             if layer.get_name().lower().startswith("template"):
@@ -281,6 +301,59 @@ def _find_panel_group(image, reference, empty_only=False):
     return walk(image.get_layers())
 
 
+def _layout_overlay_for_panel(template, take_ref, seq):
+    """Find the saved overlapping/borderless region for this script panel."""
+    parasite = template.get_parasite(LAYOUT_PARASITE) if template is not None else None
+    if parasite is None:
+        return None
+    try:
+        data = json.loads(bytes(parasite.get_data()))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    panel_id = (take_ref or {}).get("panel")
+    for entry in data.get("overlays", []):
+        if panel_id and entry.get("panel_id") == panel_id:
+            return entry
+        if seq is not None and entry.get("sequence") == seq:
+            return entry
+    return None
+
+
+def _clear_layout_region(image, template, region):
+    """Remove base frame/guide ink underneath an overlay; its own ink is foreground."""
+    if not region or template is None:
+        return
+    width, height = image.get_width(), image.get_height()
+    x, y, w, h = region
+    x1, y1, x2, y2 = x * width, y * height, (x + w) * width, (y + h) * height
+    selection = Gimp.Selection.save(image)
+    try:
+        image.select_polygon(Gimp.ChannelOps.REPLACE,
+                             [x1, y1, x2, y1, x2, y2, x1, y2])
+        template.edit_clear()
+    finally:
+        image.select_item(Gimp.ChannelOps.REPLACE, selection)
+        image.remove_channel(selection)
+
+
+def _overlay_layer_position(image, template):
+    """Immediately below layout ink, so each later overlay stacks over earlier ones."""
+    parent = template.get_parent()
+    def walk(layers):
+        for layer in layers:
+            if (layer.get_name().startswith("Imanganation Layout Ink -")
+                    and layer.get_parent() == parent):
+                return layer
+            if layer.is_group():
+                found = walk(layer.get_children())
+                if found is not None:
+                    return found
+        return None
+    ink = walk(image.get_layers())
+    return (image.get_item_position(ink) + 1 if ink is not None
+            else image.get_item_position(template))
+
+
 def _place(image, panel_file, spec, seq=None, render=None, take_ref=None, frame=None):
     """Load a panel as a layer in its own group, fitted to the selection if any."""
     label = f"Panel {spec.get('page', '?')}.{spec.get('panel', '?')}"
@@ -291,6 +364,7 @@ def _place(image, panel_file, spec, seq=None, render=None, take_ref=None, frame=
 
     # Reuse a previously defined empty semantic panel group, if present.
     template = _find_template(image)
+    overlay = _layout_overlay_for_panel(template, take_ref, seq)
     group = _find_panel_group(image, take_ref, empty_only=True)
     if group is None:
         group = Gimp.GroupLayer.new(image, label)
@@ -300,10 +374,18 @@ def _place(image, panel_file, spec, seq=None, render=None, take_ref=None, frame=
             if template.get_mode() == Gimp.LayerMode.NORMAL:
                 template.set_mode(Gimp.LayerMode.MULTIPLY)
             image.insert_layer(group, template.get_parent(),
-                               image.get_item_position(template) + 1)
+                               (_overlay_layer_position(image, template) if overlay
+                                else image.get_item_position(template) + 1))
         else:
             image.insert_layer(group, None, 0)
         _tag_panel_group(group, take_ref)
+    elif template is not None:
+        # Reused empty semantic groups may have been created before the layout was
+        # chosen; put them in the correct slot too.
+        image.remove_layer(group)
+        image.insert_layer(group, template.get_parent(),
+                           (_overlay_layer_position(image, template) if overlay
+                            else image.get_item_position(template) + 1))
 
     layer = Gimp.file_load_layer(Gimp.RunMode.NONINTERACTIVE, image, panel_file)
     layer.set_name(f"{label} render")
@@ -353,6 +435,9 @@ def _place(image, panel_file, spec, seq=None, render=None, take_ref=None, frame=
         image.insert_layer(text, group, 0)
         text.set_offsets(x1 + 16, y1 + 16 + 36 * i)
         text.set_visible(False)
+
+    if template is not None and overlay is not None:
+        _clear_layout_region(image, template, overlay.get("region"))
 
     # Hand the template back so the next Fuzzy Select click samples the frames.
     if template is not None:
@@ -1442,9 +1527,12 @@ def _choose_page_layout(combinations, page_width, page_height, page_label,
     content.set_margin_bottom(12)
     content.set_margin_start(12)
     content.set_margin_end(12)
-    content.pack_start(Gtk.Label(
-        label=f"{page_label} · {len(combinations[0][0]['regions'])} panels · "
-              "script-matched layouts appear first; choose a preview, then Apply"),
+    first_layout = combinations[0][0]
+    chooser_note = ("cover composition guides · choose a preview, then Apply"
+                    if first_layout.get("cover") else
+                    f"{len(first_layout['regions'])} panels · script-matched layouts appear "
+                    "first; choose a preview, then Apply")
+    content.pack_start(Gtk.Label(label=f"{page_label} · {chooser_note}"),
         False, False, 0)
 
     flow = Gtk.FlowBox()
@@ -1478,7 +1566,10 @@ def _choose_page_layout(combinations, page_width, page_height, page_label,
         preview = Gtk.Image.new_from_pixbuf(pixbuf)
         prefix = ("Recommended · " if layout["name"] == recommendation
                   and style["name"] == "Fine ink" else "")
-        caption = Gtk.Label(label=f"{prefix}{layout['name']}\n{style['name']}")
+        caption_text = f"{prefix}{layout['name']}\n{style['name']}"
+        if layout.get("description"):
+            caption_text += f"\n{layout['description']}"
+        caption = Gtk.Label(label=caption_text)
         caption.set_justify(Gtk.Justification.CENTER)
         caption.set_line_wrap(True)
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
@@ -1487,7 +1578,7 @@ def _choose_page_layout(combinations, page_width, page_height, page_label,
         card.pack_start(caption, False, False, 0)
         child = Gtk.FlowBoxChild()
         child.set_can_focus(True)
-        child.set_tooltip_text(f"{layout['name']} — {style['name']}")
+        child.set_tooltip_text(f"{layout['name']} — {layout.get('description', style['name'])}")
         child.add(card)
         flow.add(child)
 
@@ -1514,12 +1605,13 @@ def _choose_page_layout(combinations, page_width, page_height, page_label,
 
 
 def _generated_layout_layers(image):
-    """Find generated frame layers, including if the user grouped them."""
+    """Find generated base and foreground frame layers, including in groups."""
     found = []
 
     def walk(layers):
         for item in layers:
-            if item.get_name().startswith("Template - Imanganation Layout -"):
+            if (item.get_name().startswith("Template - Imanganation Layout -")
+                    or item.get_name().startswith("Imanganation Layout Ink -")):
                 found.append(item)
             if item.is_group():
                 walk(item.get_children())
@@ -1528,33 +1620,86 @@ def _generated_layout_layers(image):
     return found
 
 
-def _draw_page_layout(image, layout, frame_style, replace_layers=()):
-    """Add or replace generated frame art in one undo step, preserving page content."""
+def _draw_page_layout(image, layout, frame_style, replace_layers=(), page_id=None,
+                      panel_ids=(), panel_sequences=()):
+    """Add a selectable frame/cover guide and any foreground overlay ink."""
     width, height = image.get_width(), image.get_height()
     selection = Gimp.Selection.save(image)
     layer = Gimp.Layer.new(
         image, f"Template - Imanganation Layout - {layout['name']} - {frame_style['name']}",
                            width, height, Gimp.ImageType.RGBA_IMAGE, 100,
                            Gimp.LayerMode.NORMAL)
+    ink = None
+    if not layout.get("cover") and layout.get("overlays"):
+        ink = Gimp.Layer.new(
+            image, f"Imanganation Layout Ink - {layout['name']} - {frame_style['name']}",
+            width, height, Gimp.ImageType.RGBA_IMAGE, 100, Gimp.LayerMode.NORMAL)
+
+    def draw_ring(target, region, style, index, color):
+        Gimp.context_set_foreground(Gegl.Color.new(color))
+        for outer, inner in frame_rings(region, width, height, style, index):
+            image.select_polygon(Gimp.ChannelOps.REPLACE,
+                                 [v for point in outer for v in point])
+            image.select_polygon(Gimp.ChannelOps.SUBTRACT,
+                                 [v for point in inner for v in point])
+            target.edit_fill(Gimp.FillType.FOREGROUND)
+
     previous_foreground = Gimp.context_get_foreground()
     image.undo_group_start()
     try:
         layer.fill(Gimp.FillType.TRANSPARENT)
         image.insert_layer(layer, None, 0)
-        Gimp.context_set_foreground(Gegl.Color.new("black"))
-        for index, region in enumerate(layout["regions"]):
-            for outer, inner in frame_rings(region, width, height, frame_style, index):
-                image.select_polygon(
-                    Gimp.ChannelOps.REPLACE,
-                    [coordinate for point in outer for coordinate in point])
-                image.select_polygon(
-                    Gimp.ChannelOps.SUBTRACT,
-                    [coordinate for point in inner for coordinate in point])
-                layer.edit_fill(Gimp.FillType.FOREGROUND)
+        layout_data = {"role": "selection-template", "page_id": page_id,
+                       "cover": layout.get("cover"), "regions": layout.get("regions", ())}
+        if layout.get("cover"):
+            layer.set_name(f"Template - Imanganation Layout - Cover Guide - "
+                           f"{layout['name']} (hide for export)")
+            zone_colors = {"safe": "#82909B", "title": "#C35C5C", "art": "#4786AA",
+                           "credits": "#4D9169", "issue": "#C18A32",
+                           "blurb": "#4786AA", "barcode": "#C18A32"}
+            guide_style = {"weight": 0.0028, "slant": 0.0, "double": False}
+            for index, (role, region) in enumerate(layout["zones"]):
+                draw_ring(layer, region, guide_style, index, zone_colors.get(role, "gray"))
+            layout_data["cover_zones"] = layout["zones"]
+        else:
+            borderless = set(layout.get("borderless", ()))
+            guide_style = {"weight": 0.0035, "slant": 0.0, "double": False}
+            for index, region in enumerate(layout["regions"]):
+                if index in borderless:
+                    draw_ring(layer, region, guide_style, index, "cyan")
+                else:
+                    draw_ring(layer, region, frame_style, index, "black")
+
+            records = []
+            for index in layout.get("overlays", ()):
+                if index >= len(layout["regions"]):
+                    continue
+                records.append({
+                    "index": index,
+                    "panel_id": panel_ids[index] if index < len(panel_ids) else None,
+                    "sequence": (panel_sequences[index]
+                                 if index < len(panel_sequences) else None),
+                    "region": layout["regions"][index],
+                    "borderless": index in borderless,
+                })
+            layout_data["overlays"] = records
+            if records:
+                ink.fill(Gimp.FillType.TRANSPARENT)
+                image.insert_layer(ink, None, 0)
+                for record in records:
+                    if not record["borderless"]:
+                        draw_ring(ink, record["region"], frame_style,
+                                  record["index"], "black")
+
+        layer.attach_parasite(Gimp.Parasite.new(
+            LAYOUT_PARASITE, Gimp.PARASITE_PERSISTENT,
+            list(json.dumps(layout_data, separators=(",", ":")).encode())))
         for old_layer in replace_layers:
             if old_layer.get_image() is image:
                 image.remove_layer(old_layer)
     except Exception:
+        if ink is not None and ink.get_image() is image:
+            image.remove_layer(ink)
         if layer.get_image() is image:
             image.remove_layer(layer)
         raise
@@ -1601,11 +1746,19 @@ def page_layout(procedure, run_mode, image, drawables, config, data):
         if selection is None:
             return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
         layout, frame_style = selection
-        layer = _draw_page_layout(image, layout, frame_style, existing_layers)
-        Gimp.message(f"Added {layout['name']} with {frame_style['name']} frames to "
-                     f"{page.get('label', 'page')}. "
-                     "Select inside a frame with Fuzzy Select, render into it, and "
-                     "the page has been saved.")
+        layer = _draw_page_layout(
+            image, layout, frame_style, existing_layers, page_id,
+            availability.get("panel_ids", ()), availability.get("panel_sequences", ()))
+        if layout.get("cover"):
+            Gimp.message(f"Added {layout['name']} guides to {page.get('label', 'page')}. "
+                         "Gray = safe area, red = title, blue = artwork/blurb, green = "
+                         "credits, amber = issue mark/barcode. Hide the Cover Guide layer "
+                         "before export. This guide does not create script panels.")
+        else:
+            Gimp.message(f"Added {layout['name']} with {frame_style['name']} frames to "
+                         f"{page.get('label', 'page')}. Cyan outlines mark borderless "
+                         "panels for selection; overlay panels are placed above the frame "
+                         "template. Select inside a frame with Fuzzy Select to render it.")
         _save_project_page(image, root, manifest)
         return _success(procedure, layer)
     except Exception as exc:
@@ -3583,10 +3736,11 @@ class Imanganation(Gimp.PlugIn):
                 GObject.ParamFlags.READWRITE)
             proc.set_menu_label("Generate Page _Panel Layout...")
             proc.set_documentation(
-                "Generate selectable panel frames for the current project page",
-                "Choose a built-in layout with one frame per non-orphaned script panel "
-                "for the page number in the current project page label. Adds editable "
-                "frame borders to the page without replacing its existing content.",
+                "Generate a page panel layout or a cover composition guide",
+                "Choose one selectable frame per script panel for a numbered page, or "
+                "colored title, artwork, credits, and safe-area guides for pages named "
+                "Cover, Front Cover, or Back Cover. Overlapping panels are layered above "
+                "the base frame template.",
                 name)
             return proc
 
