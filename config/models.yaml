@@ -67,6 +67,14 @@ ipadapter:
       url: https://huggingface.co/h94/IP-Adapter/resolve/018e402774aeeddd60609b4ecdb7e298259dc729/sdxl_models/ip-adapter-plus_sdxl_vit-h.safetensors
       size: 847517512
       sha256: 3f5062b8400c94b7159665b21ba5c62acdcd7682262743d7f2aefedef00e6581
+  plus_face:
+    id: ip-adapter-plus-face_sdxl_vit-h.safetensors
+    display: IP-Adapter Plus Face SDXL (ViT-H) - base SDXL, faces only
+    source: https://huggingface.co/h94/IP-Adapter
+    encoder: clip_vision
+    subdir: ipadapter
+    feature: face references (base-SDXL adapter; trial)
+    license: {name: Apache-2.0, url: https://huggingface.co/h94/IP-Adapter}
   clip_vision:
     id: CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors
     display: CLIP Vision ViT-H
