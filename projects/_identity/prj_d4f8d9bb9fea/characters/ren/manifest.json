@@ -1,0 +1,41 @@
+{
+  "name": "Ren",
+  "aliases": [],
+  "appearance": {
+    "gender": "1boy",
+    "age": "",
+    "hair_color": "wavy ash-brown hair",
+    "hair_style": "medium length wavy cut",
+    "eye_color": "grey eyes",
+    "skin": "",
+    "build": "",
+    "outfit": "faded blue work jacket over white shirt with dark trousers",
+    "accessories": [
+      "canvas satchel with patched strap"
+    ],
+    "distinguishing": [],
+    "descriptors": [
+      "lean build"
+    ],
+    "default_expression": "calm and reserved expression",
+    "mannerisms": [
+      "keeps hands busy when nervous",
+      "quiet demeanor"
+    ]
+  },
+  "versions": [
+    {
+      "id": "base",
+      "kind": "base",
+      "image": "characters/ren/base.png",
+      "prompt": "solo focus, solo, 1 character, 1boy, wavy ash-brown hair, medium length wavy cut, grey eyes, faded blue work jacket over white shirt with dark trousers, canvas satchel with patched strap, lean build, calm and reserved expression, masterpiece, best quality, (cowboy shot:1.2), standing, straight-on, arms at sides, looking at viewer, facing viewer, (white background:1.4), (simple background:1.2), anime coloring, anime, highly detailed",
+      "seed": 1711773638,
+      "parent": null,
+      "note": "auto design sheet (solo focus)",
+      "created_at": "2026-10-07T09:21:43.118255Z"
+    }
+  ],
+  "default_version": "base",
+  "source": "auto",
+  "notes": "18, boy, wavy ash-brown hair, grey eyes, lean build, faded blue work jacket, white shirt, dark trousers, canvas satchel with a patched strap. Quiet and careful, keeps his hands busy when he is nervous."
+}

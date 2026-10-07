@@ -69,6 +69,7 @@ try:
         delete_page,
         load_project,
         new_id,
+        new_project_document,
         project_from_script,
         record_take,
         reorder_pages,
@@ -83,6 +84,7 @@ except ImportError:  # Keep older single-file plug-in installs usable for legacy
     load_project = record_take = save_project = apply_field_edit = None
     delete_character = None
     new_id = None
+    new_project_document = None
     build_docks = None
     character_row_id = None
     panel_label = None
@@ -101,6 +103,7 @@ PROC_STATUS = "plug-in-imanganation-engine-status"
 PROC_PROJECT_DOCKS = "plug-in-imanganation-project-docks"
 PROC_PAGE_LAYOUT = "plug-in-imanganation-page-layout"
 PROC_AUTOSTART = "extension-imanganation-ui"
+PROC_NEW_PROJECT_MANUAL = "plug-in-imanganation-new-project-manual"
 PROC_NEW_PROJECT = "plug-in-imanganation-new-project"
 PROC_SETUP_MODELS = "plug-in-imanganation-setup-models"
 PROC_RENDER_ENGINE = "plug-in-imanganation-render-engine"
@@ -124,6 +127,7 @@ DOCK_ACTIONS = {
 DOCK_OPEN_PROJECT = "plug-in-imanganation-dock-open-project"
 DOCK_OPEN_PAGE = "plug-in-imanganation-dock-open-page"  # Context's "Open page" button
 DOCK_NEW_PROJECT = "plug-in-imanganation-dock-new-project"
+DOCK_NEW_MANUAL_PROJECT = "plug-in-imanganation-dock-new-manual-project"
 DOCK_SETUP_MODELS = "plug-in-imanganation-dock-setup-models"  # the workspace shows it
 DOCK_RENDER_ENGINE = "plug-in-imanganation-dock-render-engine"  # the workspace shows it
 DOCK_DESIGN_CHARACTER = "plug-in-imanganation-dock-design-character"
@@ -2368,10 +2372,14 @@ def _default_page_size(root, manifest):
                 image.delete()
         except Exception:
             continue
+    setup = manifest.get("project", {}).get("page_setup", {})
+    if (isinstance(setup.get("width"), int) and isinstance(setup.get("height"), int)
+            and 1 <= setup["width"] <= 20000 and 1 <= setup["height"] <= 20000):
+        return setup["width"], setup["height"]
     return 1600, 2400
 
 
-def _create_project_page(root, manifest, width, height, number=None):
+def _create_project_page(root, manifest, width, height, number=None, resolution=None):
     """A new page document; ``number`` (a script page) fixes its label and file name."""
     if width < 1 or height < 1:
         raise ValueError("Page width and height must be positive")
@@ -2395,9 +2403,12 @@ def _create_project_page(root, manifest, width, height, number=None):
     page_label = f"Page {number}"
     destination = Path(root) / relative
     temporary = destination.with_name(f".{destination.stem}.{secrets.token_hex(4)}.tmp.xcf")
+    if resolution is None:
+        resolution = manifest.get("project", {}).get("page_setup", {}).get("resolution", 72)
 
     image = Gimp.Image.new(width, height, Gimp.ImageBaseType.RGB)
     try:
+        image.set_resolution(resolution, resolution)
         # (GIMP 3 images have no set_name; the saved file name titles the page)
         background = Gimp.Layer.new(
             image, "Background", width, height, Gimp.ImageType.RGB_IMAGE, 100,
@@ -2539,6 +2550,11 @@ def _dock_action(procedure, config, data):
                 return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
             if _create_project_from_script(**options) is False:
                 return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
+        elif data == "new-manual-project":
+            options = _choose_manual_project()
+            if options is None:
+                return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
+            _create_manual_project(**options)
         elif data == "design-character":
             _design_selected_character()
         elif data == "setup-models":
@@ -2620,6 +2636,203 @@ def _choose_new_project():
         return None
     finally:
         dialog.destroy()
+
+
+def _choose_manual_project():
+    """Collect the minimum useful setup for a script-free project."""
+    dialog = Gtk.Dialog(title="New Project", flags=Gtk.DialogFlags.MODAL)
+    dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+                       "Create Project", Gtk.ResponseType.OK)
+    dialog.set_default_response(Gtk.ResponseType.OK)
+    dialog.set_resizable(False)
+    grid = Gtk.Grid(column_spacing=12, row_spacing=8, margin=12)
+
+    title = Gtk.Entry(activates_default=True, hexpand=True)
+    title.set_placeholder_text("e.g. The Last Light")
+    chapter = Gtk.Entry(activates_default=True, hexpand=True)
+    chapter.set_placeholder_text("Optional")
+    folder = Gtk.FileChooserButton(title="Choose the parent folder",
+                                   action=Gtk.FileChooserAction.SELECT_FOLDER)
+    projects = ENGINE.projects if ENGINE is not None else Path.home() / "Imanganation"
+    if ENGINE is not None and ENGINE.mode == "bundled":
+        projects.mkdir(parents=True, exist_ok=True)
+    folder.set_current_folder(str(projects if projects.is_dir() else Path.home()))
+
+    reading_order = Gtk.ComboBoxText()
+    reading_order.append("rtl", "Right to left (manga)")
+    reading_order.append("ltr", "Left to right")
+    reading_order.set_active_id("rtl")
+    color_mode = Gtk.ComboBoxText()
+    color_mode.append("color", "Color")
+    color_mode.append("bw", "Black and white")
+    color_mode.append("inherit", "Use engine default")
+    color_mode.set_active_id("color")
+
+    preset_options = {
+        "oneshot": ("Manga one-shot / anthology", "a5", "rtl", "bw", "One-shot", 1),
+        "manga_series": ("Serialized manga", "jis_b6", "rtl", "bw", "Chapter 1", 1),
+        "color_comic": ("Full-color comic / manhua (LTR default)", "a5", "ltr",
+                         "color", "Chapter 1", 1),
+        "digital_comic": ("Digital page comic", "digital", "ltr", "color", "Chapter 1", 1),
+        "custom": ("Custom", None, None, None, None, None),
+    }
+    project_preset = Gtk.ComboBoxText()
+    for preset_id, values in preset_options.items():
+        project_preset.append(preset_id, values[0])
+    project_preset.set_active_id("oneshot")
+
+    page_format = Gtk.ComboBoxText()
+    for format_id, label in (
+            ("jis_b6", "Manga tankōbon — JIS B6 · 128 × 182 mm"),
+            ("shinsho", "Manga paperback — Shinsho · 106 × 173 mm"),
+            ("a5", "A5 comic / anthology · 148 × 210 mm"),
+            ("jis_b5", "Manga magazine / large comic — JIS B5 · 182 × 257 mm"),
+            ("us_digest", "US manga digest · 5.5 × 8.5 in"),
+            ("digital", "Digital portrait · 1600 × 2400 px"),
+            ("custom", "Custom pixel dimensions")):
+        page_format.append(format_id, label)
+    page_format.set_active_id("jis_b6")
+
+    create_page = Gtk.CheckButton(label="Create a blank first page", active=True)
+    panel_count = Gtk.SpinButton.new_with_range(0, 100, 1)
+    panel_count.set_value(1)
+    width = Gtk.SpinButton.new_with_range(1, 20000, 100)
+    height = Gtk.SpinButton.new_with_range(1, 20000, 100)
+    resolution = Gtk.SpinButton.new_with_range(36, 1200, 1)
+    resolution.set_value(300)
+    size = Gtk.Box(spacing=6)
+    size.pack_start(width, False, False, 0)
+    size.pack_start(Gtk.Label(label="×"), False, False, 0)
+    size.pack_start(height, False, False, 0)
+    size_row = Gtk.Box(spacing=8)
+    size_row.pack_start(size, False, False, 0)
+    size_row.pack_start(Gtk.Label(label="px"), False, False, 0)
+    resolution_row = Gtk.Box(spacing=8)
+    resolution_row.pack_start(resolution, False, False, 0)
+    resolution_row.pack_start(Gtk.Label(label="PPI"), False, False, 0)
+
+    def update_page_format(_combo):
+        format_id = page_format.get_active_id()
+        print_sizes_mm = {
+            "jis_b6": (128, 182),
+            "shinsho": (106, 173),
+            "a5": (148, 210),
+            "jis_b5": (182, 257),
+            "us_digest": (139.7, 215.9),
+        }
+        if format_id in print_sizes_mm:
+            page_width, page_height = print_sizes_mm[format_id]
+            width.set_value(round(page_width * 300 / 25.4))
+            height.set_value(round(page_height * 300 / 25.4))
+            resolution.set_value(300)
+        elif format_id == "digital":
+            width.set_value(1600)
+            height.set_value(2400)
+            resolution.set_value(72)
+        custom = format_id == "custom"
+        width.set_sensitive(custom)
+        height.set_sensitive(custom)
+        resolution.set_sensitive(custom)
+
+    page_format.connect("changed", update_page_format)
+    update_page_format(page_format)
+
+    def apply_project_preset(combo):
+        values = preset_options.get(combo.get_active_id())
+        if values is None or combo.get_active_id() == "custom":
+            return
+        _label_text, suggested_format, direction, color, chapter_text, panels = values
+        page_format.set_active_id(suggested_format)
+        reading_order.set_active_id(direction)
+        color_mode.set_active_id(color)
+        chapter.set_text(chapter_text)
+        panel_count.set_value(panels)
+
+    project_preset.connect("changed", apply_project_preset)
+    apply_project_preset(project_preset)
+
+    hint = Gtk.Label(
+        label="A new .imanga folder will be created inside the chosen parent. "
+              "Starter panels appear in Script and Context so you can fill in the "
+              "story by hand. Print presets are common manga/comic trim sizes at "
+              "300 PPI; manhua specs vary. Preset values stay editable. Check printer "
+              "trim and bleed requirements.",
+        xalign=0.0, wrap=True, max_width_chars=66)
+    hint.get_style_context().add_class("dim-label")
+    rows = (("Project preset", project_preset),
+            ("Project title", title), ("Parent folder", folder),
+            ("Chapter", chapter), ("Reading order", reading_order),
+            ("Default color", color_mode), ("Panels to start", panel_count),
+            ("", create_page), ("Page format", page_format),
+            ("First page size", size_row), ("Resolution", resolution_row))
+    for row, (label, widget) in enumerate(rows):
+        if label:
+            grid.attach(Gtk.Label(label=label, xalign=0.0), 0, row, 1, 1)
+        grid.attach(widget, 1 if label else 0, row, 1 if label else 2, 1)
+    grid.attach(hint, 0, len(rows), 2, 1)
+    dialog.get_content_area().add(grid)
+    dialog.show_all()
+    try:
+        while dialog.run() == Gtk.ResponseType.OK:
+            parent_path = folder.get_filename()
+            options = {
+                "title": title.get_text().strip(),
+                "preset": project_preset.get_active_id() or "custom",
+                "parent": Path(parent_path) if parent_path else None,
+                "chapter": chapter.get_text().strip(),
+                "reading_order": reading_order.get_active_id() or "rtl",
+                "default_color_mode": color_mode.get_active_id() or "color",
+                "starter_panels": panel_count.get_value_as_int(),
+                "create_page": create_page.get_active(),
+                "page_size": (width.get_value_as_int(), height.get_value_as_int()),
+                "resolution": resolution.get_value_as_int(),
+                "page_format": page_format.get_active_id() or "custom",
+            }
+            parent = options["parent"]
+            problem = None if options["title"] else "Enter a project title."
+            problem = problem or (None if parent is not None and parent.is_dir() else
+                                 "Choose an existing parent folder.")
+            problem = problem or (None if parent is not None and os.access(parent, os.W_OK) else
+                                 "The chosen parent folder is not writable.")
+            target = (parent / f"{_slug(options['title'])}.imanga"
+                      if parent is not None and options["title"] else None)
+            problem = problem or (f"{target} already exists. Choose another title or folder."
+                                  if target is not None and target.exists() else None)
+            if problem is None:
+                return options
+            Gimp.message(problem)
+        return None
+    finally:
+        dialog.destroy()
+
+
+def _create_manual_project(title, parent, chapter, reading_order,
+                           default_color_mode, starter_panels, create_page, page_size,
+                           resolution, page_format, preset):
+    """Write a schema-shaped manual project, optionally with a ready-to-draw page."""
+    if new_project_document is None:
+        raise RuntimeError("The plug-in install is missing project_store.py")
+    root = Path(parent) / f"{_slug(title)}.imanga"
+    root.mkdir(parents=False)
+    try:
+        manifest = new_project_document(
+            title, reading_order=reading_order,
+            default_color_mode=default_color_mode, chapter=chapter,
+            starter_panels=starter_panels, page_size=page_size,
+            resolution=resolution, page_format=page_format, preset=preset)
+        save_project(root, manifest)
+        first_page = (_create_project_page(root, manifest, *page_size,
+                                           resolution=resolution)
+                      if create_page else None)
+        _activate_project(root)
+        if first_page:
+            manifest = load_project(root)
+            _show_project_page(root, manifest, first_page)
+    except Exception:
+        import shutil
+
+        shutil.rmtree(root, ignore_errors=True)
+        raise
 
 
 def _slug(text):
@@ -3404,6 +3617,16 @@ def _new_project_run(procedure, config, data):
     return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
 
 
+def _new_manual_project_run(procedure, config, data):
+    """File > New Project: guide the user through a script-free project setup."""
+    try:
+        _dock_pdb_call(DOCK_NEW_MANUAL_PROJECT, {})
+    except Exception:
+        return _error(procedure, "The Imanganation workspace is not running; restart GIMP "
+                                 "to start it")
+    return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+
+
 _BUBBLE_PREVIEWS = {}
 
 
@@ -3682,6 +3905,7 @@ def _add_dock_callbacks(plugin):
     callbacks = [
         (DOCK_ACTIONS[DOCK_PROJECT], _dock_action, "project-action", False),
         (DOCK_OPEN_PROJECT, _dock_action, "open-project", False),
+        (DOCK_NEW_MANUAL_PROJECT, _dock_action, "new-manual-project", False),
         (DOCK_ACTIONS[DOCK_INSPECTOR], _dock_action, "generate", False),
         (DOCK_ITEMS[DOCK_INSPECTOR], _dock_field_edit, "field", True),
         (DOCK_OPEN_PAGE, _dock_action, "open-page", False),
@@ -3724,10 +3948,10 @@ def _add_dock_callbacks(plugin):
 def _register_project_docks(plugin):
     root = _DOCK_CONTEXT.get("root")
     if root is None:
-        contents = (build_welcome_docks(DOCK_NEW_PROJECT)
+        contents = (build_welcome_docks(DOCK_NEW_MANUAL_PROJECT, DOCK_NEW_PROJECT)
                     if build_welcome_docks is not None else {
             "project": "# Imanganation\nChoose a project folder to open your workspace.",
-            "inspector": "# Workspace\nOpen a project to get started.",
+            "inspector": "# Workspace\nOpen or create a project to get started.",
             "filmstrip": "# Pages\nOpen a project to see its pages.",
             "script": "# Script\nOpen a project to see its reading order.",
             "characters": "# Character Bible\nOpen a project to see its cast.",
@@ -3861,7 +4085,8 @@ class Imanganation(Gimp.PlugIn):
     def do_query_procedures(self):
         return [PROC_RENDER, PROC_NEXT, PROC_REGEN, PROC_INPAINT, PROC_REFINE, PROC_SETREF,
                 PROC_PLACE, PROC_STATUS, PROC_PROJECT_DOCKS, PROC_PAGE_LAYOUT, PROC_AUTOSTART,
-                PROC_NEW_PROJECT, PROC_SETUP_MODELS, PROC_RENDER_ENGINE,
+                PROC_NEW_PROJECT_MANUAL, PROC_NEW_PROJECT,
+                PROC_SETUP_MODELS, PROC_RENDER_ENGINE,
                 *DOCK_SHOW.values()]
 
     def do_create_procedure(self, name):
@@ -3889,6 +4114,21 @@ class Imanganation(Gimp.PlugIn):
                 "Reopen a closed Imanganation workspace dock, or bring it forward.", name)
             proc.set_attribution("imanganation", "imanganation", "2026")
             return proc
+        if name == PROC_NEW_PROJECT_MANUAL:
+            proc = Gimp.Procedure.new(
+                self, name, Gimp.PDBProcType.PLUGIN, _new_manual_project_run, None)
+            proc.set_menu_label("New _Project...")
+            proc.add_enum_argument("run-mode", "Run mode", "How to run the procedure",
+                                   Gimp.RunMode, Gimp.RunMode.INTERACTIVE,
+                                   GObject.ParamFlags.READWRITE)
+            proc.add_menu_path("<Toolbox>/File/[Open]")
+            proc.add_menu_path("<Image>/File/[Open]")
+            proc.set_documentation(
+                "Create an Imanganation project manually",
+                "Set up a project with guided defaults and starter panels, without a script.",
+                name)
+            proc.set_attribution("imanganation", "imanganation", "2026")
+            return proc
         if name == PROC_NEW_PROJECT:
             proc = Gimp.Procedure.new(
                 self, name, Gimp.PDBProcType.PLUGIN, _new_project_run, None)
@@ -3896,7 +4136,10 @@ class Imanganation(Gimp.PlugIn):
             proc.add_enum_argument("run-mode", "Run mode", "How to run the procedure",
                                    Gimp.RunMode, Gimp.RunMode.INTERACTIVE,
                                    GObject.ParamFlags.READWRITE)
-            proc.add_menu_path("<Image>/File/Create")
+            # Keep project creation beside the other ways to open/create work,
+            # in the first File section and in the toolbox before an image exists.
+            proc.add_menu_path("<Toolbox>/File/[Open]")
+            proc.add_menu_path("<Image>/File/[Open]")
             proc.set_documentation(
                 "New Imanganation project from a script",
                 "Build a project (panels, pages, cast, locations) from a script and "
@@ -3942,8 +4185,8 @@ class Imanganation(Gimp.PlugIn):
             # The toolbox File menu is available before an image is open, which
             # is when users most need to open an existing project. Keep the
             # image-window entry as well for switching projects while editing.
-            proc.add_menu_path("<Toolbox>/File")
-            proc.add_menu_path("<Image>/File")
+            proc.add_menu_path("<Toolbox>/File/[Open]")
+            proc.add_menu_path("<Image>/File/[Open]")
             proc.set_documentation(
                 "Open the Imanganation project docks",
                 "Open or switch the project shown in the startup Imanganation workspace.", name)

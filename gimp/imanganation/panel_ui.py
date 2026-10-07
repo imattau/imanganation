@@ -148,6 +148,16 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
     title = _label(manifest.get("project", {}).get("title")) or "Untitled project"
     chapter = _label(manifest.get("project", {}).get("chapter"))
     project_rows = [f"# {title}"]
+    preset_id = manifest.get("project", {}).get("preset")
+    preset_name = {
+        "oneshot": "Manga one-shot / anthology",
+        "manga_series": "Serialized manga",
+        "color_comic": "Full-color comic / manhua",
+        "digital_comic": "Digital page comic",
+        "custom": "Custom",
+    }.get(preset_id)
+    if preset_name:
+        project_rows.append(f"Preset\t{preset_name}")
     if chapter:
         project_rows.append(f"# {chapter}")
     project_rows.append("# Pages")
@@ -448,16 +458,21 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
     }
 
 
-def build_welcome_docks(new_project_action: str = "") -> dict[str, str]:
-    """First-run workspace content shown before a project is selected; with
-    ``new_project_action``, Context offers to start one from a script."""
-    start = (f"\nStart one from a script:\n!{new_project_action}\tNew project from script…"
-             if new_project_action else "")
+def build_welcome_docks(new_project_action: str = "",
+                        new_script_project_action: str = "") -> dict[str, str]:
+    """First-run workspace content shown before a project is selected."""
+    actions = []
+    if new_project_action:
+        actions.append(f"!{new_project_action}\tNew project…")
+    if new_script_project_action:
+        actions.append(f"!{new_script_project_action}\tNew project from script…")
+    start = "\nCreate a project:\n" + "\n".join(actions) if actions else ""
     return {
         "selected_id": "",
         "project": "# Imanganation\nChoose a project folder to open your workspace.",
         "project_selected": "",
-        "inspector": ("# Context\nProject\tNot open\n\nChoose or create an Imanganation project."
+        "inspector": ("# Context\nProject\tNot open\n\nOpen a project, or create one manually"
+                      " and add its pages and story details as you go."
                       + start),
         "inspector_selected": "",
         "filmstrip": "Open a project to see its pages here.",  # tiles: no headings

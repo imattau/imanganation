@@ -73,6 +73,21 @@ With a numbered page selected, Context reports the matching script-panel count a
 available layouts, then offers **Generate layout** when a built-in frame count matches.
 Pages named **Cover**, **Front Cover**, or **Back Cover** instead offer cover-composition
 guides. The action opens the selected page and layout picker in one step.
+**New Project…** (GIMP's *File* menu or the welcome Context dock) creates a manual,
+script-free project. Its presets include **Manga one-shot**, **Serialized manga**,
+**Full-color comic / manhua**, **Digital page comic**, and **Custom**. Presets
+prefill editable reading order, color, page format, chapter, and starter panels.
+The guided form also asks for a title and parent folder.
+For the first page, choose manga tankōbon JIS B6 (128 × 182 mm), Shinsho
+(106 × 173 mm), A5 (148 × 210 mm), JIS B5 (182 × 257 mm), a digital 1600 × 2400 px
+canvas, a US manga digest (5.5 × 8.5 in), or custom pixels and PPI. Print presets use
+300 PPI; the chosen setup is saved so later pages match. These are common manga/comic
+trim presets, not a universal manhua standard. Presets do not include bleed, so check
+the printer's trim and bleed requirements. The plug-in creates a `.imanga` folder with a valid
+`project.json`, opens the workspace, and opens that first page when requested. Starter
+panels appear in Script and Context, ready for you to fill in; you can also add
+characters and pages as you work.
+
 **New project from script…** (Context, before a project is open, or *Filters →
 imanganation*) builds a project from a script file: panels, the cast (with the script's
 `[CHARACTERS]` descriptions as their notes), locations from scene headings, and one page
@@ -107,8 +122,10 @@ installed, else a bold sans; the size follows the page (1/64 of its height).
 
 On first launch, the Project dock offers **Open project…**; the
 chosen project folder is remembered in GIMP's user settings and its docks are restored on
-later launches. **Open / Switch Project…** is in GIMP's **File** menu, including
-the toolbox File menu before an image is open. A dock you close
+later launches. **Open / Switch Project…**, **New Project…**, and
+**New Project from Script…** are
+in the first section of GIMP's **File** menu, including the toolbox File menu
+before an image is open. A dock you close
 stays closed on later launches; reopen it from
 *Windows → Imanganation*. Row callbacks carry stable IDs.
 For container projects, generated and imported images are

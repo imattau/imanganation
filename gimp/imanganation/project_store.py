@@ -20,6 +20,7 @@ from typing import Any
 
 FORMAT = "imanganation.project"
 VERSION = 1
+PROJECT_PRESETS = {"oneshot", "manga_series", "color_comic", "digital_comic", "custom"}
 _ID_PATTERNS = {
     "prj_": re.compile(r"^prj_[a-z0-9]{6,}$"),
     "pnl_": re.compile(r"^pnl_[a-z0-9]{6,}$"),
@@ -37,6 +38,78 @@ def new_id(prefix: str) -> str:
     if prefix not in {"prj_", "pnl_", "pg_", "tk_"}:
         raise ValueError(f"unsupported project id prefix: {prefix!r}")
     return prefix + secrets.token_hex(6)
+
+
+def new_project_document(title: str, *, reading_order: str = "rtl",
+                         default_color_mode: str = "color",
+                         chapter: str = "", starter_panels: int = 1,
+                         page_size: tuple[int, int] = (1512, 2150),
+                         resolution: int = 300, page_format: str = "jis_b6",
+                         preset: str = "custom") -> dict[str, Any]:
+    """Return a valid starter manifest for a project built without a script."""
+    title = title.strip() if isinstance(title, str) else ""
+    if not title:
+        raise ProjectFileError("project title cannot be empty")
+    if reading_order not in {"rtl", "ltr"}:
+        raise ProjectFileError("reading order must be right-to-left or left-to-right")
+    if default_color_mode not in {"color", "bw", "inherit"}:
+        raise ProjectFileError("default color mode must be color, bw, or inherit")
+    if preset not in PROJECT_PRESETS:
+        raise ProjectFileError(f"unsupported project preset: {preset!r}")
+    if isinstance(starter_panels, bool) or not isinstance(starter_panels, int) \
+            or not 0 <= starter_panels <= 100:
+        raise ProjectFileError("starter panel count must be between 0 and 100")
+    if (not isinstance(page_size, (tuple, list)) or len(page_size) != 2
+            or any(isinstance(value, bool) or not isinstance(value, int)
+                   or not 1 <= value <= 20000 for value in page_size)):
+        raise ProjectFileError("page dimensions must be between 1 and 20000 pixels")
+    if isinstance(resolution, bool) or not isinstance(resolution, int) \
+            or not 36 <= resolution <= 1200:
+        raise ProjectFileError("page resolution must be between 36 and 1200 PPI")
+    now = datetime.now().astimezone().isoformat(timespec="seconds")
+    project = {
+        "id": new_id("prj_"),
+        "title": title,
+        "reading_order": reading_order,
+        "default_color_mode": default_color_mode,
+        "preset": preset,
+        "page_setup": {"format": page_format, "width": page_size[0],
+                       "height": page_size[1], "resolution": resolution},
+        "created": now,
+        "modified": now,
+    }
+    if chapter.strip():
+        project["chapter"] = chapter.strip()
+    panels = [{
+        "id": new_id("pnl_"),
+        "label": {"page": 1, "panel": number},
+        "scene_heading": "",
+        "location": "",
+        "characters": [],
+        "action": "",
+        "camera": "",
+        "expressions": {},
+        "dialogue": [],
+        "sfx": [],
+        "notes": "",
+        "seed": None,
+        "status": "unplaced",
+        "placement": None,
+        "takes": [],
+        "active_take": None,
+    } for number in range(1, starter_panels + 1)]
+    return {
+        "format": FORMAT,
+        "version": VERSION,
+        "project": project,
+        "panels": panels,
+        "pages": [],
+        "takes": {},
+        "cast": [],
+        "locations": [],
+        "props": [],
+        "cursor": {"next_panel": panels[0]["id"] if panels else None},
+    }
 
 
 def _relative_manifest_path(value: Any, field: str) -> None:
@@ -58,6 +131,24 @@ def _check_references(document: dict[str, Any]) -> None:
     if not isinstance(project, dict):
         raise ProjectFileError("project must be an object")
     _check_id(project.get("id"), "prj_", "project.id")
+    page_setup = project.get("page_setup")
+    if page_setup is not None:
+        if not isinstance(page_setup, dict):
+            raise ProjectFileError("project.page_setup must be an object")
+        if not isinstance(page_setup.get("format"), str) or page_setup["format"] not in {
+                "jis_b6", "shinsho", "a5", "jis_b5", "us_digest", "digital", "custom"}:
+            raise ProjectFileError("project.page_setup.format is unsupported")
+        for dimension in ("width", "height"):
+            value = page_setup.get(dimension)
+            if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 20000:
+                raise ProjectFileError(f"project.page_setup.{dimension} must be 1–20000 pixels")
+        resolution = page_setup.get("resolution")
+        if isinstance(resolution, bool) or not isinstance(resolution, int) \
+                or not 36 <= resolution <= 1200:
+            raise ProjectFileError("project.page_setup.resolution must be 36–1200 PPI")
+    if ("preset" in project and (not isinstance(project["preset"], str)
+            or project["preset"] not in PROJECT_PRESETS)):
+        raise ProjectFileError("project.preset is unsupported")
 
     for field in ("script",):
         section = document.get(field)

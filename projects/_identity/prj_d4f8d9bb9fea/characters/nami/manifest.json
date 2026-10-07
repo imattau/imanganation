@@ -1,0 +1,41 @@
+{
+  "name": "Nami",
+  "aliases": [],
+  "appearance": {
+    "gender": "1girl",
+    "age": "",
+    "hair_color": "short black hair with blunt fringe",
+    "hair_style": "blunt bob",
+    "eye_color": "dark brown eyes",
+    "skin": "",
+    "build": "",
+    "outfit": "oversized cream fisherman sweater and navy rain skirt",
+    "accessories": [
+      "brass lighthouse key on cord"
+    ],
+    "distinguishing": [],
+    "descriptors": [
+      "slim build"
+    ],
+    "default_expression": "hopeful gaze",
+    "mannerisms": [
+      "shoulders forward",
+      "scanning horizon"
+    ]
+  },
+  "versions": [
+    {
+      "id": "base",
+      "kind": "base",
+      "image": "characters/nami/base.png",
+      "prompt": "solo focus, solo, 1 character, 1girl, short black hair with blunt fringe, blunt bob, dark brown eyes, oversized cream fisherman sweater and navy rain skirt, brass lighthouse key on cord, slim build, hopeful gaze, masterpiece, best quality, (cowboy shot:1.2), standing, straight-on, arms at sides, looking at viewer, facing viewer, (white background:1.4), (simple background:1.2), anime coloring, anime, highly detailed",
+      "seed": 1169474400,
+      "parent": null,
+      "note": "auto design sheet (solo focus)",
+      "created_at": "2026-10-07T09:19:50.742795Z"
+    }
+  ],
+  "default_version": "base",
+  "source": "auto",
+  "notes": "17, girl, short black hair with a blunt fringe, dark brown eyes, slim build, oversized cream fisherman sweater, navy rain skirt, red rubber boots, brass lighthouse key on a cord. Stubbornly hopeful, shoulders forward, always scanning the horizon."
+}

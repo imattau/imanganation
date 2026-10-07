@@ -19,12 +19,23 @@
         "reading_order": {"enum": ["rtl", "ltr"]},
         "default_color_mode": {"enum": ["inherit", "color", "bw"],
                                "description": "Recorded only; the engine renders colour"},
+        "preset": {"enum": ["oneshot", "manga_series", "color_comic", "digital_comic", "custom"],
+                   "description": "Optional setup preset selected when creating a project"},
         "created": {"type": "string", "format": "date-time"},
         "modified": {"type": "string", "format": "date-time"},
         "render": {"type": "object", "additionalProperties": false,
                    "description": "The project's render engine and face pass (Render Engine dialog); absent = the engine's settings",
                    "properties": {"engine": {"enum": ["sdxl", "qwen_image_21", "z_anime"]},
-                                  "face_pass": {"type": "boolean"}}}
+                                  "face_pass": {"type": "boolean"}}},
+        "page_setup": {"type": "object", "additionalProperties": false,
+                        "required": ["format", "width", "height", "resolution"],
+                        "description": "Manual project page preset; dimensions in pixels and resolution in PPI",
+                        "properties": {
+                          "format": {"enum": ["jis_b6", "shinsho", "a5", "jis_b5", "us_digest", "digital", "custom"]},
+                          "width": {"type": "integer", "minimum": 1, "maximum": 20000},
+                          "height": {"type": "integer", "minimum": 1, "maximum": 20000},
+                          "resolution": {"type": "integer", "minimum": 36, "maximum": 1200}
+                        }}
       }
     },
     "script": {
