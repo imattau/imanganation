@@ -140,7 +140,9 @@ def test_frame_shape_and_size_hints_choose_the_layout():
 
 def test_no_hints_means_no_recommendation():
     names, recommended = _names([{}, {"camera": "medium shot"}, {}], 3)
-    assert recommended is None and len(names) == 3
+    # every three-panel layout is still offered, just none singled out
+    assert recommended is None
+    assert sorted(names) == sorted(layout["name"] for layout in layouts_for_count(3))
 
 
 def test_page_availability_ranks_by_script_order_and_project_reading_order():
