@@ -107,7 +107,8 @@ installed, else a bold sans; the size follows the page (1/64 of its height).
 
 On first launch, the Project dock offers **Open project…**; the
 chosen project folder is remembered in GIMP's user settings and its docks are restored on
-later launches. **Open / Switch Project…** is in GIMP's **File** menu. A dock you close
+later launches. **Open / Switch Project…** is in GIMP's **File** menu, including
+the toolbox File menu before an image is open. A dock you close
 stays closed on later launches; reopen it from
 *Windows → Imanganation*. Row callbacks carry stable IDs.
 For container projects, generated and imported images are

@@ -3890,6 +3890,10 @@ class Imanganation(Gimp.PlugIn):
             proc.add_enum_argument("run-mode", "Run mode", "How to run the procedure",
                                    Gimp.RunMode, Gimp.RunMode.INTERACTIVE,
                                    GObject.ParamFlags.READWRITE)
+            # The toolbox File menu is available before an image is open, which
+            # is when users most need to open an existing project. Keep the
+            # image-window entry as well for switching projects while editing.
+            proc.add_menu_path("<Toolbox>/File")
             proc.add_menu_path("<Image>/File")
             proc.set_documentation(
                 "Open the Imanganation project docks",
