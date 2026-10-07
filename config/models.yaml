@@ -196,7 +196,7 @@ trials:
       display: Qwen-Image 2.1 (7B DiT, int8) — text-to-image and multi-reference editing
       source: https://huggingface.co/Qwen/Qwen-Image-2.1 (repackaged by Comfy-Org)
       subdir: diffusion_models
-      feature: trial renderer (references for characters and places)
+      feature: Qwen-Image 2.1 engine (optional; references for characters and places)
       # Non-commercial: evaluation is allowed; shipping it needs a licence from Alibaba.
       license: {name: Qwen Research License (non-commercial), url: https://huggingface.co/Qwen/Qwen-Image-2.1/blob/main/LICENSE}
       download:
@@ -208,7 +208,7 @@ trials:
       display: Qwen3-VL 8B (int8) — Qwen-Image 2.1's text and image encoder
       source: https://huggingface.co/Comfy-Org/Qwen-Image-2.1
       subdir: text_encoders
-      feature: trial renderer (text encoder)
+      feature: Qwen-Image 2.1 engine (text encoder)
       license: {name: Qwen Research License (non-commercial), url: https://huggingface.co/Qwen/Qwen-Image-2.1/blob/main/LICENSE}
       download:
         url: https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/cb504a4090723e43f17ad01cec0359490e2de613/text_encoders/qwen3vl_8b_int8_convrot.safetensors
@@ -219,7 +219,7 @@ trials:
       display: Qwen-Image 2.1 VAE
       source: https://huggingface.co/Comfy-Org/Qwen-Image-2.1
       subdir: vae
-      feature: trial renderer (VAE)
+      feature: Qwen-Image 2.1 engine (VAE)
       license: {name: Qwen Research License (non-commercial), url: https://huggingface.co/Qwen/Qwen-Image-2.1/blob/main/LICENSE}
       download:
         url: https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/cb504a4090723e43f17ad01cec0359490e2de613/vae/qwen_image_2.1_vae_bf16.safetensors
@@ -243,7 +243,7 @@ trials:
       display: Animagine XL 4.0 Opt (SDXL anime)
       source: https://huggingface.co/cagliostrolab/animagine-xl-4.0
       subdir: checkpoints
-      feature: trial checkpoint (drop-in for NoobAI-XL)
+      feature: face pass (Animagine XL 4.0 repaints faces)
       license: {name: CreativeML OpenRAIL++-M, url: https://huggingface.co/cagliostrolab/animagine-xl-4.0}
       download:
         url: https://huggingface.co/cagliostrolab/animagine-xl-4.0/resolve/2b7c1b397761bf5bd3cc42e5b39ec99314a75a96/animagine-xl-4.0-opt.safetensors
@@ -255,7 +255,7 @@ trials:
       display: Z-Anime Base (Z-Image 6B anime fine-tune, fp8)
       source: https://huggingface.co/SeeSee21/Z-Anime
       subdir: diffusion_models
-      feature: trial renderer (natural-language prompts)
+      feature: Z-Anime engine (optional; natural-language prompts)
       license: {name: Apache-2.0, url: https://huggingface.co/SeeSee21/Z-Anime}
       download:
         url: https://huggingface.co/SeeSee21/Z-Anime/resolve/0f5fb51464638a2f7328a1d74590281e63e1fde2/diffusion_models/z-anime-base-fp8.safetensors
@@ -266,7 +266,7 @@ trials:
       display: Qwen3 4B (fp8) — Z-Image's text encoder
       source: https://huggingface.co/SeeSee21/Z-Anime
       subdir: text_encoders
-      feature: trial renderer (text encoder)
+      feature: Z-Anime engine (text encoder)
       license: {name: Apache-2.0, url: https://huggingface.co/SeeSee21/Z-Anime}
       download:
         url: https://huggingface.co/SeeSee21/Z-Anime/resolve/0f5fb51464638a2f7328a1d74590281e63e1fde2/text_encoder/qwen_3_4b-fp8.safetensors
@@ -277,7 +277,7 @@ trials:
       display: Z-Image VAE
       source: https://huggingface.co/SeeSee21/Z-Anime
       subdir: vae
-      feature: trial renderer (VAE)
+      feature: Z-Anime engine (VAE)
       license: {name: Apache-2.0, url: https://huggingface.co/SeeSee21/Z-Anime}
       download:
         url: https://huggingface.co/SeeSee21/Z-Anime/resolve/0f5fb51464638a2f7328a1d74590281e63e1fde2/vae/ae.safetensors

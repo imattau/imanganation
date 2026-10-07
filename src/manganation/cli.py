@@ -213,6 +213,9 @@ def setup(
                                     help="Also the tagger `manganation eval` judges with."),
     trial: str = typer.Option("", "--trial", help="Also a trial model group "
                               "(models.yaml -> trials), e.g. qwen_image_21."),
+    engine: list[str] = typer.Option(
+        None, "--engine", help="Also an optional render engine: qwen_image_21, z_anime "
+        "or face_pass. Repeatable."),
 ) -> None:
     """Get the model files the engine needs: link ones you have, download the rest.
 
@@ -245,6 +248,17 @@ def setup(
         models += ms.evaluation(load_models())
     if trial:
         models += ms.trial(load_models(), trial)
+    from manganation import engines as engine_catalogue
+
+    for engine_id in engine or []:
+        chosen = engine_catalogue.BY_ID.get(engine_id)
+        if chosen is None or engine_id == "sdxl":
+            rprint(f"[red]No optional engine {engine_id!r}[/red] (known: "
+                   f"{', '.join(i for i in engine_catalogue.BY_ID if i != 'sdxl')})")
+            raise typer.Exit(2)
+        seen = {m.role for m in models}
+        models += [m for m in engine_catalogue.files(chosen, load_models(), settings)
+                   if m.role not in seen]
     states = {m.role: ms.state(m, root, verify=verify) for m in models}
 
     if not check and reuse:
@@ -273,6 +287,12 @@ def setup(
     if not check and ms.write_comfy_paths(comfy_paths_file(), root):
         rprint(f"Pointed ComfyUI's model paths at {root} "
                f"({comfy_paths_file()}); restart ComfyUI to pick it up.")
+
+    extras = [e for e in [*engine_catalogue.ENGINES, engine_catalogue.FACE_PASS]
+              if e.id != "sdxl" and e.id not in (engine or [])]
+    if extras:
+        rprint("Optional engines (add with --engine): " + "; ".join(
+            f"{e.id} ({e.name}, {e.licence})" for e in extras))
 
     todo = [m for m in models if states[m.role] != "present"]
     unfetchable = [m for m in todo if not m.urls]

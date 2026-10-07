@@ -144,3 +144,19 @@ def should_prompt(report: dict[str, Any] | None) -> bool:
         return False
     return any(r.get("role") in ("checkpoint", RENDERER) and r.get("state") != "present"
                for r in report.get("models", []))
+
+
+OPTIONAL_INTRO = ("Optional engines: not needed to render, but a project can choose one "
+                  "under Imanganation ▸ Render Engine. Each downloads separately.")
+DEFAULT_ENGINE = "sdxl"  # its files are the required rows above
+
+
+def optional_engines(engines_report: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """The GET /engines rows Set Up Models offers as extras: every engine but the
+    default (Qwen-Image 2.1, Z-Anime) and the face pass."""
+    return [r for r in (engines_report or {}).get("engines", [])
+            if r.get("id") != DEFAULT_ENGINE]
+
+
+def optional_size(row: dict[str, Any]) -> str:
+    return "" if row.get("installed") else human_size(row.get("missing_bytes") or 0)

@@ -3218,6 +3218,11 @@ def _show_setup_dialog():
     licence = Gtk.Label(xalign=0.0, wrap=True, max_width_chars=72)
     licence.get_style_context().add_class("dim-label")
     box.pack_start(licence, False, False, 0)
+    box.pack_start(Gtk.Separator(margin_top=6), False, False, 0)
+    box.pack_start(Gtk.Label(label=setup_ui.OPTIONAL_INTRO, xalign=0.0, wrap=True,
+                             max_width_chars=72), False, False, 0)
+    optional = Gtk.Grid(column_spacing=12, row_spacing=4)
+    box.pack_start(optional, False, False, 0)
 
     link_button = dialog.add_button("Use Files I Have…", 1)
     cancel_button = dialog.add_button("Pause Download", 2)
@@ -3225,7 +3230,8 @@ def _show_setup_dialog():
     dialog.add_button("Close", Gtk.ResponseType.CLOSE)
     widgets = {"dialog": dialog, "grid": grid, "headline": headline, "bar": bar,
                "details": details, "licence": licence, "link": link_button,
-               "cancel": cancel_button, "download": download_button, "rows": None}
+               "cancel": cancel_button, "download": download_button, "rows": None,
+               "optional": optional, "optional_rows": None}
 
     def post(path, body):
         try:
@@ -3250,6 +3256,7 @@ def _show_setup_dialog():
         if not _SETUP_DIALOG:
             return False  # closed: stop polling
         _update_setup_dialog(widgets, _setup_report())
+        _update_optional_engines(widgets, _engines_report(), post)
         return True
 
     def on_destroy(_widget):
@@ -3312,6 +3319,48 @@ def _update_setup_dialog(widgets, report):
         widgets["bar"].hide()
     widgets["details"].set_text("\n".join(setup_ui.details(report)))
     widgets["licence"].set_text(setup_ui.licence_note(report))
+
+
+def _engines_report():
+    """GET /engines, or None while the engine isn't answering."""
+    try:
+        return _http("GET", f"{ENGINE_URL}/engines", timeout=3)
+    except EngineError:
+        return None
+
+
+def _update_optional_engines(widgets, report, post):
+    """The optional engines under Set Up Models: name, size, state, licence, Install."""
+    grid = widgets["optional"]
+    rows = setup_ui.optional_engines(report)
+    if engine_ui is None or not rows:
+        grid.hide()
+        return
+    if widgets["optional_rows"] is None or len(widgets["optional_rows"]) != len(rows):
+        for child in grid.get_children():
+            grid.remove(child)
+        widgets["optional_rows"] = []
+        for index, row in enumerate(rows):
+            name = Gtk.Label(label=engine_ui.label(row), xalign=0.0, hexpand=True,
+                             wrap=True, max_width_chars=34)
+            name.set_tooltip_text(row.get("summary") or "")
+            size = Gtk.Label(xalign=1.0)
+            state = Gtk.Label(xalign=0.0, wrap=True, max_width_chars=28)
+            licence = (Gtk.LinkButton.new_with_label(row["licence_url"], "Licence")
+                       if row.get("licence_url") else Gtk.Label(label=""))
+            licence.set_tooltip_text(engine_ui.licence_line(row))
+            get = Gtk.Button(label="Install")
+            get.connect("clicked", lambda *_, i=row["id"]: post(f"/engines/{i}/install", {}))
+            for column, widget in enumerate((name, size, state, licence, get)):
+                grid.attach(widget, column, index, 1, 1)
+            widgets["optional_rows"].append((size, state, get))
+        grid.show_all()
+    for (size, state, get), row in zip(widgets["optional_rows"], rows, strict=True):
+        size.set_text(setup_ui.optional_size(row))
+        state.set_text(engine_ui.state(row))
+        get.set_visible(not row.get("installed"))
+        get.set_sensitive(engine_ui.can_install(row))
+    grid.show()
 
 
 def _choose_models_folder(parent):

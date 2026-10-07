@@ -110,6 +110,9 @@ missing, checkpoint first so you can render as soon as it lands:
   before it's used. Run `setup` again to retry.
 - `--check` only reports; `--verify` re-hashes files already in place; `-y` skips the
   question. `HF_TOKEN` and `HF_ENDPOINT` (a Hugging Face mirror) are honoured.
+- Optional engines are fetched only when asked: `--engine qwen_image_21` (Qwen-Image
+  2.1, ~17 GB, non-commercial licence), `--engine z_anime`, `--engine face_pass`
+  (repeatable). Choose one per project in GIMP under **Render Engine…**.
 - Setup also points `config/comfyui_extra_model_paths.yaml` at your models folder.
 - In GIMP the same thing is **Imanganation → Set Up Models…**, which opens by itself on
   first start when the checkpoint is missing.

@@ -170,6 +170,28 @@ def test_cli_check_reports_missing_files_and_exits_nonzero(tmp_path, monkeypatch
         config.REPO_ROOT)  # how a packaged GIMP finds this checkout
 
 
+def test_cli_engine_adds_an_optional_engines_files(tmp_path, monkeypatch):
+    from manganation import cli, config
+
+    settings = load_settings().model_copy(deep=True)
+    settings.paths.models_dir = str(tmp_path / "models")
+    monkeypatch.setattr(config, "load_settings", lambda: settings)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    env = {"COLUMNS": "300"}
+    plain = CliRunner().invoke(cli.app, ["setup", "--check"], env=env)
+    assert "Optional engines (add with --engine): qwen_image_21" in plain.output
+    assert "Qwen Research" not in plain.output.split("Optional engines")[0]
+
+    qwen = CliRunner().invoke(cli.app, ["setup", "--check", "--engine", "qwen_image_21"],
+                              env=env)
+    assert qwen.exit_code == 1
+    assert "qwen_image_21" not in qwen.output.split("Optional engines")[1].split("\n")[0]
+    assert "Qwen Research" in qwen.output  # its licence is listed before downloading
+
+    bad = CliRunner().invoke(cli.app, ["setup", "--check", "--engine", "nope"], env=env)
+    assert bad.exit_code == 2 and "z_anime" in bad.output
+
+
 # --- the engine's /setup endpoints --------------------------------------------
 
 

@@ -121,3 +121,17 @@ def test_the_renderer_row_installs_first_with_its_own_progress():
     ready = _report(("present", "present"))
     ready["models"].insert(0, _renderer_row("missing"))
     assert setup_ui.should_prompt(ready)  # no renderer: can't render, so ask
+
+
+def test_optional_engines_leave_out_the_default_and_size_what_is_missing():
+    report = {"engines": [
+        {"id": "sdxl", "installed": True},
+        {"id": "qwen_image_21", "installed": False, "missing_bytes": 17_300_000_000},
+        {"id": "z_anime", "installed": True, "missing_bytes": 0},
+        {"id": "face_pass", "installed": False, "missing_bytes": 6_900_000_000},
+    ]}
+    rows = setup_ui.optional_engines(report)
+    assert [r["id"] for r in rows] == ["qwen_image_21", "z_anime", "face_pass"]
+    assert setup_ui.optional_size(rows[0]) == "17.3 GB"
+    assert setup_ui.optional_size(rows[1]) == ""
+    assert setup_ui.optional_engines(None) == []

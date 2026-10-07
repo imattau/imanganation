@@ -194,7 +194,9 @@ the top-level *Imanganation* menu:
   the engine needs (what each is for, size, state, a link to its licence), with
   **Download** for the missing ones, checkpoint first, and **Use Files I Have…** to
   link matching files from a ComfyUI or A1111 folder (found by content, no extra disk
-  space). The dialog isn't modal: downloads run in the engine, it shows their progress
+  space). Under them, **Optional engines** (Qwen-Image 2.1, Z-Anime, the face pass)
+  each have their size, licence and an **Install** button; they aren't needed to
+  render, and a project picks one in **Render Engine…**. The dialog isn't modal: downloads run in the engine, it shows their progress
   while you work, **Pause Download** keeps the partial file, and Download resumes it.
   Its first row is the **renderer** (ComfyUI and PyTorch for your GPU, about 5.5 GB):
   missing on a fresh Flatpak install, it's installed before the models, with each step
