@@ -496,7 +496,8 @@ def render_panel(
     project: Path, seq: int, frame_w: float, frame_h: float, *,
     seed: int | None = None, client: ComfyClient | None = None,
     placements: dict[str, Path] | None = None, guide: Path | None = None,
-    guide_strength: float | None = None,
+    guide_strength: float | None = None, engine: str | None = None,
+    face_pass: bool | None = None,
 ) -> RenderResult:
     """Legacy form: panel ``seq`` of ``project/panels.json``, written to its panels/."""
     project = Path(project)
@@ -510,7 +511,7 @@ def render_panel(
         script.panels[seq - 1], project, frame_w, frame_h,
         reading_order=script.reading_order, seed=seed, client=client,
         out=output_path(project, seq), seq=seq, placements=placements,
-        guide=guide, guide_strength=guide_strength,
+        guide=guide, guide_strength=guide_strength, engine=engine, face_pass=face_pass,
     )
 
 
@@ -520,6 +521,7 @@ def render_inline(
     client: ComfyClient | None = None, identity: Path | None = None,
     outputs: Path | None = None, placements: dict[str, Path] | None = None,
     guide: Path | None = None, guide_strength: float | None = None,
+    engine: str | None = None, face_pass: bool | None = None,
 ) -> RenderResult:
     """Container form: the panel spec travels in the request (docs/engine-api.md).
 
@@ -551,7 +553,8 @@ def render_inline(
     out = out_dir / f"{panel.get('id', 'panel')}-{uuid.uuid4().hex[:12]}.png"
     result = _render(spec, root, frame_w, frame_h, reading_order=ReadingOrder(reading_order),
                      seed=seed, client=client, out=out, seq=None, placements=placements,
-                     guide=guide, guide_strength=guide_strength)
+                     guide=guide, guide_strength=guide_strength, engine=engine,
+                     face_pass=face_pass)
     result.panel_id = panel.get("id")
     result.references = {**{n: "active" for n in spec.characters}, **used}
     out.with_suffix(".json").write_text(json.dumps(asdict(result), indent=2))
@@ -633,11 +636,15 @@ def _render(
     out: Path, seq: int | None, placements: dict[str, Path] | None = None,
     guide: Path | None = None, guide_strength: float | None = None,
     init: Path | None = None, init_denoise: float = 0.45,
+    engine: str | None = None, face_pass: bool | None = None,
 ) -> RenderResult:
     """Render ``spec`` with characters from ``identity`` (a character registry folder).
 
     ``init`` starts the SDXL render from an existing image at ``init_denoise`` instead
     of noise: a second stage that restyles another model's composition.
+
+    ``engine`` and ``face_pass`` override the settings for this render (a project's
+    choice, sent by the plug-in; engines.py).
 
     ``placements`` maps characters to mask images (the artist's placement layers, any
     size with the frame's proportions; white or opaque = this character). They replace
@@ -648,6 +655,17 @@ def _render(
     expression, outfit, …) decides the details."""
     placements = _check_placements(spec, placements)
     settings = load_settings()
+    if engine is not None or face_pass is not None:
+        from manganation.engines import ENGINES
+
+        settings = settings.model_copy(deep=True)
+        if engine is not None:
+            if engine not in {e.id for e in ENGINES}:
+                raise RenderError(f"unknown engine {engine!r} "
+                                  f"(known: {', '.join(e.id for e in ENGINES)})")
+            settings.defaults.renderer.engine = engine
+        if face_pass is not None:
+            settings.defaults.face_pass.enabled = face_pass
     models = load_models()
     client = client or ComfyClient(settings.comfyui.base_url)
     if not client.is_up():

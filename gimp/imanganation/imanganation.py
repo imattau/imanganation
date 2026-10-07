@@ -55,6 +55,7 @@ from gi.repository import (  # noqa: E402
 
 try:
     import bubbles as bubble_templates
+    import engine_ui
     import lettering
     import services as engine_services
     import setup_ui
@@ -78,7 +79,7 @@ try:
 except ImportError:  # Keep older single-file plug-in installs usable for legacy projects.
     ProjectFileError = ValueError
     project_from_script = parse_script_text = script_looks_canonical = None
-    lettering = bubble_templates = setup_ui = engine_services = None
+    lettering = bubble_templates = setup_ui = engine_services = engine_ui = None
     load_project = record_take = save_project = apply_field_edit = None
     delete_character = None
     new_id = None
@@ -102,6 +103,7 @@ PROC_PAGE_LAYOUT = "plug-in-imanganation-page-layout"
 PROC_AUTOSTART = "extension-imanganation-ui"
 PROC_NEW_PROJECT = "plug-in-imanganation-new-project"
 PROC_SETUP_MODELS = "plug-in-imanganation-setup-models"
+PROC_RENDER_ENGINE = "plug-in-imanganation-render-engine"
 DOCK_PROJECT = "project"
 DOCK_INSPECTOR = "inspector"
 DOCK_FILMSTRIP = "filmstrip"
@@ -123,6 +125,7 @@ DOCK_OPEN_PROJECT = "plug-in-imanganation-dock-open-project"
 DOCK_OPEN_PAGE = "plug-in-imanganation-dock-open-page"  # Context's "Open page" button
 DOCK_NEW_PROJECT = "plug-in-imanganation-dock-new-project"
 DOCK_SETUP_MODELS = "plug-in-imanganation-dock-setup-models"  # the workspace shows it
+DOCK_RENDER_ENGINE = "plug-in-imanganation-dock-render-engine"  # the workspace shows it
 DOCK_DESIGN_CHARACTER = "plug-in-imanganation-dock-design-character"
 # Project tree right-click menus (one-string procedures: the row id)
 DOCK_NEW_CHARACTER = "plug-in-imanganation-dock-new-character"
@@ -460,8 +463,11 @@ def _render_body(root, manifest, seq):
     panels.json), legacy project_dir + seq otherwise. Frame size is added by callers."""
     if manifest is None:
         return {"project_dir": str(root), "seq": seq}
-    return {"project": manifest["project"]["id"], "panel": manifest["panels"][seq - 1],
+    body = {"project": manifest["project"]["id"], "panel": manifest["panels"][seq - 1],
             "reading_order": manifest["project"].get("reading_order", "rtl")}
+    if engine_ui is not None:  # the project's engine and face pass (Render Engine dialog)
+        body.update(engine_ui.job_options(manifest))
+    return body
 
 
 def _engine_project(root, manifest=None):
@@ -2537,6 +2543,8 @@ def _dock_action(procedure, config, data):
             _design_selected_character()
         elif data == "setup-models":
             _show_setup_dialog()
+        elif data == "render-engine":
+            _show_engine_dialog()
         else:
             _refresh_project_docks()
         return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
@@ -2989,6 +2997,187 @@ def _setup_models_run(procedure, config, data):
         return _error(procedure, "The Imanganation workspace is not running; restart GIMP "
                                  "to start it")
     return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+
+
+def _render_engine_run(procedure, config, data):
+    """Imanganation > Render Engine: the workspace shows the dialog for its open project
+    (it keeps polling install progress while you work)."""
+    try:
+        _dock_pdb_call(DOCK_RENDER_ENGINE, {})
+    except Exception:
+        return _error(procedure, "The Imanganation workspace is not running; restart GIMP "
+                                 "to start it")
+    return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+
+
+_ENGINE_DIALOG = {}  # the open Render Engine dialog's widgets, while it's shown
+_LOCATION_JOBS = {}  # job id -> project root, while locations are being designed
+
+
+def _show_engine_dialog():
+    """Render Engine: one choice per engine (licence, speed, install state), the face
+    pass, Design Locations; Save writes project.render to project.json. Not modal:
+    installs run in the engine and the dialog polls them every second."""
+    if engine_ui is None or load_project is None:
+        raise ValueError("This plug-in install is missing engine_ui.py or project_store.py")
+    root = _DOCK_CONTEXT.get("root")
+    if root is None:
+        raise ValueError("Open a project first (File > Open / Switch Project)")
+    if _ENGINE_DIALOG:
+        _ENGINE_DIALOG["dialog"].present()
+        return
+    manifest = load_project(root)
+    choice = engine_ui.project_render(manifest)
+    try:
+        report = _http("GET", f"{ENGINE_URL}/engines", timeout=5)
+    except EngineError as exc:
+        raise ValueError(f"The engine isn't answering: {exc}") from exc
+
+    dialog = Gtk.Dialog(title=f"Render Engine — {manifest['project'].get('title', '')}")
+    dialog.set_default_size(640, -1)
+    box = dialog.get_content_area()
+    box.set_spacing(8)
+    box.set_border_width(12)
+    box.pack_start(Gtk.Label(label=engine_ui.INTRO, xalign=0.0, wrap=True,
+                             max_width_chars=76), False, False, 0)
+    rows, group = {}, None
+
+    def install(engine_id):
+        try:
+            _http("POST", f"{ENGINE_URL}/engines/{engine_id}/install", {}, timeout=10)
+        except EngineError as exc:
+            Gimp.message(f"Install failed to start: {exc}")
+        refresh()
+
+    def add_row(row, radio):
+        nonlocal group
+        grid = Gtk.Grid(column_spacing=12, row_spacing=2, margin_top=6)
+        if radio:
+            button = Gtk.RadioButton.new_with_label_from_widget(group, engine_ui.label(row))
+            group = group or button
+            button.set_active(row["id"] == choice["engine"])
+        else:
+            button = Gtk.CheckButton(label=engine_ui.label(row))
+            button.set_active(bool(choice["face_pass"]))
+        grid.attach(button, 0, 0, 2, 1)
+        summary = Gtk.Label(label=row.get("summary", ""), xalign=0.0, wrap=True,
+                            max_width_chars=70, margin_start=24)
+        grid.attach(summary, 0, 1, 2, 1)
+        licence = Gtk.Label(label=engine_ui.licence_line(row), xalign=0.0, margin_start=24)
+        licence.get_style_context().add_class("dim-label")
+        grid.attach(licence, 0, 2, 2, 1)
+        state = Gtk.Label(xalign=0.0, margin_start=24)
+        grid.attach(state, 0, 3, 1, 1)
+        get = Gtk.Button(label="Install")
+        get.connect("clicked", lambda *_: install(row["id"]))
+        grid.attach(get, 1, 3, 1, 1)
+        box.pack_start(grid, False, False, 0)
+        rows[row["id"]] = {"button": button, "state": state, "install": get}
+        button.connect("toggled", lambda *_: update_warning())
+
+    for row in engine_ui.engines(report):
+        add_row(row, radio=True)
+    box.pack_start(Gtk.Separator(margin_top=6), False, False, 0)
+    face = engine_ui.face_pass(report)
+    if face is not None:
+        add_row(face, radio=False)
+    warning = Gtk.Label(xalign=0.0, wrap=True, max_width_chars=76, margin_top=6)
+    box.pack_start(warning, False, False, 0)
+    box.pack_start(Gtk.Separator(margin_top=6), False, False, 0)
+    locations_note = Gtk.Label(xalign=0.0, wrap=True, max_width_chars=76)
+    box.pack_start(locations_note, False, False, 0)
+    locations_button = dialog.add_button("Design Locations", 1)
+    dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
+    dialog.add_button("Save", Gtk.ResponseType.OK)
+
+    def selected():
+        engine = next((i for i, r in rows.items() if i != engine_ui.FACE_PASS
+                       and r["button"].get_active()), choice["engine"])
+        face_on = engine_ui.FACE_PASS in rows and rows[engine_ui.FACE_PASS]["button"].get_active()
+        return {"engine": engine, "face_pass": face_on}
+
+    def update_warning():
+        now = _ENGINE_DIALOG.get("report") or report
+        picked = next((r for r in engine_ui.engines(now) if r["id"] == selected()["engine"]),
+                      None)
+        text = engine_ui.warning(picked)
+        warning.set_markup(f"<b>{GLib.markup_escape_text(text)}</b>" if text else "")
+        locations_note.set_text(engine_ui.locations_note(selected()))
+
+    def refresh():
+        if not _ENGINE_DIALOG:
+            return GLib.SOURCE_REMOVE
+        try:
+            now = _http("GET", f"{ENGINE_URL}/engines", timeout=3)
+        except EngineError:
+            return GLib.SOURCE_CONTINUE  # engine restarting: try again next tick
+        _ENGINE_DIALOG["report"] = now
+        for row in now.get("engines", []):
+            widgets = rows.get(row["id"])
+            if widgets is None:
+                continue
+            widgets["state"].set_text(engine_ui.state(row))
+            widgets["install"].set_visible(not row.get("installed"))
+            widgets["install"].set_sensitive(engine_ui.can_install(row))
+            # an engine can be chosen once installed; the current choice stays visible
+            widgets["button"].set_sensitive(engine_ui.can_choose(row)
+                                            or widgets["button"].get_active())
+        locations_button.set_sensitive(not _LOCATION_JOBS)
+        update_warning()
+        return GLib.SOURCE_CONTINUE
+
+    def on_response(dlg, response):
+        if response == 1:
+            _queue_location_design(root)
+            refresh()
+            return  # keep the dialog open
+        if response == Gtk.ResponseType.OK:
+            picked = selected()
+            current = load_project(root)  # the docks may have saved meanwhile
+            engine_ui.set_project_render(current, picked["engine"], picked["face_pass"])
+            save_project(root, current)
+            Gimp.message(f"Render engine for this project: {picked['engine']}"
+                         + (", with the face pass." if picked["face_pass"] else "."))
+        _ENGINE_DIALOG.clear()
+        dlg.destroy()
+
+    dialog.connect("response", on_response)
+    dialog.connect("delete-event", lambda *_: _ENGINE_DIALOG.clear() or False)
+    _ENGINE_DIALOG.update({"dialog": dialog, "report": report})
+    dialog.show_all()
+    refresh()
+    GLib.timeout_add_seconds(1, refresh)
+
+
+def _queue_location_design(root):
+    """Ask the engine to design every location the project's panels use."""
+    manifest = load_project(root)
+    job = _http("POST", f"{ENGINE_URL}/locations/design",
+                {"project": manifest["project"]["id"], "panels": manifest["panels"]})
+    if not _LOCATION_JOBS:
+        GLib.timeout_add_seconds(3, _poll_location_jobs)
+    _LOCATION_JOBS[job["id"]] = root
+    Gimp.message("Designing the script's locations (about a minute each)…")
+
+
+def _poll_location_jobs():
+    for job_id in list(_LOCATION_JOBS):
+        try:
+            job = _http("GET", f"{ENGINE_URL}/jobs/{job_id}", timeout=3)
+        except EngineError:
+            continue
+        if job["status"] in ("queued", "running"):
+            continue
+        del _LOCATION_JOBS[job_id]
+        if job["status"] == "error":
+            Gimp.message(f"Designing locations failed: {job.get('error')}")
+        else:
+            result = job.get("result") or {}
+            made = [d["key"] for d in result.get("designed", [])]
+            Gimp.message("Locations designed: " + (", ".join(made) or "none new")
+                         + (f" (already had: {', '.join(result['existing'])})"
+                            if result.get("existing") else ""))
+    return GLib.SOURCE_CONTINUE if _LOCATION_JOBS else GLib.SOURCE_REMOVE
 
 
 _SETUP_DIALOG = {}  # the open Set Up Models dialog's widgets, while it's shown
@@ -3449,6 +3638,7 @@ def _add_dock_callbacks(plugin):
         (DOCK_OPEN_PAGE, _dock_action, "open-page", False),
         (DOCK_NEW_PROJECT, _dock_action, "new-project", False),
         (DOCK_SETUP_MODELS, _dock_action, "setup-models", False),
+        (DOCK_RENDER_ENGINE, _dock_action, "render-engine", False),
         (DOCK_DESIGN_CHARACTER, _dock_action, "design-character", False),
         (DOCK_NEW_CHARACTER, _dock_character_menu, "new", True),
         (DOCK_DESIGN_CHARACTER_ITEM, _dock_character_menu, "design", True),
@@ -3622,7 +3812,8 @@ class Imanganation(Gimp.PlugIn):
     def do_query_procedures(self):
         return [PROC_RENDER, PROC_NEXT, PROC_REGEN, PROC_INPAINT, PROC_REFINE, PROC_SETREF,
                 PROC_PLACE, PROC_STATUS, PROC_PROJECT_DOCKS, PROC_PAGE_LAYOUT, PROC_AUTOSTART,
-                PROC_NEW_PROJECT, PROC_SETUP_MODELS, *DOCK_SHOW.values()]
+                PROC_NEW_PROJECT, PROC_SETUP_MODELS, PROC_RENDER_ENGINE,
+                *DOCK_SHOW.values()]
 
     def do_create_procedure(self, name):
         global _DOCK_PLUGIN
@@ -3675,6 +3866,21 @@ class Imanganation(Gimp.PlugIn):
                 "Download or link Imanganation's AI models",
                 "Show which model files the engine needs, their licences and state; "
                 "download the missing ones or link files you already have.", name)
+            proc.set_attribution("imanganation", "imanganation", "2026")
+            return proc
+        if name == PROC_RENDER_ENGINE:
+            proc = Gimp.Procedure.new(
+                self, name, Gimp.PDBProcType.PLUGIN, _render_engine_run, None)
+            proc.set_menu_label("Render _Engine...")
+            proc.add_enum_argument("run-mode", "Run mode", "How to run the procedure",
+                                   Gimp.RunMode, Gimp.RunMode.INTERACTIVE,
+                                   GObject.ParamFlags.READWRITE)
+            proc.add_menu_path("<Image>/Imanganation")
+            proc.set_documentation(
+                "Choose the open project's render engine",
+                "Pick the engine that draws this project's panels (each with its licence), "
+                "turn the face pass on or off, install what's missing, and design the "
+                "script's locations.", name)
             proc.set_attribution("imanganation", "imanganation", "2026")
             return proc
         if name == PROC_PROJECT_DOCKS:

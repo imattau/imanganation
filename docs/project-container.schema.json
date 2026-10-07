@@ -20,7 +20,11 @@
         "default_color_mode": {"enum": ["inherit", "color", "bw"],
                                "description": "Recorded only; the engine renders colour"},
         "created": {"type": "string", "format": "date-time"},
-        "modified": {"type": "string", "format": "date-time"}
+        "modified": {"type": "string", "format": "date-time"},
+        "render": {"type": "object", "additionalProperties": false,
+                   "description": "The project's render engine and face pass (Render Engine dialog); absent = the engine's settings",
+                   "properties": {"engine": {"enum": ["sdxl", "qwen_image_21", "z_anime"]},
+                                  "face_pass": {"type": "boolean"}}}
       }
     },
     "script": {

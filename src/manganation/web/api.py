@@ -49,6 +49,9 @@ class RenderRequest(BaseModel):
     # (ControlNet on its edges); the prompt decides the details.
     guide: str | None = None
     guide_strength: float | None = Field(default=None, ge=0, le=2)
+    # The project's render engine and face pass (engines.py); None = the settings'.
+    engine: Literal["sdxl", "qwen_image_21", "z_anime"] | None = None
+    face_pass: bool | None = None
 
     @model_validator(mode="after")
     def _one_form(self) -> RenderRequest:
@@ -191,7 +194,21 @@ class ScriptParseRequest(BaseModel):
     title: str = ""
 
 
-JobKind = Literal["render", "refine", "inpaint", "character", "parse"]
+JobKind = Literal["render", "refine", "inpaint", "character", "parse", "locations"]
+
+
+class LocationsRequest(BaseModel):
+    """Design a reference image for every location these panels use (locations.py)."""
+
+    project: str = Field(pattern=r"^prj_[a-z0-9]{6,}$")
+    panels: list[dict] = Field(min_length=1)
+    force: bool = False  # redesign locations that already have an image
+
+
+@dataclass
+class LocationsResult:
+    designed: list[dict]  # {"key", "name", "image", "details"}
+    existing: list[str]
 
 
 @dataclass
@@ -265,6 +282,8 @@ def create_app(
     parse_script=None,
     setup_runner=None,
     comfy_process=None,
+    design_locations=None,
+    engines_report=None,
 ) -> FastAPI:
     app = FastAPI(title="imanganation engine")
     jobs: dict[str, Job] = {}
@@ -383,6 +402,89 @@ def create_app(
         """Stop the running download; finished files stay, the current one resumes later."""
         return setup().cancel()
 
+    installs: dict = {}  # engine id -> its SetupRunner (downloads that engine's files)
+
+    def _install_runner(engine_id: str):
+        from manganation import engines, models_setup
+        from manganation.config import load_models, load_settings, models_root
+
+        engine = engines.BY_ID.get(engine_id)
+        if engine is None:
+            raise HTTPException(404, f"no engine {engine_id!r} "
+                                     f"(known: {', '.join(engines.BY_ID)})")
+        if engine_id not in installs:
+            installs[engine_id] = models_setup.SetupRunner(
+                models_root(load_settings()),
+                lambda: engines.files(engine, load_models(), load_settings()))
+        return installs[engine_id]
+
+    @app.get("/engines")
+    def engines_list() -> dict:
+        """The render engines and the face pass: what each does, its licence (and
+        whether output may be used commercially), whether it's installed, and any
+        install running for it."""
+        if engines_report is not None:
+            rows = engines_report()
+        else:
+            from manganation import engines
+            from manganation.config import load_models, load_settings, models_root
+
+            settings = load_settings()
+            rows = engines.report(load_models(), settings, models_root(settings))
+        for row in rows:
+            runner = installs.get(row["id"])
+            row["install"] = runner.report()["task"] if runner is not None else None
+        return {"engines": rows}
+
+    @app.post("/engines/{engine_id}/install", status_code=202)
+    def engine_install(engine_id: str) -> dict:
+        """Download an engine's missing files (checked against their SHA-256; resumes).
+        Poll GET /engines. 409 while that engine's install runs."""
+        from manganation.models_setup import SetupError
+
+        runner = _install_runner(engine_id)
+        if runner.busy():
+            raise HTTPException(409, f"{engine_id} is already installing")
+        try:
+            return runner.start_download(None)
+        except SetupError as exc:
+            raise HTTPException(507 if "disk space" in str(exc) else 409, str(exc)) from exc
+
+    @app.post("/locations/design", status_code=202)
+    def locations_design(req: LocationsRequest) -> Job:
+        """Design a reference image for each location the panels use (Qwen-Image 2.1,
+        no people), stored with the project's characters. Renders with the Qwen engine
+        then show every panel set there as the same place."""
+        from manganation.identity import IdentityError, identity_root
+        from manganation.project_container import panel_to_spec
+
+        try:
+            identity = identity_root(req.project, root=root)
+            specs = [panel_to_spec(p)[0] for p in req.panels]
+        except IdentityError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except (ValueError, KeyError, TypeError) as exc:
+            raise HTTPException(422, f"invalid panel: {exc}") from exc
+
+        def work():
+            if design_locations is not None:
+                return design_locations(identity, specs, req.force)
+            from manganation import locations as lc
+
+            registry = lc.LocationRegistry.from_path(identity)
+            designed, existing = [], []
+            for key, found in lc.gather(specs).items():
+                if key in registry.locations and not req.force \
+                        and registry.reference_path(key) is not None:
+                    existing.append(key)
+                    continue
+                loc = lc.design(identity, key, found["name"], found["details"])
+                designed.append({"key": loc.key, "name": loc.name, "details": loc.details,
+                                 "image": str(registry.root / loc.image)})
+            return LocationsResult(designed=designed, existing=existing)
+
+        return submit_job("locations", req.model_dump(), work)
+
     @app.get("/health")
     def health() -> dict:
         from manganation.config import load_settings
@@ -443,6 +545,10 @@ def create_app(
         if req.placements:
             extra["placements"] = {name: _engine_file(path, f"placement for {name}")
                                    for name, path in req.placements.items()}
+        if req.engine is not None:
+            extra["engine"] = req.engine
+        if req.face_pass is not None:
+            extra["face_pass"] = req.face_pass
         if req.guide:
             extra["guide"] = _engine_file(req.guide, "guide")
             if req.guide_strength is not None:

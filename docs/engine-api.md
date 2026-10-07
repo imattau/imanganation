@@ -68,6 +68,14 @@ outfit. It composes with placements and regional IP-Adapter, and results record
 `guide`. Edges carry structure, not colour: pair it with the same seed to keep colours
 too. A strong face change still wants Inpaint (the face's edges are kept).
 
+### Engine: `engine`, `face_pass`
+
+`"engine": "sdxl" | "qwen_image_21" | "z_anime"` and `"face_pass": true | false` override
+the engine's settings for this render (`defaults.renderer.engine`,
+`defaults.face_pass.enabled`). The plug-in sends the project's choice
+(`project.render` in `project.json`, set in *Imanganation → Render Engine*). See
+`GET /engines` for what each needs and its licence.
+
 ### Legacy: `project_dir` + `seq`
 
 ```json
@@ -192,6 +200,25 @@ it, and stops with the engine. Inside the Flatpak the engine's data (renderer, m
 outputs, model-paths file, logs) lives in the app's data folder and its projects root
 is `~/Imanganation`; `IMANGANATION_DATA` / `IMANGANATION_PROJECTS` override them, and
 `COMFY_PORT` moves ComfyUI.
+
+## Engines: `/engines`
+
+- `GET /engines` → `{"engines": [...]}`, one row per engine and one for the face pass
+  (`id: "face_pass"`): `name`, `summary`, `speed`, `licence`, `licence_url`,
+  `commercial` (may output be used commercially; Qwen-Image 2.1: false), `installed`,
+  `missing` (files), `missing_bytes`, `problem` (e.g. a missing Python package), and
+  `install` (the running or last install task, as in `/setup`, or null).
+- `POST /engines/{id}/install` → 202: download that engine's missing files (SHA-256
+  checked, resumable). Poll `GET /engines`. 409 while it's installing; 404 for an
+  unknown id.
+
+## Locations: `POST /locations/design`
+
+`{"project": "prj_…", "panels": [<container panels>], "force": false}` → a job (kind
+`locations`) that designs an establishing image (no people) for each place the panels
+use, stored with the project's characters. Result: `{"designed": [{"key", "name",
+"details", "image"}], "existing": [keys]}`. Qwen-Image renders then give the panel's
+place as a reference.
 
 ## Paths in container forms
 

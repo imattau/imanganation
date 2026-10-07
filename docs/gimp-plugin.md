@@ -180,6 +180,15 @@ the top-level *Imanganation* menu:
   cursor). The script's page numbers only show up in a note like "the script starts a
   new page here". They never restrict which image a panel goes into.
 - **Place Panel…**: places any PNG manually.
+- **Render Engine…** (*Imanganation* menu): chooses how the open project's panels are
+  drawn, saved in `project.json` (`project.render`) and sent with every render and
+  regenerate. One choice per engine with what it does, its speed, its licence (a
+  non-commercial one is flagged, with a warning when selected) and its install state,
+  with **Install** for missing files (progress shown while the dialog stays open). The
+  **face pass** checkbox repaints each face with the panel's expression after the render.
+  **Design Locations** draws an image of each place in the script for Qwen-Image to
+  keep consistent. Measured trade-offs: `docs/quality/2026-10-07_combined.md`. Engine:
+  `GET /engines`, `POST /engines/{id}/install`, `POST /locations/design`.
 - **Set Up Models…**: the AI models aren't included with the app. This lists the files
   the engine needs (what each is for, size, state, a link to its licence), with
   **Download** for the missing ones, checkpoint first, and **Use Files I Have…** to
