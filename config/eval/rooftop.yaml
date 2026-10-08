@@ -5,7 +5,9 @@
 # (`a|b` = either), `expect.forbid` ones it shouldn't. The head count comes from the
 # characters' own count tags (Akira 1boy, Yuki 1girl) unless `expect.count` says.
 name: rooftop
-script: projects/rooftop.imanga/script/script.md
+# A frozen copy of the rooftop script, so runs stay comparable when the project's
+# own script changes (it moved to [FRAME]/[EXPRESSIONS] on 2026-10-09)
+script: config/eval/rooftop-script.md
 identity: projects/_gimp_smoke          # single-figure references (see docs/quality)
 reading_order: rtl
 seeds: [101, 202, 303, 404, 505, 606, 707, 808]   # fewer is noise: docs/quality/2026-10-06_poses_and_noise.md

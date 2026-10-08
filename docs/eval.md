@@ -58,7 +58,7 @@ panel and IP-Adapter settings and the git commit, so `compare` can tell you what
 
 ```yaml
 name: rooftop
-script: projects/rooftop.imanga/script/script.md   # panels come from the real parser
+script: config/eval/rooftop-script.md      # panels come from the real parser
 identity: projects/_gimp_smoke                     # character registry to render with
 seeds: [101, 202, 303, 404, 505, 606, 707, 808]
 characters:                                        # checked on each one's own figure

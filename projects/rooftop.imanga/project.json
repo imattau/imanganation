@@ -7,7 +7,7 @@
     "reading_order": "rtl",
     "default_color_mode": "bw",
     "created": "2026-10-04T02:17:46.722972+00:00",
-    "modified": "2026-10-05T15:28:19+11:00",
+    "modified": "2026-10-09T06:30:43+11:00",
     "imported_from": "rooftop"
   },
   "panels": [
@@ -18,16 +18,18 @@
         "panel": 1
       },
       "scene_heading": "School rooftop — late afternoon",
-      "location": "",
+      "location": "playground",
       "characters": [
         {
           "name": "Akira",
           "version": null
         }
       ],
-      "action": "Wide shot. Akira sits alone against the chain-link fence, lunchbox on his knees.",
+      "action": "Akira sits alone against the chain-link fence, lunchbox on his knees.",
       "camera": "wide shot",
-      "expressions": {},
+      "expressions": {
+        "Akira": "relieved, calm"
+      },
       "dialogue": [
         {
           "speaker": "Akira",
@@ -38,7 +40,7 @@
       "sfx": [],
       "notes": "",
       "flashback": false,
-      "aspect_ratio": "1:1",
+      "aspect_ratio": "4:3",
       "seed": null,
       "status": "placed",
       "placement": {
@@ -54,9 +56,12 @@
         "tk_49640aa21af8",
         "tk_8a744ceb94bc",
         "tk_2cc44cfe6d2c",
-        "tk_57f01a07a5ec"
+        "tk_57f01a07a5ec",
+        "tk_60df24a6530d",
+        "tk_a022302341e8"
       ],
-      "active_take": "tk_57f01a07a5ec"
+      "active_take": "tk_a022302341e8",
+      "source": "84cacf7f4f3a3d59"
     },
     {
       "id": "pnl_d4aeea541da8",
@@ -72,14 +77,16 @@
           "version": null
         }
       ],
-      "action": "Close-up. Akira's head snaps up, eyes wide.",
+      "action": "Akira's head snaps up, eyes wide. Yuki calls from off-panel.",
       "camera": "close-up",
-      "expressions": {},
+      "expressions": {
+        "Akira": "startled, eyes wide"
+      },
       "dialogue": [
         {
           "speaker": "Yuki",
           "text": "There you are!",
-          "kind": "speech"
+          "kind": "shout"
         }
       ],
       "sfx": [
@@ -87,7 +94,7 @@
       ],
       "notes": "",
       "flashback": false,
-      "aspect_ratio": "1:1",
+      "aspect_ratio": "3:2",
       "seed": null,
       "status": "placed",
       "placement": {
@@ -104,7 +111,8 @@
         "tk_98f58eb35bff",
         "tk_7fc18b229965"
       ],
-      "active_take": "tk_7fc18b229965"
+      "active_take": "tk_7fc18b229965",
+      "source": "8cdc3de22cd962f5"
     },
     {
       "id": "pnl_622a14042ddb",
@@ -124,9 +132,12 @@
           "version": null
         }
       ],
-      "action": "Two-shot. Yuki stands over him, hands on her hips, grinning.",
+      "action": "Yuki stands over him, hands on her hips, grinning.",
       "camera": "two-shot",
-      "expressions": {},
+      "expressions": {
+        "Yuki": "wide grin",
+        "Akira": "weary"
+      },
       "dialogue": [
         {
           "speaker": "Yuki",
@@ -142,7 +153,7 @@
       "sfx": [],
       "notes": "",
       "flashback": false,
-      "aspect_ratio": "1:1",
+      "aspect_ratio": "16:9",
       "seed": null,
       "status": "placed",
       "placement": {
@@ -161,7 +172,8 @@
         "tk_c8c5717431d1",
         "tk_00bf7f1c0f62"
       ],
-      "active_take": "tk_00bf7f1c0f62"
+      "active_take": "tk_00bf7f1c0f62",
+      "source": "ad2793cd11554870"
     },
     {
       "id": "pnl_60ddf7e6c584",
@@ -177,9 +189,11 @@
           "version": null
         }
       ],
-      "action": "Reaction shot. Akira sighs, shoulders slumping.",
+      "action": "Akira sighs, shoulders slumping.",
       "camera": "reaction shot",
-      "expressions": {},
+      "expressions": {
+        "Akira": "sighing, half-closed eyes"
+      },
       "dialogue": [
         {
           "speaker": "Akira",
@@ -190,7 +204,7 @@
       "sfx": [],
       "notes": "keep his uniform consistent with the character sheet",
       "flashback": false,
-      "aspect_ratio": "1:1",
+      "aspect_ratio": "1:2",
       "seed": null,
       "status": "placed",
       "placement": {
@@ -206,7 +220,8 @@
         "tk_6546e8b427cb",
         "tk_9cda797855d3"
       ],
-      "active_take": "tk_9cda797855d3"
+      "active_take": "tk_9cda797855d3",
+      "source": "149f1a79f9da106d"
     },
     {
       "id": "pnl_824568b3d439",
@@ -226,9 +241,12 @@
           "version": null
         }
       ],
-      "action": "Medium shot. Yuki drags Akira by the wrist down the stairs.",
+      "action": "Yuki drags Akira by the wrist down the stairs.",
       "camera": "medium shot",
-      "expressions": {},
+      "expressions": {
+        "Yuki": "excited grin",
+        "Akira": "reluctant"
+      },
       "dialogue": [
         {
           "speaker": "Yuki",
@@ -241,7 +259,7 @@
       ],
       "notes": "",
       "flashback": false,
-      "aspect_ratio": "1:1",
+      "aspect_ratio": "1:2",
       "seed": null,
       "status": "placed",
       "placement": {
@@ -260,7 +278,8 @@
         "tk_ed67631a8619",
         "tk_b6e4ee10b1d4"
       ],
-      "active_take": "tk_b6e4ee10b1d4"
+      "active_take": "tk_b6e4ee10b1d4",
+      "source": "9b3de45240380e56"
     }
   ],
   "pages": [
@@ -273,6 +292,11 @@
       "id": "pg_b10540a4eafd",
       "label": "Page 2",
       "file": "pages/page-002.xcf"
+    },
+    {
+      "id": "pg_8245885c41a3",
+      "label": "Page 3",
+      "file": "pages/page-003.xcf"
     }
   ],
   "takes": {
@@ -579,23 +603,59 @@
         "height": 1344,
         "prompt": "manga panel, anime illustration, 1boy, 1girl, messy white bob with pink tips, loose pigtails tied with red ribbons, amber eyes, navy blue sailor collar school uniform with red necktie and pleated skirt, white wristwatch, silver hair barrettes, snowflake pin on blazer lapel, slightly messy strands flying, wide toothed grin, messy charcoal brown with blue tips, medium length swept to left side covering right eye, amber eyes, white dress shirt tucked into navy pleated trousers, grey blazer and red necktie, silver wristwatch, black canvas backpack strap visible on shoulder, loose collar button undone, small scar above left eyebrow, medium shot, Medium shot. Yuki drags Akira by the wrist down the stairs., School rooftop — cont."
       }
+    },
+    "tk_60df24a6530d": {
+      "panel": "pnl_d3e0995e608d",
+      "file": "takes/pnl_d3e0995e608d-tk_60df24a6530d.png",
+      "width": 1280,
+      "height": 896,
+      "kind": "render",
+      "parent": null,
+      "origin": "tk_60df24a6530d",
+      "created": "2026-10-08T20:17:03+11:00",
+      "engine": {
+        "seed": 774476371,
+        "width": 1280,
+        "height": 896,
+        "prompt": "manga panel, anime illustration, solo, wide shot, full body, sitting, against fence, chain-link fence, bento, playground, daytime, outdoors, 1girl, jet black hair, long straight locks tied back with a single white ribbon, amber eyes, tattered grey hoodie over a stained white t-shirt and ripped jeans, white ribbon in hair, scars on knuckles, smudge of grease under left eye, slender build, messy bun, worn sneakers, weary but determined gaze"
+      }
+    },
+    "tk_a022302341e8": {
+      "panel": "pnl_d3e0995e608d",
+      "file": "takes/pnl_d3e0995e608d-tk_a022302341e8.png",
+      "width": 1280,
+      "height": 896,
+      "kind": "render",
+      "parent": null,
+      "origin": "tk_a022302341e8",
+      "created": "2026-10-09T06:30:43+11:00",
+      "engine": {
+        "seed": 135697083,
+        "width": 1280,
+        "height": 896,
+        "prompt": "manga panel, anime illustration, solo, male focus, wide shot, full body, sitting, against fence, knees up, bento, playground, day, outdoors, 1boy, charcoal-brown hair with blue tips, medium length swept to the left covering right eye, amber eyes, white dress shirt with undone collar button, loose red necktie, grey blazer, navy pleated trousers, silver wristwatch, brown satchel bag, small scar above left eyebrow, 17-year-old boy, relieved, calm"
+      }
     }
   },
   "cast": [
     {
       "name": "Akira",
       "aliases": [],
-      "notes": ""
+      "notes": "17-year-old boy. Messy charcoal-brown hair with blue tips, medium length, swept to the left so it covers his right eye; amber eyes; a small scar above his left eyebrow. School uniform: white dress shirt with the collar button undone, loose red necktie, grey blazer, navy pleated trousers, silver wristwatch, and a brown satchel bag on his shoulder. Quiet, a little withdrawn; relaxed slouch, usually looks tired or unimpressed."
     },
     {
       "name": "Yuki",
       "aliases": [],
-      "notes": ""
+      "notes": "15-year-old girl. Long white hair with pink tips, worn in two pigtails tied with red bows, a few strands flying loose; amber eyes; silver hair barrettes. Female school uniform: navy sailor-collar top with a red necktie, navy pleated skirt, a snowflake pin on her lapel, white wristwatch. Loud and energetic; wide toothy grin, restless, always pulling Akira along."
     }
   ],
   "locations": [
     {
       "name": "the stairwell"
+    },
+    {
+      "name": "playground",
+      "notes": "Playground - with seating on the edge - surrounded by chain link fencing"
     }
   ],
   "props": [],
@@ -606,8 +666,9 @@
     "file": "script/script.md",
     "format": "canonical",
     "parser": {
-      "kind": "imported"
+      "kind": "plug-in"
     },
-    "sha256": "4156aab3aec220fab9a0755694e5ec104fd4190edab247d9b62357df66d68822"
+    "sha256": "ac915d58bcf40ecf1e04e6107cbb93632f26cdd557e1150624bf71fe772a304c",
+    "parsed_at": "2026-10-09T06:17:03+11:00"
   }
 }
