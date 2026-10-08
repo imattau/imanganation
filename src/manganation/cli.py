@@ -705,6 +705,8 @@ def _print_report(report: dict) -> None:
                       ", ".join(f"{k} ({n})" for k, n in fails.items()))
     rprint(table)
     rprint("By kind: " + ", ".join(f"{k} {v:.0%}" for k, v in summary["by_kind"].items()))
+    if summary.get("style") is not None:
+        rprint(f"Style shows (its check tags seen): {summary['style']:.0%} of images")
     if summary.get("continuity"):
         rprint("Continuity (same place, same look; 0-1): " + ", ".join(
             f"{k} {v:.2f}" for k, v in summary["continuity"].items()))
@@ -730,6 +732,11 @@ def eval_run(
                              "An existing one resumes: renders already there are kept."),
     seeds: str = typer.Option("", "--seeds", help="Comma-separated seeds instead of the "
                               "suite's (quicker, but not comparable with full runs)."),
+    style: str = typer.Option("", "--style", help="Render in this style preset "
+                              "(config/styles/presets.yaml) and score whether it shows."),
+    style_text: str = typer.Option("", "--style-text", help="The author's own style words."),
+    engine: str = typer.Option("", "--engine", help="Render with this engine "
+                               "(sdxl, qwen_image_21, z_anime) instead of the settings'."),
 ) -> None:
     """Render a suite's panels at fixed seeds, tag them, score them against the script."""
     import re
@@ -748,8 +755,9 @@ def eval_run(
         slug = re.sub(r"[^A-Za-z0-9_.-]+", "-", label).strip("-")
         out = outputs_root() / "eval" / f"{suite.name}-{stamp}{'-' + slug if slug else ''}"
     rprint(f"Run folder: {out}")
-    snapshot = ev._snapshot()
-    ev.render_all(suite, out, log=rprint)
+    look = {"preset": style or "default", "text": style_text} if style or style_text else None
+    snapshot = ev._snapshot(look, engine or None)
+    ev.render_all(suite, out, log=rprint, style=look, engine=engine or None)
     report = ev.score_all(suite, out, tagger, label=label, snapshot=snapshot,
                           detector=detector)
     _print_report(report)

@@ -1206,6 +1206,8 @@ def inpaint_selection(procedure, run_mode, image, drawables, config, data):
             manifest = _manifest_for(root)
             if manifest is not None:
                 body["reading_order"] = manifest["project"].get("reading_order", "rtl")
+        if "project" in engine_project:  # the project's look, as its panels have
+            body.update(_style_options(_manifest_for(root)))
         result = _run_job(config.get_property("engine-url").rstrip("/"), "/inpaint", body,
                           f"Inpainting panel {seq:03d}: {prompt[:40]}…")
     except (EngineError, ValueError) as exc:
@@ -3213,12 +3215,19 @@ def _create_project_from_script(script_path, title, parent, page_size, design):
                      "their Context notes, then use Design character.")
 
 
-def _queue_character_design(root, manifest, character, redesign=False):
+def _style_options(manifest):
+    """The project's look for an engine request ({"style": …}), or nothing."""
+    return engine_ui.style_options(manifest) if engine_ui is not None and manifest else {}
+
+
+def _queue_character_design(root, manifest, character, redesign=False, describe=True):
     """Ask the engine to design one character from its notes; the docks refresh when
-    the sheet is ready."""
+    the sheet is ready. ``describe`` False keeps their traits (a redesign in a new
+    look, not a new description)."""
     body = {**_engine_project(root, manifest), "name": character["name"],
-            "description": character.get("notes", ""),
-            "aliases": character.get("aliases", []), "redesign": redesign}
+            "description": character.get("notes", "") if describe else "",
+            "aliases": character.get("aliases", []), "redesign": redesign,
+            **_style_options(manifest)}
     job = _http("POST", f"{ENGINE_URL}/characters", body)
     if not _DESIGN_JOBS:
         GLib.timeout_add_seconds(3, _poll_design_jobs)
@@ -3631,6 +3640,43 @@ def _show_engine_dialog():
     warning = Gtk.Label(xalign=0.0, wrap=True, max_width_chars=76, margin_top=6)
     box.pack_start(warning, False, False, 0)
     box.pack_start(Gtk.Separator(margin_top=6), False, False, 0)
+    # The project's look: a preset from the engine (GET /styles) and the author's words
+    current_style = engine_ui.project_style(manifest)
+    try:
+        presets = _http("GET", f"{ENGINE_URL}/styles", timeout=5)
+    except EngineError:  # an engine from before styles: only the look it has
+        presets = [{"id": "default", "label": "Clean modern anime"}]
+    if current_style["preset"] not in {p["id"] for p in presets}:
+        presets.append({"id": current_style["preset"], "label": current_style["preset"]})
+    style_title = Gtk.Label(xalign=0.0, margin_top=6)
+    style_title.set_markup("<b>Style</b>")
+    box.pack_start(style_title, False, False, 0)
+    box.pack_start(Gtk.Label(label=engine_ui.STYLE_INTRO, xalign=0.0, wrap=True,
+                             max_width_chars=76), False, False, 0)
+    style_grid = Gtk.Grid(column_spacing=12, row_spacing=6)
+    style_combo = Gtk.ComboBoxText(hexpand=True)
+    for entry in presets:
+        style_combo.append(entry["id"], entry.get("label") or entry["id"])
+    style_combo.set_active_id(current_style["preset"])
+    style_text = Gtk.Entry(hexpand=True, max_length=300, text=current_style["text"],
+                           placeholder_text="Optional, your own words: e.g. thick brush "
+                                            "outlines, autumn palette")
+    style_grid.attach(Gtk.Label(label="Look", xalign=0.0), 0, 0, 1, 1)
+    style_grid.attach(style_combo, 1, 0, 1, 1)
+    style_grid.attach(Gtk.Label(label="Also", xalign=0.0), 0, 1, 1, 1)
+    style_grid.attach(style_text, 1, 1, 1, 1)
+    box.pack_start(style_grid, False, False, 0)
+    style_note = Gtk.Label(xalign=0.0, wrap=True, max_width_chars=76)
+    style_note.get_style_context().add_class("dim-label")
+    box.pack_start(style_note, False, False, 0)
+
+    def update_style_note(*_):
+        chosen = next((p for p in presets if p["id"] == style_combo.get_active_id()), None)
+        style_note.set_text(engine_ui.style_note(chosen))
+
+    style_combo.connect("changed", update_style_note)
+    update_style_note()
+    box.pack_start(Gtk.Separator(margin_top=6), False, False, 0)
     locations_note = Gtk.Label(xalign=0.0, wrap=True, max_width_chars=76)
     box.pack_start(locations_note, False, False, 0)
     locations_button = dialog.add_button("Design Locations", 1)
@@ -3641,7 +3687,9 @@ def _show_engine_dialog():
         engine = next((i for i, r in rows.items() if i != engine_ui.FACE_PASS
                        and r["button"].get_active()), choice["engine"])
         face_on = engine_ui.FACE_PASS in rows and rows[engine_ui.FACE_PASS]["button"].get_active()
-        return {"engine": engine, "face_pass": face_on}
+        return {"engine": engine, "face_pass": face_on,
+                "style": {"preset": style_combo.get_active_id() or "default",
+                          "text": " ".join(style_text.get_text().split())}}
 
     def update_warning():
         now = _ENGINE_DIALOG.get("report") or report
@@ -3681,10 +3729,14 @@ def _show_engine_dialog():
         if response == Gtk.ResponseType.OK:
             picked = selected()
             current = load_project(root)  # the docks may have saved meanwhile
-            engine_ui.set_project_render(current, picked["engine"], picked["face_pass"])
+            before = engine_ui.project_style(current)
+            engine_ui.set_project_render(current, picked["engine"], picked["face_pass"],
+                                         picked["style"])
             save_project(root, current)
             Gimp.message(f"Render engine for this project: {picked['engine']}"
                          + (", with the face pass." if picked["face_pass"] else "."))
+            if engine_ui.project_style(current) != before:
+                _offer_style_redesign(root, current)
         _ENGINE_DIALOG.clear()
         dlg.destroy()
 
@@ -3696,12 +3748,53 @@ def _show_engine_dialog():
     GLib.timeout_add_seconds(1, refresh)
 
 
+def _offer_style_redesign(root, manifest):
+    """After the project's look changed: offer to redesign the characters and locations
+    that have designs, so the references the panels follow are in the new look too.
+    Characters keep their traits; earlier designs are kept as versions."""
+    query = urllib.parse.urlencode(_engine_project(root, manifest))
+    try:
+        known = _http("GET", f"{ENGINE_URL}/characters?{query}", timeout=5)
+        places = _http("GET", f"{ENGINE_URL}/locations?{query}", timeout=5)
+    except EngineError as exc:
+        Gimp.message(f"The look was saved. To draw the cast and locations in it, use "
+                     f"Design character / Design location ({_engine_status(exc)}).")
+        return
+    designed = {c["name"].casefold() for c in known if c.get("default_version")}
+    cast = [c for c in manifest["cast"] if c["name"].casefold() in designed
+            and c["name"] not in _DESIGN_JOBS.values()]
+    drawn = {p["key"] for p in places if p.get("image")}
+    locations = [loc for loc in manifest.get("locations", [])
+                 if location_key(loc["name"]) in drawn
+                 and location_key(loc["name"]) not in _LOCATION_DESIGN_JOBS.values()]
+    if not cast and not locations:
+        return
+    parts = [f"{len(cast)} character{'s' if len(cast) != 1 else ''}" if cast else "",
+             f"{len(locations)} location{'s' if len(locations) != 1 else ''}"
+             if locations else ""]
+    what = " and ".join(p for p in parts if p)
+    if not _confirm(f"Redesign {what} in the new look?",
+                    "Panels follow these designs, so they keep the old look until the "
+                    "designs are redrawn. Characters keep their traits; earlier designs "
+                    "are kept as versions. About a minute each.", "Redesign"):
+        return
+    try:
+        for character in cast:
+            _queue_character_design(root, manifest, character, redesign=True,
+                                    describe=False)
+        for location in locations:
+            _queue_single_location_design(root, manifest, location, redesign=True)
+    except EngineError as exc:
+        Gimp.message(f"Not every design was queued: {_engine_status(exc)}")
+    _refresh_project_docks()
+
+
 def _queue_location_design(root):
     """Ask the engine to design every location the project's panels use."""
     manifest = load_project(root)
     job = _http("POST", f"{ENGINE_URL}/locations/design",
                 {"project": manifest["project"]["id"], "panels": manifest["panels"],
-                 "locations": manifest.get("locations", [])})
+                 "locations": manifest.get("locations", []), **_style_options(manifest)})
     if not _LOCATION_JOBS:
         GLib.timeout_add_seconds(3, _poll_location_jobs)
     _LOCATION_JOBS[job["id"]] = root
@@ -3739,7 +3832,8 @@ def _queue_single_location_design(root, manifest, location, redesign=False):
     """Ask the engine to design one location from its notes; the docks refresh when
     the image is ready."""
     body = {"project": manifest["project"]["id"], "name": location["name"],
-            "description": location.get("notes", ""), "redesign": redesign}
+            "description": location.get("notes", ""), "redesign": redesign,
+            **_style_options(manifest)}
     job = _http("POST", f"{ENGINE_URL}/locations", body)
     if not _LOCATION_DESIGN_JOBS:
         GLib.timeout_add_seconds(3, _poll_single_location_jobs)

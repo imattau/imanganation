@@ -246,6 +246,12 @@ the top-level *Imanganation* menu:
   non-commercial one is flagged, with a warning when selected) and its install state,
   with **Install** for missing files (progress shown while the dialog stays open). The
   **face pass** checkbox repaints each face with the panel's expression after the render.
+  **Style** sets the project's look: a preset (Clean modern anime, 90s cel anime, Gritty
+  seinen ink, Soft shōjo, Watercolour; each with what measuring it found) and, under
+  *Also*, your own words. It goes with every render, inpaint and character and location
+  design, saved as `project.render.style`. Changing it offers to redesign the characters
+  and locations that have designs, since panels follow those references (traits are
+  kept; earlier designs stay as versions). Panels stay in colour. See `docs/styles.md`.
   **Design Locations** draws an image of each place in the script that has none yet
   (a place's notes are its description) for Qwen-Image to keep consistent. Measured trade-offs: `docs/quality/2026-10-07_combined.md`. Engine:
   `GET /engines`, `POST /engines/{id}/install`, `POST /locations/design`.

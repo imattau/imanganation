@@ -1,0 +1,68 @@
+# A project's overall look (project.render.style in project.json; docs/styles.md).
+#
+# Each preset adds to the colour style (default_color.yaml), never replaces it:
+#   tags      Danbooru tags for SDXL (NoobAI), after the style prefix
+#   negative  more negative tags for SDXL
+#   prose     how Qwen-Image and Z-Anime are told the look, after "A full-colour anime
+#             illustration for a single manga panel, ". Location images use it too.
+#   check     tags the eval tagger should see when the look shows (`a|b` = either);
+#             `manganation eval run --style ID` scores it as the `style` check
+#   measured  what an eval run found (docs/quality/2026-10-08_styles.md); shown in GIMP
+# Character designs (SDXL) get the tags, so their references are in the same look.
+# Change a preset only with an eval run: style tags also move accuracy.
+presets:
+  default:
+    label: Clean modern anime
+    summary: Crisp line art and cel shading; the look every measurement so far used.
+    tags: ""
+    negative: ""
+    prose: clean line art and cel shading
+    check: []
+    measured: "the baseline: 83% of the rooftop suite's accuracy checks."
+  retro_90s:
+    label: 90s cel anime
+    summary: Hand-painted cel look of 1990s TV anime, slightly muted colours.
+    tags: "retro artstyle, 1990s (style)"
+    negative: ""
+    prose: "drawn like a 1990s cel-animated TV anime: hand-painted cels, slightly muted
+      colours, soft shading"
+    check: ["retro artstyle|1990s (style)"]
+    measured: "with the characters redesigned in it, it shows on every panel, but
+      accuracy falls to 71% (default 83%): hair and outfits drift most. Without a
+      redesign it barely shows."
+  seinen_ink:
+    label: Gritty seinen ink
+    summary: Heavy ink outlines, flat muted colour.
+    tags: "hatching (texture), muted color, high contrast"
+    # Its first design gave Yuki black wings and tentacles, which every panel copied
+    negative: "pastel colors, sparkle, wings, tentacles, horns, monster, demon"
+    prose: "a gritty seinen manga look: heavy ink lines, hatched shadows, muted
+      desaturated colours, high contrast"
+    # The tagger has no tag for this look (flat muted ink; no hatching appeared):
+    # docs/quality/2026-10-08_styles.md measures it as colour saturation instead
+    check: []
+    measured: "with the characters redesigned in it, it shows on every panel (colour
+      about 25% less saturated); accuracy 76% (default 83%): hair colour drifts. Without
+      a redesign, only slightly muted."
+  soft_shoujo:
+    label: Soft shōjo
+    summary: Delicate lines, pastel colours, sparkles and glowing light.
+    tags: "pastel colors, sparkle, light particles"
+    negative: "high contrast, dark"
+    prose: "a soft shōjo manga look: delicate thin lines, pastel colours, sparkles and
+      gently glowing light"
+    check: ["pastel colors|sparkle|light particles"]
+    measured: "with the characters redesigned in it, it shows on every panel and
+      accuracy holds (84%, default 83%). Without a redesign it barely shows."
+  watercolor:
+    label: Watercolour
+    summary: Soft watercolour washes on paper, visible brush texture.
+    tags: "watercolor (medium), traditional media"
+    negative: ""
+    prose: "painted in soft watercolour on paper: light washes of colour, visible brush
+      texture, soft edges"
+    check: ["watercolor (medium)|traditional media"]
+    measured: "with the characters redesigned in it, it shows on every panel and
+      accuracy holds (82%, default 83%), though a streak of blue hair can take over.
+      Without a redesign it doesn't show on SDXL; Qwen-Image paints every panel in it
+      from the words alone, accuracy unchanged."

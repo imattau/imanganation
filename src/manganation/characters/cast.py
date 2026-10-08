@@ -129,6 +129,7 @@ def design_character(
     settings: Settings | None = None,
     llm=None,
     comfy=None,
+    style: dict | None = None,
 ) -> CharacterDesign:
     """Create (or update) one character from the author's description, derive its
     traits with the LLM, release the LLM's VRAM, then render and lock its design sheet.
@@ -137,6 +138,8 @@ def design_character(
     New Project from Script… both end here. ``redesign`` re-derives traits from a new
     description (an empty one keeps the traits) and adds a new design version
     (``design-02``, …) as the active reference; earlier designs are never overwritten.
+    ``style`` is the project's look (styles.py): its tags go into the design, so the
+    reference every panel takes after is drawn in that look too.
     """
     from manganation.script.llm import OllamaClient
 
@@ -167,8 +170,17 @@ def design_character(
     while character.version(version_id) is not None:
         number += 1
         version_id = f"design-{number:02d}"
+    prompt = None
+    if style:
+        from manganation.characters.design import design_prompt_for
+        from manganation.render.panel import load_style
+
+        look = load_style(style)
+        prompt = design_prompt_for(character, extra=look["tags"])
+        if look["extra_negative"]:  # what the look must not bring (seinen: no monsters)
+            prompt.negative = f"{prompt.negative}, {look['extra_negative']}"
     result = generate_design(character, registry, version_id=version_id, seed=seed,
-                             settings=settings, client=comfy)
+                             settings=settings, client=comfy, prompt=prompt)
     return CharacterDesign(
         name=character.name, created=created,
         appearance=character.appearance.model_dump(), version_id=result.version_id,

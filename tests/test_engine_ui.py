@@ -58,3 +58,26 @@ def test_rows_states_and_the_non_commercial_warning():
     assert not engine_ui.can_install(running)
     failed = {**QWEN, "install": {"state": "error", "errors": ["peer closed"]}}
     assert engine_ui.state(failed) == "Install failed: peer closed"
+
+
+def test_a_projects_look_travels_with_its_jobs_and_designs():
+    schema = json.loads((REPO_ROOT / "docs/project-container.schema.json").read_text())
+    project = {"id": "prj_abc123", "title": "t", "reading_order": "rtl",
+               "created": "2026-10-07T00:00:00Z", "modified": "2026-10-07T00:00:00Z"}
+    manifest = {"project": project}
+    assert engine_ui.project_style(manifest) == {"preset": "default", "text": ""}
+    assert engine_ui.style_options(manifest) == {}
+    engine_ui.set_project_render(manifest, "sdxl", False,
+                                 {"preset": "retro_90s", "text": "  autumn   palette "})
+    style = {"preset": "retro_90s", "text": "autumn palette"}
+    assert project["render"]["style"] == style
+    assert engine_ui.job_options(manifest) == {"engine": "sdxl", "face_pass": False,
+                                               "style": style}
+    assert engine_ui.style_options(manifest) == {"style": style}
+    jsonschema.validate(project, schema["properties"]["project"])
+    engine_ui.set_project_render(manifest, "qwen_image_21", True)  # keeps the look
+    assert project["render"]["style"] == style
+    engine_ui.set_project_render(manifest, "sdxl", False, {"preset": "default", "text": ""})
+    assert "style" not in project["render"]  # the default look is no look of its own
+    assert engine_ui.style_note({"summary": "Soft.", "measured": "shows in 9/10"}) == (
+        "Soft. Measured: shows in 9/10")

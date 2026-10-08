@@ -334,18 +334,22 @@ def _git() -> dict:
             "dirty": bool(run("status", "--porcelain", "--untracked-files=no"))}
 
 
-def _snapshot() -> dict:
-    """What a run was rendered with, so two reports can say why they differ."""
+def _snapshot(style: dict | None = None, engine: str | None = None) -> dict:
+    """What a run was rendered with, so two reports can say why they differ.
+    ``style``: a project look (styles.py) the run used; ``engine`` an engine override."""
     from manganation.config import load_settings
     from manganation.render.panel import load_style
 
     defaults = load_settings().defaults
-    return {"style": load_style(), "panel": defaults.panel.model_dump(),
+    return {"style": load_style(style), "style_options": style,
+            "engine": engine or defaults.renderer.engine,
+            "panel": defaults.panel.model_dump(),
             "ipadapter": defaults.ipadapter.model_dump(), "git": _git()}
 
 
 def render_all(suite: Suite, out_dir: Path, *, client=None, log=print,
-               init_dir: Path | None = None, init_denoise: float = 0.45) -> None:
+               init_dir: Path | None = None, init_denoise: float = 0.45,
+               style: dict | None = None, engine: str | None = None) -> None:
     """Render every case at every seed into ``out_dir`` (skipping images already there,
     so an interrupted run resumes). ``init_dir``: another run's renders, each one the
     starting image of the same case and seed here (a two-stage pipeline)."""
@@ -364,7 +368,7 @@ def render_all(suite: Suite, out_dir: Path, *, client=None, log=print,
             result = _render(specs[case.id], suite.identity, *case.frame,
                              reading_order=ReadingOrder(suite.reading_order), seed=seed,
                              client=client, out=out, seq=None, init=init,
-                             init_denoise=init_denoise)
+                             init_denoise=init_denoise, style=style, engine=engine)
             for warning in result.warnings:
                 log(f"  warning: {warning}")
 
@@ -373,7 +377,12 @@ def score_all(suite: Suite, out_dir: Path, tagger, *, label: str = "",
               snapshot: dict | None = None, detector=None) -> dict:
     """Tag every render in ``out_dir`` and write ``report.json`` (+ ``sheet.png``).
     With a ``detector`` (and ``characters`` in the suite), figures are checked too."""
+    from manganation import styles
+
     specs = panel_specs(suite)
+    config = snapshot if snapshot is not None else _snapshot()
+    # The look's own check, kept apart from the accuracy score so styles compare on it
+    look = styles.check_tags(config.get("style_options"))
     results = []
     for case in suite.cases:
         count = case.count if case.count is not None else expected_count(
@@ -396,9 +405,11 @@ def score_all(suite: Suite, out_dir: Path, tagger, *, label: str = "",
             if detector is not None and not boxes:
                 boxes = [[round(b.x0), round(b.y0), round(b.x1), round(b.y1)]
                          for b in detector.figures(image)]
+            style_checks = [{**check_tag(t, probs, suite.threshold), "kind": "style"}
+                            for t in look]
             results.append({
                 "case": case.id, "seed": seed, "image": image.name, "prompt": prompt,
-                "checks": checks, "figures": figures,
+                "checks": checks, "style_checks": style_checks, "figures": figures,
                 "background": background_tags(probs), "palette": palette(image, boxes),
                 "score": sum(c["ok"] for c in checks) / len(checks) if checks else 1.0,
                 "top_tags": {t: round(p, 3) for t, p in top if p >= 0.2}})
@@ -406,7 +417,7 @@ def score_all(suite: Suite, out_dir: Path, tagger, *, label: str = "",
               "created": datetime.now().astimezone().isoformat(timespec="seconds"),
               "threshold": suite.threshold, "seeds": suite.seeds,
               "unknown_tags": unknown_tags(suite, tagger.vocabulary),
-              "config": snapshot if snapshot is not None else _snapshot(),
+              "config": config,
               "results": results, "summary": summarize(results)}
     from manganation.locations import location_key
     from manganation.render.panel import setting
@@ -435,7 +446,10 @@ def summarize(results: list[dict]) -> dict:
     for c in checks:
         by_kind.setdefault(c["kind"], []).append(c["ok"])
     mean = lambda xs: round(sum(xs) / len(xs), 3) if xs else None  # noqa: E731
+    looks = [all(c["ok"] for c in r["style_checks"]) for r in results
+             if r.get("style_checks")]
     return {"score": mean([c["ok"] for c in checks]), "images": len(results),
+            "style": mean(looks),  # share of images whose look shows; None: no check
             "by_kind": {k: mean(v) for k, v in by_kind.items()},
             "by_case": {k: mean(v) for k, v in by_case.items()},
             "by_check": {k: mean(v) for k, v in by_check.items()}}

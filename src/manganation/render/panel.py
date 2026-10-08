@@ -77,10 +77,14 @@ def fit_resolution(
     return best[1], best[2]
 
 
-def load_style() -> dict:
-    """The single colour style. B&W/screentone is the artist's job in GIMP, so a
+def load_style(options: dict | None = None) -> dict:
+    """The colour style, with a project's look on top (``options``: project.render.style,
+    ``{"preset", "text"}``; styles.py). B&W/screentone is the artist's job in GIMP, so a
     panel's ``color_mode`` is recorded but never changes the render."""
-    return yaml.safe_load((CONFIG_DIR / "styles" / "default_color.yaml").read_text())
+    from manganation import styles
+
+    base = yaml.safe_load((CONFIG_DIR / "styles" / "default_color.yaml").read_text())
+    return styles.apply(base, options)
 
 
 COUNT_TAG = re.compile(r"^(\d+)(girl|boy|other)s?$")
@@ -260,7 +264,7 @@ def shot_prose(camera: str) -> str:
 
 def prose_prompt(spec: PanelSpec, appearances: dict[str, list[str]],
                  refs: dict[str, int] | None = None, location_ref: int | None = None,
-                 ) -> str:
+                 style: str = "clean line art and cel shading") -> str:
     """A panel in plain English, for models with an LLM text encoder (Qwen-Image,
     Z-Image): the script's own sentences, each character introduced by name with their
     look, and (``refs``: name -> image number) a pointer to their reference image."""
@@ -274,8 +278,8 @@ def prose_prompt(spec: PanelSpec, appearances: dict[str, list[str]],
     if count and all(kinds):
         who += ": " + (kinds[0] if count == 1 else ", ".join(kinds[:-1]) + " and "
                        + kinds[-1])
-    parts = ["A full-colour anime illustration for a single manga panel, clean line art "
-             f"and cel shading, showing {who}. No text, no speech bubbles, no panel borders."]
+    parts = [f"A full-colour anime illustration for a single manga panel, {style}, "
+             f"showing {who}. No text, no speech bubbles, no panel borders."]
     if spec.camera:
         parts.append(shot_prose(spec.camera))
     place = setting(spec)
@@ -351,14 +355,14 @@ def _prose_graph(engine: str, spec: PanelSpec, identity: Path, client, models: d
                 uploaded.append(client.upload_image(str(place_ref))["name"])
             location_ref = len(uploaded)
         prompt = prose_prompt(spec, appearances, {n: i for i, n in enumerate(refs, 1)},
-                              location_ref)
+                              location_ref, style=style["prose"])
         graph = graphs.qwen_image21(unet=files["model"], clip=files["text_encoder"],
                                     vae=files["vae"], prompt=prompt, refs=uploaded,
                                     width=width, height=height, seed=seed, prefix=prefix,
                                     resolution=resolution)
         return graph, prompt, ",".join(refs) or None
     files = trial_files(models, "z_anime")
-    prompt = prose_prompt(spec, appearances)
+    prompt = prose_prompt(spec, appearances, style=style["prose"])
     negative = (style.get("negative", "") + ", comic, multiple panels, border, "
                 "speech bubble, extra people" if spec.characters else style.get("negative", ""))
     graph = graphs.z_image(unet=files["model"], clip=files["text_encoder"], vae=files["vae"],
@@ -521,7 +525,7 @@ def render_inline(
     client: ComfyClient | None = None, identity: Path | None = None,
     outputs: Path | None = None, placements: dict[str, Path] | None = None,
     guide: Path | None = None, guide_strength: float | None = None,
-    engine: str | None = None, face_pass: bool | None = None,
+    engine: str | None = None, face_pass: bool | None = None, style: dict | None = None,
 ) -> RenderResult:
     """Container form: the panel spec travels in the request (docs/engine-api.md).
 
@@ -554,7 +558,7 @@ def render_inline(
     result = _render(spec, root, frame_w, frame_h, reading_order=ReadingOrder(reading_order),
                      seed=seed, client=client, out=out, seq=None, placements=placements,
                      guide=guide, guide_strength=guide_strength, engine=engine,
-                     face_pass=face_pass)
+                     face_pass=face_pass, style=style)
     result.panel_id = panel.get("id")
     result.references = {**{n: "active" for n in spec.characters}, **used}
     out.with_suffix(".json").write_text(json.dumps(asdict(result), indent=2))
@@ -636,7 +640,7 @@ def _render(
     out: Path, seq: int | None, placements: dict[str, Path] | None = None,
     guide: Path | None = None, guide_strength: float | None = None,
     init: Path | None = None, init_denoise: float = 0.45,
-    engine: str | None = None, face_pass: bool | None = None,
+    engine: str | None = None, face_pass: bool | None = None, style: dict | None = None,
 ) -> RenderResult:
     """Render ``spec`` with characters from ``identity`` (a character registry folder).
 
@@ -644,7 +648,8 @@ def _render(
     of noise: a second stage that restyles another model's composition.
 
     ``engine`` and ``face_pass`` override the settings for this render (a project's
-    choice, sent by the plug-in; engines.py).
+    choice, sent by the plug-in; engines.py), and ``style`` is the project's look
+    (styles.py).
 
     ``placements`` maps characters to mask images (the artist's placement layers, any
     size with the frame's proportions; white or opaque = this character). They replace
@@ -671,7 +676,7 @@ def _render(
     if not client.is_up():
         raise RenderError(f"ComfyUI is not reachable at {settings.comfyui.base_url}")
 
-    style = load_style()
+    style = load_style(style)
     warnings: list[str] = []
     staging = None
     engine = settings.defaults.renderer.engine

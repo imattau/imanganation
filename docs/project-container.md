@@ -84,7 +84,7 @@ version, and preserve unknown keys within the same version.
 | `reading_order` | `rtl` (manga) or `ltr`. |
 | `default_color_mode` | Recorded only; the engine renders colour (`docs/color-policy.md`). |
 | `preset` | Optional manual-setup preset id (`oneshot`, `manga_series`, `color_comic`, `digital_comic`, or `custom`). Presets initialize editable settings; they don't constrain later edits. |
-| `render` | Optional `{"engine": "sdxl" \| "qwen_image_21" \| "z_anime", "face_pass": bool}`: the project's render engine, set in *Imanganation → Render Engine*; every render job sends it. Absent: the engine's own settings. |
+| `render` | Optional `{"engine": "sdxl" \| "qwen_image_21" \| "z_anime", "face_pass": bool, "style": {"preset", "text"}}`: the project's render engine and look, set in *Imanganation → Render Engine*; every render job sends it, and inpaints and character/location designs send the style. Absent: the engine's own settings; no `style`: the default look (`docs/styles.md`). |
 | `page_setup` | Optional manual-project defaults: selected format, page width/height in pixels, and resolution in PPI. New pages inherit these values. |
 | `created`, `modified` | ISO 8601 timestamps. |
 

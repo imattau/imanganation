@@ -26,6 +26,20 @@ from manganation.render import refiner as refiner_render
 from manganation.render.comfy_client import ComfyClient
 
 
+class StyleOptions(BaseModel):
+    """A project's overall look (project.render.style; styles.py)."""
+
+    preset: str = Field(default="default", max_length=40)
+    text: str = Field(default="", max_length=300, description="The author's own words")
+
+    @model_validator(mode="after")
+    def _known(self) -> StyleOptions:
+        from manganation import styles
+
+        styles.preset(self.preset)  # StyleError (a ValueError): 422
+        return self
+
+
 class RenderRequest(BaseModel):
     """Either form, not both (docs/engine-api.md):
 
@@ -52,6 +66,7 @@ class RenderRequest(BaseModel):
     # The project's render engine and face pass (engines.py); None = the settings'.
     engine: Literal["sdxl", "qwen_image_21", "z_anime"] | None = None
     face_pass: bool | None = None
+    style: StyleOptions | None = None  # the project's look; None = the default
 
     @model_validator(mode="after")
     def _one_form(self) -> RenderRequest:
@@ -139,6 +154,8 @@ class InpaintRequest(BaseModel):
     # prompt change more (e.g. an expression), higher holds the reference closer.
     character_weight: float | None = Field(default=None, ge=0, le=1.5)
 
+    style: StyleOptions | None = None  # the project's look, as its panels have
+
     def character_list(self) -> list[dict] | None:
         if not self.characters:
             return None
@@ -170,6 +187,7 @@ class CharacterRequest(BaseModel):
     # A character that has a design: re-derive traits from the description (empty
     # keeps them) and add a new design version as the active reference
     redesign: bool = False
+    style: StyleOptions | None = None  # the project's look: the design is drawn in it
 
     @model_validator(mode="after")
     def _one_form(self):
@@ -206,6 +224,7 @@ class LocationsRequest(BaseModel):
     force: bool = False  # redesign locations that already have an image
     # The project's locations ({"name", "notes"}): a place's notes are its description
     locations: list[dict] = Field(default_factory=list)
+    style: StyleOptions | None = None
 
 
 class LocationReferenceRequest(BaseModel):
@@ -226,6 +245,7 @@ class LocationRequest(BaseModel):
     seed: int | None = None
     # A location that has an image: draw a new one (the old is kept in ``previous``)
     redesign: bool = False
+    style: StyleOptions | None = None
 
 
 @dataclass
@@ -506,7 +526,8 @@ def create_app(
                     existing.append(key)
                     continue
                 loc = lc.design(identity, key, found["name"], found["details"],
-                                description=notes.get(key) or None)
+                                description=notes.get(key) or None,
+                                style=req.style.model_dump() if req.style else None)
                 designed.append({"key": loc.key, "name": loc.name, "details": loc.details,
                                  "image": str(registry.root / loc.image)})
             return LocationsResult(designed=designed, existing=existing)
@@ -558,7 +579,8 @@ def create_app(
         def work():
             design = design_location or lc.design
             loc = design(identity, key, name, [], seed=req.seed,
-                         description=req.description.strip() or None)
+                         description=req.description.strip() or None,
+                         **({"style": req.style.model_dump()} if req.style else {}))
             return _location_record(lc.LocationRegistry.from_path(identity), loc)
 
         return submit_job("location", req.model_dump(), work)
@@ -597,6 +619,15 @@ def create_app(
         location, moved = removed
         return {"key": location.key, "name": location.name,
                 "moved_to": str(moved) if moved else None}
+
+    @app.get("/styles")
+    def styles_list() -> list[dict]:
+        """The style presets a project can choose (config/styles/presets.yaml): id,
+        label, summary and what an eval measured. Send the choice as ``style``
+        (``{"preset", "text"}``) with renders, inpaints and designs."""
+        from manganation import styles
+
+        return styles.presets()
 
     @app.get("/health")
     def health() -> dict:
@@ -662,6 +693,8 @@ def create_app(
             extra["engine"] = req.engine
         if req.face_pass is not None:
             extra["face_pass"] = req.face_pass
+        if req.style is not None:
+            extra["style"] = req.style.model_dump()
         if req.guide:
             extra["guide"] = _engine_file(req.guide, "guide")
             if req.guide_strength is not None:
@@ -732,7 +765,9 @@ def create_app(
                                        denoise=req.denoise, grow_mask_by=req.grow_mask_by,
                                        seed=req.seed, characters=req.character_list(),
                                        character_weight=req.character_weight,
-                                       reading_order=req.reading_order),
+                                       reading_order=req.reading_order,
+                                       **({"style": req.style.model_dump()}
+                                          if req.style else {})),
             )
         project = resolve_project(req.project_dir, root)
         req.project_dir = str(project)
@@ -850,7 +885,8 @@ def create_app(
         design = design_character or default_design
         return submit_job("character", req.model_dump(), lambda: design(
             reg, req.name, req.description, aliases=req.aliases, seed=req.seed,
-            redesign=req.redesign))
+            redesign=req.redesign,
+            **({"style": req.style.model_dump()} if req.style else {})))
 
     @app.get("/jobs/{job_id}")
     def status(job_id: str) -> Job:

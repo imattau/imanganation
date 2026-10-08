@@ -224,10 +224,12 @@ def inpaint_inline(
     client: ComfyClient | None = None, outputs: Path | None = None,
     characters: list[dict] | None = None, identity: Path | None = None,
     character_weight: float | None = None, reading_order: str = "rtl",
+    style: dict | None = None,
 ) -> InpaintResult:
     """Container form (docs/engine-api.md): ``source`` is the exact take, ``mask`` the
     selection export. Output goes to the engine's ``outputs/<project>/`` cache; the
-    plug-in records it as a take (kind ``inpaint``, parent = the source take)."""
+    plug-in records it as a take (kind ``inpaint``, parent = the source take).
+    ``style``: the project's look (styles.py), as its panels have."""
     import uuid
 
     from manganation.config import outputs_root
@@ -245,7 +247,8 @@ def inpaint_inline(
     result = inpaint_image(source, mask, prompt=prompt, out=out, denoise=denoise,
                            grow_mask_by=grow_mask_by, seed=seed, client=client,
                            tag=project_id, characters=characters, identity=identity,
-                           character_weight=character_weight, reading_order=reading_order)
+                           character_weight=character_weight, reading_order=reading_order,
+                           style=style)
     out.with_suffix(".json").write_text(json.dumps(asdict(result), indent=2))
     return result
 
@@ -256,7 +259,7 @@ def inpaint_image(
     client: ComfyClient | None = None, tag: str = "panel",
     characters: list[dict] | None = None, identity: Path | None = None,
     character_weight: float | None = None, reading_order: str = "rtl",
-    checkpoint: str | None = None,
+    checkpoint: str | None = None, style: dict | None = None,
 ) -> InpaintResult:
     """Crop-and-stitch repaint of ``src`` inside ``mask_path``, saved to ``out``.
     ``checkpoint`` (a file name) paints with another SDXL model than the primary one.
@@ -299,11 +302,11 @@ def inpaint_image(
     work_w, work_h = fit_resolution(crop_w, crop_h)
     scale = ((work_w * work_h) / (crop_w * crop_h)) ** 0.5
 
-    neg = negative if negative is not None else _style_negative()
+    neg = negative if negative is not None else _style_negative(style)
     tags, refs, used = resolve_characters(identity, characters) if characters else ([], {}, {})
     # The artist's prompt leads: it's what to paint. Traits follow to keep it on-model;
     # placed first they win, e.g. a "wide toothed grin" trait overrode "open mouth".
-    positive = _with_style(", ".join([prompt.strip(), *tags]) if tags else prompt)
+    positive = _with_style(", ".join([prompt.strip(), *tags]) if tags else prompt, style)
     seed = seed if seed is not None else random.randrange(2**32)
     with tempfile.TemporaryDirectory() as tmp:
         stem = f"{tag}_inpaint"
@@ -375,16 +378,17 @@ def _regional_references(
             for name, region in zip(names, regions, strict=True) if name in refs]
 
 
-def _with_style(prompt: str) -> str:
-    """The patch is drawn into a panel rendered with the colour style, so give it the
-    same style prefix; a bare "red apple" drifts from the surrounding art."""
+def _with_style(prompt: str, style: dict | None = None) -> str:
+    """The patch is drawn into a panel rendered with the colour style (and the project's
+    look), so give it the same style prefix; a bare "red apple" drifts from the
+    surrounding art."""
     from manganation.render.panel import load_style
 
-    prefix = load_style().get("prompt_prefix", "").strip().rstrip(",")
+    prefix = load_style(style).get("prompt_prefix", "").strip().rstrip(",")
     return f"{prefix}, {prompt.strip()}" if prefix else prompt.strip()
 
 
-def _style_negative() -> str:
+def _style_negative(style: dict | None = None) -> str:
     from manganation.render.panel import load_style
 
-    return load_style().get("negative", "")
+    return load_style(style).get("negative", "")

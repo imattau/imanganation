@@ -23,21 +23,64 @@ def human_size(n: int | None) -> str:
     return f"{n / 1e9:.1f} GB" if n >= 1e9 else f"{max(1, round(n / 1e6))} MB"
 
 
+DEFAULT_STYLE = {"preset": "default", "text": ""}
+
+
 def project_render(manifest: dict[str, Any] | None) -> dict[str, Any]:
     """The project's engine choice, with defaults for anything unset."""
     chosen = ((manifest or {}).get("project") or {}).get("render") or {}
     return {**DEFAULT, **{k: v for k, v in chosen.items() if k in DEFAULT}}
 
 
-def set_project_render(manifest: dict[str, Any], engine: str, face_pass: bool) -> None:
-    manifest["project"]["render"] = {"engine": engine, "face_pass": bool(face_pass)}
+def project_style(manifest: dict[str, Any] | None) -> dict[str, str]:
+    """The project's look: ``{"preset", "text"}`` (the default look when unset)."""
+    chosen = (((manifest or {}).get("project") or {}).get("render") or {}).get("style")
+    return {**DEFAULT_STYLE, **{k: str(v) for k, v in (chosen or {}).items()
+                                if k in DEFAULT_STYLE}}
+
+
+def is_default_style(style: dict[str, str]) -> bool:
+    return style.get("preset", "default") == "default" and not style.get("text", "").strip()
+
+
+def set_project_render(manifest: dict[str, Any], engine: str, face_pass: bool,
+                       style: dict[str, str] | None = None) -> None:
+    render = {"engine": engine, "face_pass": bool(face_pass)}
+    style = style if style is not None else project_style(manifest)
+    style = {"preset": style.get("preset") or "default",
+             "text": " ".join(style.get("text", "").split())}
+    if not is_default_style(style):
+        render["style"] = style
+    manifest["project"]["render"] = render
+
+
+def style_options(manifest: dict[str, Any] | None) -> dict[str, Any]:
+    """``{"style": …}`` for a job or design request when the project has a look of its
+    own, else nothing (the engine's default look)."""
+    style = project_style(manifest)
+    return {} if is_default_style(style) else {"style": style}
 
 
 def job_options(manifest: dict[str, Any] | None) -> dict[str, Any]:
     """What a render job sends: nothing for a project that never chose (the engine's
-    own settings apply), else its engine and face pass."""
+    own settings apply), else its engine and face pass, and its look if it has one."""
     chosen = ((manifest or {}).get("project") or {}).get("render")
-    return project_render(manifest) if chosen else {}
+    return {**project_render(manifest), **style_options(manifest)} if chosen else {}
+
+
+STYLE_INTRO = ("The project's look, for every panel and for the character and location "
+               "designs they follow. Panels stay in colour; black and white is done in "
+               "GIMP.")
+
+
+def style_note(preset: dict[str, Any] | None) -> str:
+    """The chosen preset's summary and what measuring it found."""
+    if not preset:
+        return ""
+    note = preset.get("summary", "")
+    if preset.get("measured"):
+        note += f" Measured: {preset['measured']}"
+    return note
 
 
 def engines(report: dict[str, Any] | None) -> list[dict[str, Any]]:

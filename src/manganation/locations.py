@@ -133,7 +133,8 @@ class LocationRegistry:
             ensure_ascii=False))
 
 
-def location_prompt(name: str, details: list[str], description: str = "") -> str:
+def location_prompt(name: str, details: list[str], description: str = "",
+                    style: str = "") -> str:
     """An establishing view of the place, empty, for the renderer to keep. The author's
     description comes first: Qwen-Image reads prose, so their words go in as written."""
     extra = ", ".join(d for d in details if d not in ("indoors", "outdoors"))
@@ -148,8 +149,9 @@ def location_prompt(name: str, details: list[str], description: str = "") -> str
             + (f". Also shown: {extra}" if extra and description else "") + ". "
             f"{kind} seen at eye level, wide "
             "enough to show the whole place and its surroundings. No people, no "
-            "characters, no text. Clean line art and cel-shaded colour, detailed "
-            "background art.")
+            "characters, no text. "
+            + (f"Style: {style}; detailed background art." if style else
+               "Clean line art and cel-shaded colour, detailed background art."))
 
 
 def gather(panels, settings=None) -> dict[str, dict]:
@@ -174,12 +176,13 @@ def gather(panels, settings=None) -> dict[str, dict]:
 
 def design(identity: Path, key: str, name: str, details: list[str], *, client=None,
            seed: int | None = None, width: int = 1344, height: int = 768,
-           description: str | None = None) -> Location:
+           description: str | None = None, style: dict | None = None) -> Location:
     """Render a location's reference image (Qwen-Image 2.1, no people) and register it.
 
     A place designed before is redesigned: a new image (a new seed unless one is given),
     the old one kept in ``previous``; ``description`` None keeps the last one, and the
-    setting tags gathered before are kept when none are given."""
+    setting tags gathered before are kept when none are given. ``style`` is the
+    project's look (styles.py)."""
     from manganation.config import load_models, load_settings
     from manganation.render import graphs
     from manganation.render.comfy_client import ComfyClient
@@ -197,7 +200,14 @@ def design(identity: Path, key: str, name: str, details: list[str], *, client=No
         settings = load_settings()
         client = ComfyClient(settings.comfyui.base_url)
     files = trial_files(load_models(), "qwen_image_21")
-    prompt = location_prompt(name, details, description)
+    look = ""
+    if style:
+        from manganation.render.panel import load_style
+
+        chosen = load_style(style)
+        if chosen["id"] != "default" or chosen["text"]:  # the default keeps its words
+            look = chosen["prose"]
+    prompt = location_prompt(name, details, description, look)
     graph = graphs.qwen_image21(unet=files["model"], clip=files["text_encoder"],
                                 vae=files["vae"], prompt=prompt, refs=[], width=width,
                                 height=height, seed=seed, prefix="imanganation_location")
