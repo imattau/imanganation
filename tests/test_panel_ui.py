@@ -264,3 +264,10 @@ def test_dialogue_lines_get_bubble_buttons_in_context():
     assert f"SFX\tBANG\t!bub:{pid}:sfx0:Bubble…" in inspector
     page = build_docks(manifest, "pg_a1b2c3", new_bubble_action="new")["inspector"]
     assert "!new\tBubble…" in page
+
+
+def test_the_project_title_offers_close_project():
+    manifest = copy.deepcopy(EXAMPLE)
+    tree = build_docks(manifest, close_project_action="close-proc")["project"]
+    assert tree.splitlines()[0] == "# Rooftop\t!close-proc:Close project"
+    assert build_docks(manifest)["project"].splitlines()[0] == "# Rooftop"

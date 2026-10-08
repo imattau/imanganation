@@ -101,7 +101,8 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
                 new_bubble_action: str = "",
                 design_location_action: str = "", new_location_action: str = "",
                 design_location_menu: str = "",
-                delete_location_menu: str = "") -> dict[str, str]:
+                delete_location_menu: str = "",
+                close_project_action: str = "") -> dict[str, str]:
     """Build generic host content and stable selections from a project manifest.
 
     The Context (inspector) rows are editable fields; ``open_page_action``, a dock
@@ -121,7 +122,8 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
     to a page's Context. Locations mirror characters: ``new_location_action`` on the
     Locations heading, ``design_location_menu`` and ``delete_location_menu`` on each
     location's row, and ``design_location_action`` a "Design location" button in its
-    Context (its notes are the description)."""
+    Context (its notes are the description). ``close_project_action`` puts "Close
+    project" on the project title's right-click menu."""
     panels = manifest.get("panels", [])
     pages = manifest.get("pages", [])
     page_by_id = {page["id"]: page for page in pages}
@@ -165,7 +167,8 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
 
     title = _label(manifest.get("project", {}).get("title")) or "Untitled project"
     chapter = _label(manifest.get("project", {}).get("chapter"))
-    project_rows = [f"# {title}"]
+    project_rows = [f"# {title}" + (f"\t!{close_project_action}:Close project"
+                                    if close_project_action else "")]
     preset_id = manifest.get("project", {}).get("preset")
     preset_name = {
         "oneshot": "Manga one-shot / anthology",

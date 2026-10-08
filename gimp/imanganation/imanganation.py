@@ -113,6 +113,7 @@ PROC_SET_LOCATION_REF = "plug-in-imanganation-set-location-reference"
 PROC_INPAINT = "plug-in-imanganation-inpaint-selection"
 PROC_STATUS = "plug-in-imanganation-engine-status"
 PROC_PROJECT_DOCKS = "plug-in-imanganation-project-docks"
+PROC_CLOSE_PROJECT = "plug-in-imanganation-close-project"
 PROC_PAGE_LAYOUT = "plug-in-imanganation-page-layout"
 PROC_AUTOSTART = "extension-imanganation-ui"
 PROC_NEW_PROJECT_MANUAL = "plug-in-imanganation-new-project-manual"
@@ -137,6 +138,7 @@ DOCK_ACTIONS = {
     DOCK_PANEL: "plug-in-imanganation-dock-panel-refresh",
 }
 DOCK_OPEN_PROJECT = "plug-in-imanganation-dock-open-project"
+DOCK_CLOSE_PROJECT = "plug-in-imanganation-dock-close-project"
 DOCK_OPEN_PAGE = "plug-in-imanganation-dock-open-page"  # Context's "Open page" button
 DOCK_NEW_PROJECT = "plug-in-imanganation-dock-new-project"
 DOCK_NEW_MANUAL_PROJECT = "plug-in-imanganation-dock-new-manual-project"
@@ -1565,21 +1567,32 @@ def _last_project_file():
     return Path(Gimp.directory()) / "imanganation" / "last-project.txt"
 
 
-def _remember_project(root):
+def _remember_project(root, closed=False):
+    """Record the last project. A closed one is still remembered (the folder chooser
+    starts beside it) but no longer reopened at startup."""
     state_file = _last_project_file()
     state_file.parent.mkdir(parents=True, exist_ok=True)
     temporary = state_file.with_suffix(".tmp")
-    temporary.write_text(str(Path(root).resolve()), encoding="utf-8")
+    temporary.write_text(str(Path(root).resolve()) + ("\nclosed" if closed else ""),
+                         encoding="utf-8")
     os.replace(temporary, state_file)
 
 
-def _remembered_project():
+def _remembered_project(include_closed=True):
     try:
-        root = Path(_last_project_file().read_text(encoding="utf-8").strip())
+        lines = _last_project_file().read_text(encoding="utf-8").splitlines()
+        if not include_closed and "closed" in (line.strip() for line in lines[1:]):
+            return None
+        root = Path(lines[0].strip())
         load_project(root)
         return root
-    except (OSError, ProjectFileError, ValueError):
+    except (OSError, IndexError, ProjectFileError, ValueError):
         return None
+
+
+def _open_project():
+    """The project to reopen: the last one, unless it was closed."""
+    return _remembered_project(include_closed=False)
 
 
 def _choose_project_folder():
@@ -1834,7 +1847,7 @@ def page_layout(procedure, run_mode, image, drawables, config, data):
         # for direct menu invocation.
         project_file = config.get_property("project-dir")
         root = (Path(project_file.get_path()) if project_file is not None else None)
-        root = root or _DOCK_CONTEXT.get("root") or _remembered_project()
+        root = root or _DOCK_CONTEXT.get("root") or _open_project()
         if root is None:
             raise ValueError("Open an Imanganation project first")
         manifest = load_project(root)
@@ -2631,7 +2644,7 @@ def _generate_selected_panel():
 def _dock_action(procedure, config, data):
     try:
         if data == "open-project":
-            root = _remembered_project() or _choose_project_folder()
+            root = _open_project() or _choose_project_folder()
             if root is None:
                 return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
             _activate_project(root)
@@ -2700,6 +2713,9 @@ def _dock_action(procedure, config, data):
             if options is None:
                 return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
             _create_manual_project(**options)
+        elif data == "close-project":
+            if not _close_project():
+                return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
         elif data == "design-character":
             _design_selected_character()
         elif data == "design-location":
@@ -3284,6 +3300,60 @@ def _confirm(title, text, action):
         return dialog.run() == Gtk.ResponseType.OK
     finally:
         dialog.destroy()
+
+
+def _close_project():
+    """Close Project: offer to save pages with unsaved changes, close the pages the
+    workspace opened, and show the welcome workspace. The project is not reopened at
+    the next start. -> False if cancelled."""
+    root = _DOCK_CONTEXT.get("root")
+    if root is None:
+        Gimp.message("No Imanganation project is open.")
+        return True
+    manifest = load_project(root)
+    title = manifest["project"].get("title") or Path(root).name
+    pages = _open_page_images(manifest)
+    labels = {page["id"]: page.get("label") or page["id"] for page in manifest["pages"]}
+    dirty = {page_id: image for page_id, image in pages.items() if image.is_dirty()}
+    if dirty:
+        names = ", ".join(labels.get(page_id, page_id) for page_id in dirty)
+        dialog = Gtk.MessageDialog(flags=Gtk.DialogFlags.MODAL,
+                                   message_type=Gtk.MessageType.QUESTION,
+                                   text=f"Save changes to {title} before closing?")
+        dialog.format_secondary_text(f"Unsaved changes: {names}.")
+        dialog.add_buttons("Close without saving", Gtk.ResponseType.REJECT,
+                           Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+                           Gtk.STOCK_SAVE, Gtk.ResponseType.ACCEPT)
+        dialog.set_default_response(Gtk.ResponseType.ACCEPT)
+        try:
+            response = dialog.run()
+        finally:
+            dialog.destroy()
+        if response not in (Gtk.ResponseType.ACCEPT, Gtk.ResponseType.REJECT):
+            return False
+        if response == Gtk.ResponseType.ACCEPT:
+            failed = [labels.get(page_id, page_id) for page_id, image in dirty.items()
+                      if not _save_project_page(image, root, manifest)]
+            if failed:  # _save_project_page has said why
+                Gimp.message(f"{title} is still open: {', '.join(failed)} could not be "
+                             "saved.")
+                return False
+    for page_id in pages:
+        _close_page_display(manifest["project"]["id"], page_id)
+    _remember_project(root, closed=True)
+    _DOCK_CONTEXT.update(root=None, selected_id=None, orphan_id=None, candidate_id=None)
+    _register_project_docks(_DOCK_PLUGIN)
+    return True
+
+
+def _close_project_run(procedure, config, data):
+    """File > Close Imanganation Project: the workspace extension does the closing."""
+    close = Gimp.get_pdb().lookup_procedure(DOCK_CLOSE_PROJECT)
+    if close is None:
+        return _error(procedure, "The Imanganation workspace is not running; restart GIMP "
+                                 "to start it")
+    status = close.run(close.create_config()).index(0)
+    return procedure.new_return_values(status, GLib.Error())
 
 
 def _close_page_display(project_id, page_id):
@@ -4046,7 +4116,8 @@ def _dock_actions(root, manifest):
             "design_location_action": DOCK_DESIGN_LOCATION,
             "new_location_action": DOCK_NEW_LOCATION,
             "design_location_menu": DOCK_DESIGN_LOCATION_ITEM,
-            "delete_location_menu": DOCK_DELETE_LOCATION}
+            "delete_location_menu": DOCK_DELETE_LOCATION,
+            "close_project_action": DOCK_CLOSE_PROJECT}
 
 
 def _selected_bubble(image=None):
@@ -4288,6 +4359,7 @@ def _add_dock_callbacks(plugin):
     callbacks = [
         (DOCK_ACTIONS[DOCK_PROJECT], _dock_action, "project-action", False),
         (DOCK_OPEN_PROJECT, _dock_action, "open-project", False),
+        (DOCK_CLOSE_PROJECT, _dock_action, "close-project", True),  # also a menu
         (DOCK_NEW_MANUAL_PROJECT, _dock_action, "new-manual-project", False),
         (DOCK_ACTIONS[DOCK_INSPECTOR], _dock_action, "generate", False),
         (DOCK_ITEMS[DOCK_INSPECTOR], _dock_field_edit, "field", True),
@@ -4441,7 +4513,7 @@ def _show_dock_run(procedure, config, dock):
 def _autostart_run(procedure, config, data):
     """Install the default workspace before GIMP restores its dock layout."""
     try:
-        root = _remembered_project()
+        root = _open_project()
         if root is not None:
             manifest = load_project(root)
             selected = manifest.get("cursor", {}).get("next_panel")
@@ -4474,7 +4546,8 @@ class Imanganation(Gimp.PlugIn):
     def do_query_procedures(self):
         return [PROC_RENDER, PROC_NEXT, PROC_REGEN, PROC_INPAINT, PROC_REFINE, PROC_SETREF,
                 PROC_SET_LOCATION_REF,
-                PROC_PLACE, PROC_STATUS, PROC_PROJECT_DOCKS, PROC_PAGE_LAYOUT, PROC_AUTOSTART,
+                PROC_PLACE, PROC_STATUS, PROC_PROJECT_DOCKS, PROC_CLOSE_PROJECT,
+                PROC_PAGE_LAYOUT, PROC_AUTOSTART,
                 PROC_NEW_PROJECT_MANUAL, PROC_NEW_PROJECT,
                 PROC_SETUP_MODELS, PROC_RENDER_ENGINE,
                 *DOCK_SHOW.values()]
@@ -4565,6 +4638,23 @@ class Imanganation(Gimp.PlugIn):
                 "script's locations.", name)
             proc.set_attribution("imanganation", "imanganation", "2026")
             return proc
+        if name == PROC_CLOSE_PROJECT:
+            proc = Gimp.Procedure.new(
+                self, name, Gimp.PDBProcType.PLUGIN, _close_project_run, None)
+            proc.set_menu_label("_Close Imanganation Project")
+            proc.add_enum_argument("run-mode", "Run mode", "How to run the procedure",
+                                   Gimp.RunMode, Gimp.RunMode.INTERACTIVE,
+                                   GObject.ParamFlags.READWRITE)
+            proc.add_menu_path("<Toolbox>/File/[Open]")
+            proc.add_menu_path("<Image>/File/[Open]")
+            proc.set_documentation(
+                "Close the open Imanganation project",
+                "Offer to save its pages with unsaved changes, close the pages the "
+                "workspace opened, and return the docks to the welcome workspace. The "
+                "project is not reopened at the next start.", name)
+            proc.set_attribution("imanganation", "imanganation", "2026")
+            return proc
+
         if name == PROC_PROJECT_DOCKS:
             proc = Gimp.Procedure.new(
                 self, name, Gimp.PDBProcType.PLUGIN, _project_docks_run, None)

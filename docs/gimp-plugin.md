@@ -153,6 +153,11 @@ copied into immutable `takes/` files and linked through take IDs; XCF parasites 
 page placement metadata are still being migrated. The image procedures remain under
 the top-level *Imanganation* menu:
 
+- **Close Imanganation Project** (*File* menu, or right-click the project's title in
+  Project): offers to save pages with unsaved changes (Save, Close without saving,
+  Cancel), closes the pages the workspace opened, and returns the docks to the welcome
+  workspace. A closed project is not reopened at the next start; Open / Switch
+  Project still starts beside it.
 - **Open / Switch Project…**: choose a folder containing `project.json` to populate the
   workspace docks. Select project rows to
   inspect panels or pages; page tiles show placed-panel counts and basic progress,
