@@ -313,11 +313,19 @@ def write_comfy_paths(config_file: Path, models_root: Path) -> bool:
     from manganation.config import load_models
 
     subdirs = {"checkpoints": "checkpoints", "loras": "loras"}
-    for section in load_models().values():
-        entries = section.values() if isinstance(section, dict) else section
-        for entry in entries:
-            if isinstance(entry, dict) and entry.get("subdir"):
-                subdirs.setdefault(entry["subdir"], entry["subdir"])
+
+    def collect(node) -> None:
+        # Entries sit at different depths: checkpoints.primary, trials.<group>.<part>
+        if isinstance(node, dict):
+            if isinstance(node.get("subdir"), str) and node["subdir"]:
+                subdirs.setdefault(node["subdir"], node["subdir"])
+                return
+            node = node.values()
+        if isinstance(node, (list, tuple, type({}.values()))):
+            for child in node:
+                collect(child)
+
+    collect(load_models())
     subdirs["clip_vision"] = "ipadapter"  # encoders live beside their adapters
     lines = ["# Point ComfyUI at imanganation's model store. Written by `manganation setup`.",
              "# Launch with: python main.py --extra-model-paths-config <this file>",
@@ -329,7 +337,15 @@ def write_comfy_paths(config_file: Path, models_root: Path) -> bool:
     except FileNotFoundError:
         current = ""
     if _base_path(current) == str(Path(models_root).resolve()):
-        return False  # already right; keep any hand edits
+        # Right folder: keep any hand edits, only add the model folders it lacks (an
+        # engine added since, e.g. Qwen-Image's diffusion_models/text_encoders/vae)
+        present = {line.strip().partition(":")[0] for line in current.splitlines()}
+        missing = [f"    {key}: {value}" for key, value in subdirs.items()
+                   if key not in present]
+        if not missing:
+            return False
+        config_file.write_text(current.rstrip("\n") + "\n" + "\n".join(missing) + "\n")
+        return True
     config_file.write_text(text)
     return True
 

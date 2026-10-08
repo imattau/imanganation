@@ -149,9 +149,21 @@ def test_comfy_paths_follow_the_models_folder(tmp_path):
     text = config.read_text()
     assert f"base_path: {(tmp_path / 'models').resolve()}" in text
     for key in ("checkpoints", "ipadapter", "clip_vision: ipadapter", "controlnet",
-                "upscale_models"):
-        assert key in text
+                "upscale_models", "diffusion_models", "text_encoders", "vae"):
+        assert key in text  # the optional engines' folders too (models.yaml trials)
     assert not ms.write_comfy_paths(config, tmp_path / "models")  # already right
+
+
+def test_comfy_paths_gain_new_engine_folders_and_keep_hand_edits(tmp_path):
+    config = tmp_path / "paths.yaml"
+    root = (tmp_path / "models").resolve()
+    config.write_text(f"imanganation:\n    base_path: {root}\n    checkpoints: checkpoints\n"
+                      "    loras: my_loras\n")  # written before Qwen-Image, hand-edited
+    assert ms.write_comfy_paths(config, root)
+    text = config.read_text()
+    assert "loras: my_loras" in text and "loras: loras" not in text
+    assert "diffusion_models: diffusion_models" in text and "vae: vae" in text
+    assert not ms.write_comfy_paths(config, root)
 
 
 def test_cli_check_reports_missing_files_and_exits_nonzero(tmp_path, monkeypatch):
