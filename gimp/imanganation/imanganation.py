@@ -3570,6 +3570,18 @@ _ENGINE_DIALOG = {}  # the open Render Engine dialog's widgets, while it's shown
 _LOCATION_JOBS = {}  # job id -> project root, while locations are being designed
 
 
+def _screen_height(widget, fallback=900):
+    """The height of the screen ``widget`` is on (its monitor's workarea), in pixels."""
+    try:
+        display = widget.get_display()
+        window = widget.get_window()
+        monitor = (display.get_monitor_at_window(window) if window is not None
+                   else display.get_primary_monitor() or display.get_monitor(0))
+        return monitor.get_workarea().height
+    except Exception:  # no display information: a size that fits most laptops
+        return fallback
+
+
 def _show_engine_dialog():
     """Render Engine: one choice per engine (licence, speed, install state), the face
     pass, Design Locations; Save writes project.render to project.json. Not modal:
@@ -3591,9 +3603,15 @@ def _show_engine_dialog():
 
     dialog = Gtk.Dialog(title=f"Render Engine — {manifest['project'].get('title', '')}")
     dialog.set_default_size(640, -1)
-    box = dialog.get_content_area()
-    box.set_spacing(8)
-    box.set_border_width(12)
+    # Engines, the face pass and the style outgrow a laptop screen: scroll, sized to
+    # the content up to most of the screen's height (the buttons stay in view)
+    scrolled = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER,
+                                  vscrollbar_policy=Gtk.PolicyType.AUTOMATIC,
+                                  propagate_natural_height=True, vexpand=True)
+    scrolled.set_max_content_height(_screen_height(dialog) * 4 // 5 - 120)
+    dialog.get_content_area().pack_start(scrolled, True, True, 0)
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, border_width=12)
+    scrolled.add(box)
     box.pack_start(Gtk.Label(label=engine_ui.INTRO, xalign=0.0, wrap=True,
                              max_width_chars=76), False, False, 0)
     rows, group = {}, None
