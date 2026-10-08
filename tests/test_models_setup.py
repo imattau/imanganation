@@ -415,3 +415,25 @@ def test_inside_the_flatpak_data_and_projects_leave_the_read_only_app(tmp_path, 
     monkeypatch.setattr(config, "in_flatpak", lambda: False)
     assert config.data_root() == config.REPO_ROOT  # a checkout: unchanged
     assert config.projects_root() == config.REPO_ROOT / "projects"
+
+
+def test_use_files_i_have_finds_the_optional_engines_files_too(tmp_path, monkeypatch):
+    from manganation import engines
+
+    qwen_vae = bytes(range(255, -1, -1)) * 3000  # another size: a different file
+    extra = ms.ModelFile(role="qwen_image_21 vae", feature="Qwen-Image 2.1 engine (VAE)",
+                         file="qwen_vae.safetensors", subdir="vae", size=len(qwen_vae),
+                         sha256=hashlib.sha256(qwen_vae).hexdigest(), urls=["https://x/v"])
+    monkeypatch.setattr(engines, "files", lambda engine, models, settings:
+                        [extra] if engine.id == "qwen_image_21" else [])
+    library = tmp_path / "ComfyUI"
+    (library / "vae").mkdir(parents=True)
+    (library / "checkpoint.safetensors").write_bytes(PAYLOAD)
+    (library / "vae" / "downloaded-before.safetensors").write_bytes(qwen_vae)
+    client = _app(tmp_path, [_model()])
+    client.post("/setup/link", json={"folders": [str(library)]})
+    report = _wait(client)
+    assert report["task"]["state"] == "done"
+    assert sorted(report["task"]["finished"]) == ["m.safetensors (hard link)",
+                                                  "qwen_vae.safetensors (hard link)"]
+    assert (tmp_path / "models" / "vae" / "qwen_vae.safetensors").read_bytes() == qwen_vae

@@ -443,11 +443,17 @@ class SetupRunner:
         return self._start("download", work, files=len(todo) + renderer, total=total,
                            renderer=renderer, phase="renderer" if renderer else "models")
 
-    def start_link(self, folders: list[Path]) -> dict:
+    def start_link(self, folders: list[Path], also: list[ModelFile] | None = None) -> dict:
+        """Search ``folders`` for the missing models, and for ``also`` (the optional
+        engines' files, say) in the same pass, and link the matches in."""
         for folder in folders:
             if not Path(folder).expanduser().is_dir():
                 raise SetupError(f"not a folder: {folder}")
-        todo = [m for m in self.models() if state(m, self.root) != "present"]
+        todo, seen = [], set()
+        for m in [*self.models(), *(also or [])]:
+            if state(m, self.root) != "present" and m.role not in seen:
+                seen.add(m.role)
+                todo.append(m)
         return self._start("link", lambda: self._link(todo, folders),
                            folders=[str(f) for f in folders])
 

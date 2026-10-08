@@ -4123,8 +4123,9 @@ def _show_setup_dialog():
     def refresh():
         if not _SETUP_DIALOG:
             return False  # closed: stop polling
-        _update_setup_dialog(widgets, _setup_report())
-        _update_optional_engines(widgets, _engines_report(), post)
+        engines_report = _engines_report()
+        _update_setup_dialog(widgets, _setup_report(), engines_report)
+        _update_optional_engines(widgets, engines_report, post)
         return True
 
     def on_destroy(_widget):
@@ -4138,9 +4139,9 @@ def _show_setup_dialog():
     GLib.timeout_add_seconds(1, refresh)
 
 
-def _update_setup_dialog(widgets, report):
+def _update_setup_dialog(widgets, report, engines_report=None):
     """Fill the dialog from a GET /setup report (None: the engine isn't answering)."""
-    actions = setup_ui.actions(report)
+    actions = setup_ui.actions(report, engines_report)
     widgets["download"].set_label(actions["download"])
     widgets["download"].set_sensitive(actions["download_enabled"])
     widgets["link"].set_sensitive(actions["link_enabled"])

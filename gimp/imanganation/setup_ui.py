@@ -10,7 +10,8 @@ from typing import Any
 
 INTRO = ("Imanganation's renderer and AI models aren't included with the app. Download "
          "what's missing below, or point it at a folder of models you already have "
-         "(ComfyUI, A1111): matching files are linked in without using more disk space.")
+         "(ComfyUI, A1111): matching files, the optional engines' too, are linked in "
+         "without using more disk space.")
 RENDERER = "renderer"  # the row for ComfyUI + PyTorch, when the engine installs it
 
 
@@ -115,8 +116,10 @@ def progress(report: dict[str, Any]) -> tuple[float, str]:
     return fraction, f"{current}  {int(fraction * 100)}%" if current else f"{int(fraction * 100)}%"
 
 
-def actions(report: dict[str, Any] | None) -> dict[str, Any]:
-    """Button labels and sensitivity. ``None`` = the engine isn't answering."""
+def actions(report: dict[str, Any] | None,
+            engines_report: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Button labels and sensitivity. ``None`` = the engine isn't answering. Use Files I
+    Have stays available while an optional engine (``engines_report``) is missing."""
     if report is None:
         return {"download": "Download", "download_enabled": False, "link_enabled": False,
                 "cancel_enabled": False}
@@ -124,7 +127,9 @@ def actions(report: dict[str, Any] | None) -> dict[str, Any]:
     fetchable = report.get("missing_bytes") or 0
     return {"download": (f"Download ({human_size(fetchable)})" if fetchable else "Download"),
             "download_enabled": not busy and fetchable > 0,
-            "link_enabled": not busy and not report.get("ready"),
+            "link_enabled": not busy and (not report.get("ready") or any(
+                not r.get("installed") and r.get("missing")
+                for r in optional_engines(engines_report))),
             "cancel_enabled": busy and (report.get("task") or {}).get("kind") == "download"}
 
 
@@ -147,7 +152,8 @@ def should_prompt(report: dict[str, Any] | None) -> bool:
 
 
 OPTIONAL_INTRO = ("Optional engines: not needed to render, but a project can choose one "
-                  "under Imanganation ▸ Render Engine. Each downloads separately.")
+                  "under Imanganation ▸ Render Engine. Each downloads separately; Use "
+                  "Files I Have… finds them in a folder too.")
 DEFAULT_ENGINE = "sdxl"  # its files are the required rows above
 
 

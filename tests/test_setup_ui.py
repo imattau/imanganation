@@ -135,3 +135,15 @@ def test_optional_engines_leave_out_the_default_and_size_what_is_missing():
     assert setup_ui.optional_size(rows[0]) == "17.3 GB"
     assert setup_ui.optional_size(rows[1]) == ""
     assert setup_ui.optional_engines(None) == []
+
+
+def test_use_files_i_have_stays_available_while_an_optional_engine_is_missing():
+    ready = _report(("present", "present"))
+    engines = {"engines": [
+        {"id": "sdxl", "installed": True, "missing": []},
+        {"id": "qwen_image_21", "installed": False, "missing": ["qwen.safetensors"],
+         "missing_bytes": 17_300_000_000}]}
+    assert setup_ui.actions(ready)["link_enabled"] is False
+    assert setup_ui.actions(ready, engines)["link_enabled"] is True
+    engines["engines"][1].update(installed=True, missing=[])
+    assert setup_ui.actions(ready, engines)["link_enabled"] is False

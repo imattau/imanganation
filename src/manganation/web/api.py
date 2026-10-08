@@ -431,14 +431,21 @@ def create_app(
 
     @app.post("/setup/link", status_code=202)
     def setup_link(req: SetupLinkRequest) -> dict:
-        """Search folders of models the user already has; link matching files in."""
+        """Search folders of models the user already has; link matching files in. The
+        optional engines' files (Qwen-Image, Z-Anime, the face pass) are looked for too,
+        so files downloaded before are used instead of downloaded again."""
+        from manganation import engines
+        from manganation.config import load_models, load_settings
         from manganation.models_setup import SetupError
 
         runner = setup()
         if runner.busy():
             raise HTTPException(409, "a setup task is already running")
+        models, settings = load_models(), load_settings()
+        extras = [m for engine in [*engines.ENGINES, engines.FACE_PASS]
+                  if engine.id != "sdxl" for m in engines.files(engine, models, settings)]
         try:
-            return runner.start_link([Path(f) for f in req.folders])
+            return runner.start_link([Path(f) for f in req.folders], also=extras)
         except SetupError as exc:
             raise HTTPException(400, str(exc)) from exc
 
