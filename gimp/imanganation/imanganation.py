@@ -4473,6 +4473,12 @@ def _register_project_docks(plugin):
         })
     if root is not None:
         _refresh_project_docks()
+        return
+    # Registering a dock that is already shown only stores its text; an update redraws
+    # it (Close Project returns open docks to the welcome workspace this way).
+    for identifier, _title, _presentation, content, selected, *_rest in rows:
+        _dock_pdb_call("gimp-extension-panel-update", {
+            "identifier": identifier, "content": content, "selected-item": selected})
 
 
 def _project_docks_run(procedure, config, data):
