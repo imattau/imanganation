@@ -1994,7 +1994,7 @@ def _refresh_when_engine_up(deadline):
             return GLib.SOURCE_REMOVE
         return GLib.SOURCE_CONTINUE if time.monotonic() < deadline else GLib.SOURCE_REMOVE
 
-    GLib.timeout_add_seconds(2, poll)
+    GLib.timeout_add_seconds(2, _exclusive(poll))
 
 
 def _engine_status(exc):
@@ -3230,7 +3230,7 @@ def _queue_character_design(root, manifest, character, redesign=False, describe=
             **_style_options(manifest)}
     job = _http("POST", f"{ENGINE_URL}/characters", body)
     if not _DESIGN_JOBS:
-        GLib.timeout_add_seconds(3, _poll_design_jobs)
+        GLib.timeout_add_seconds(3, _exclusive(_poll_design_jobs))
     _DESIGN_JOBS[job["id"]] = character["name"]
 
 
@@ -3614,7 +3614,7 @@ def _show_engine_dialog():
     scrolled.add(box)
     box.pack_start(Gtk.Label(label=engine_ui.INTRO, xalign=0.0, wrap=True,
                              max_width_chars=76), False, False, 0)
-    rows, group = {}, None
+    rows, group, hooks = {}, None, {}
 
     def install(engine_id):
         try:
@@ -3647,7 +3647,8 @@ def _show_engine_dialog():
         grid.attach(get, 1, 3, 1, 1)
         box.pack_start(grid, False, False, 0)
         rows[row["id"]] = {"button": button, "state": state, "install": get}
-        button.connect("toggled", lambda *_: update_warning())
+        # set_active on a later radio toggles this one before update_warning exists
+        button.connect("toggled", lambda *_: hooks.get("warn", lambda: None)())
 
     for row in engine_ui.engines(report):
         add_row(row, radio=True)
@@ -3716,6 +3717,8 @@ def _show_engine_dialog():
         text = engine_ui.warning(picked)
         warning.set_markup(f"<b>{GLib.markup_escape_text(text)}</b>" if text else "")
         locations_note.set_text(engine_ui.locations_note(selected()))
+
+    hooks["warn"] = update_warning
 
     def refresh():
         if not _ENGINE_DIALOG:
@@ -3814,7 +3817,7 @@ def _queue_location_design(root):
                 {"project": manifest["project"]["id"], "panels": manifest["panels"],
                  "locations": manifest.get("locations", []), **_style_options(manifest)})
     if not _LOCATION_JOBS:
-        GLib.timeout_add_seconds(3, _poll_location_jobs)
+        GLib.timeout_add_seconds(3, _exclusive(_poll_location_jobs))
     _LOCATION_JOBS[job["id"]] = root
     Gimp.message("Designing the script's locations (about a minute each)…")
 
@@ -3854,7 +3857,7 @@ def _queue_single_location_design(root, manifest, location, redesign=False):
             **_style_options(manifest)}
     job = _http("POST", f"{ENGINE_URL}/locations", body)
     if not _LOCATION_DESIGN_JOBS:
-        GLib.timeout_add_seconds(3, _poll_single_location_jobs)
+        GLib.timeout_add_seconds(3, _exclusive(_poll_single_location_jobs))
     _LOCATION_DESIGN_JOBS[job["id"]] = location_key(location["name"])
 
 
@@ -4596,6 +4599,22 @@ class _SavedConfig:
         return self._values.get(name)
 
 
+def _exclusive(tick):
+    """A GLib timer callback that makes GIMP calls, run under the same one-at-a-time
+    rule as the dock callbacks: while it waits on GIMP, a dock click arrives inside it
+    (the selection watcher's image check, then a click's dock redraw: a segfault in
+    _gimp_gp_params_to_value_array). Busy: skip this tick and try again on the next."""
+    def run():
+        if _DOCK_BUSY:
+            return GLib.SOURCE_CONTINUE
+        _DOCK_BUSY.append(tick)
+        try:
+            return tick()
+        finally:
+            _DOCK_BUSY.clear()
+    return run
+
+
 def _one_at_a_time(callback, takes_item):
     """Never run a dock callback inside another. While one waits on a GIMP call
     (drawing a page thumbnail, say), libgimp delivers the next dock click right
@@ -4860,7 +4879,7 @@ def _autostart_run(procedure, config, data):
         _add_dock_callbacks(_DOCK_PLUGIN)
         _start_engine_services()
         _prompt_setup_when_engine_up(time.monotonic() + 180)
-        GLib.timeout_add(1000, _watch_canvas_selection)
+        GLib.timeout_add(1000, _exclusive(_watch_canvas_selection))
         _register_project_docks(_DOCK_PLUGIN)
     except Exception as exc:
         Gimp.message(f"Could not start Imanganation workspace: {exc}")
