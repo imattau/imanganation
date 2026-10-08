@@ -26,6 +26,10 @@ REPO = HERE.parents[1]
 PYTHON = "3.14"  # the runtime's (org.gnome.Platform//51)
 CP = "cp" + PYTHON.replace(".", "")
 OUT = HERE / "engine-deps.json"
+# Optional groups the app needs too: `eval` holds onnxruntime, which the face pass's
+# detectors (and the tagger matching faces to characters) run on
+EXTRAS = ["eval"]
+EXTRAS_ARGS = [arg for extra in EXTRAS for arg in ("--extra", extra)]
 
 
 def pinned() -> list[tuple[str, str]]:
@@ -34,10 +38,11 @@ def pinned() -> list[tuple[str, str]]:
         lock = Path(tmp) / "lock.txt"
         lock.write_text(subprocess.run(
             ["uv", "export", "--format", "requirements-txt", "--no-dev",
-             "--no-emit-project", "--no-hashes", "-q"],
+             "--no-emit-project", "--no-hashes", "-q", *EXTRAS_ARGS],
             cwd=REPO, check=True, capture_output=True, text=True).stdout)
         resolved = subprocess.run(
-            ["uv", "pip", "compile", "pyproject.toml", "--python-version", PYTHON,
+            ["uv", "pip", "compile", "pyproject.toml", *EXTRAS_ARGS,
+             "--python-version", PYTHON,
              "--python-platform", "x86_64-manylinux_2_28", "--only-binary", ":all:",
              "-c", str(lock), "-q", "--no-header", "--no-annotate"],
             cwd=REPO, check=True, capture_output=True, text=True).stdout
