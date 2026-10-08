@@ -140,6 +140,10 @@ categories: click one to add it to the open page, inside the selection if there 
 A page's Context also has a free **Bubble…**. Lettering uses Comic Neue / Bangers when
 installed, else a bold sans; the size follows the page (1/64 of its height).
 
+**Screentone.** Select an area and choose **Imanganation → Create Screentone…** to
+fill it with black halftone dots on a separate layer. Adjust dot spacing, coverage,
+and screen angle; the source pattern is also kept as an editable path.
+
 On first launch, the Project dock offers **Open project…**; the
 chosen project folder is remembered in GIMP's user settings and its docks are restored on
 later launches. **Open / Switch Project…**, **New Project…**, and
