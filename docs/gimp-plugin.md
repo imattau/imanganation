@@ -104,7 +104,10 @@ like), or a character for **Design character** or **Delete character…** (also 
 Character Bible's rows). Deleting asks first, then removes them from the cast and from
 every panel that lists them (takes and dialogue stay), and the engine moves their
 designs to `characters/.deleted/` in its identity store, from where they can be restored
-by hand. The engine has ComfyUI unload its models before an LLM
+by hand. A designed character's Context has **Open reference image**, which
+opens their active reference in GIMP; paint over it and run *Imanganation → Set
+Character Reference from Layer…*, which already knows the project and character, to make
+it a new reference version. The engine has ComfyUI unload its models before an LLM
 step and unloads the LLM before a render, so both fit on 16 GB.
 **Locations** are designed the same way. Right-click **Locations** under Assets for
 **New location…** (a name as the script writes the place, and a description: inside

@@ -149,6 +149,7 @@ DOCK_DESIGN_CHARACTER_ITEM = "plug-in-imanganation-dock-design-character-item"
 DOCK_DELETE_CHARACTER = "plug-in-imanganation-dock-delete-character"
 # Locations, like characters: Context buttons, and the tree's right-click menus
 DOCK_DESIGN_LOCATION = "plug-in-imanganation-dock-design-location"
+DOCK_OPEN_CHARACTER_IMAGE = "plug-in-imanganation-dock-open-character-image"
 DOCK_OPEN_LOCATION_IMAGE = "plug-in-imanganation-dock-open-location-image"
 DOCK_NEW_LOCATION = "plug-in-imanganation-dock-new-location"
 DOCK_DESIGN_LOCATION_ITEM = "plug-in-imanganation-dock-design-location-item"
@@ -184,8 +185,9 @@ LAYOUT_PARASITE = "imanganation-layout"
 PROJECT_PARASITE = "imanganation-project"
 PANEL_PARASITE = "imanganation-panel"
 TAKE_PARASITE = "imanganation-take"
-# On a location's reference image opened from Context: {"project": root, "name": place}
+# On a reference image opened from Context: {"project": root, "name": who / place}
 LOCATION_PARASITE = "imanganation-location"
+CHARACTER_PARASITE = "imanganation-character"
 CURSOR_FILE = "gimp_cursor.json"  # per project: which panel comes next
 ENGINE_URL = "http://127.0.0.1:8790"
 RENDER_TIMEOUT = 600  # seconds
@@ -1292,10 +1294,13 @@ def set_character_reference(procedure, run_mode, image, drawables, config, data)
     layers = [d for d in drawables if isinstance(d, Gimp.Layer)]
     if not layers:
         return _error(procedure, "Select the layer that shows the character.")
+    root, recorded = _reference_target(image, CHARACTER_PARASITE)
+    if recorded and not config.get_property("character"):
+        config.set_property("character", recorded)
     if run_mode == Gimp.RunMode.INTERACTIVE and not _dialog(procedure, config, PROC_SETREF):
         return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
 
-    root = _image_project(image)
+    root = root or _image_project(image)
     if root is None:
         chosen = config.get_property("project-dir")
         if chosen is None:
@@ -1328,12 +1333,13 @@ def set_character_reference(procedure, run_mode, image, drawables, config, data)
     Gimp.message(f"{result['name']}'s reference is now {result['version']} ({side}px square; "
                  f"was {result['previous']}). New renders of {result['name']} use it; earlier "
                  f"versions are kept in characters/{slug}/.")
+    _notify_project_docks(root)
     return _success(procedure, layers[0])
 
 
-def _location_reference_target(image):
-    """(project root, place name) recorded on a location image opened from Context."""
-    parasite = image.get_parasite(LOCATION_PARASITE)
+def _reference_target(image, kind=LOCATION_PARASITE):
+    """(project root, name) recorded on a reference image opened from Context."""
+    parasite = image.get_parasite(kind)
     if parasite is None:
         return None, ""
     try:
@@ -1350,7 +1356,7 @@ def set_location_reference(procedure, run_mode, image, drawables, config, data):
     layers = [d for d in drawables if isinstance(d, Gimp.Layer)]
     if not layers:
         return _error(procedure, "Select the layer that shows the place.")
-    root, recorded = _location_reference_target(image)
+    root, recorded = _reference_target(image, LOCATION_PARASITE)
     if recorded and not config.get_property("location"):
         config.set_property("location", recorded)
     if run_mode == Gimp.RunMode.INTERACTIVE and not _dialog(procedure, config,
@@ -2256,8 +2262,12 @@ def _refresh_project_docks(sync_canvas=False):
         engine_rows = "\n".join(_engine_character_rows(root, character["name"]))
         if character["name"] in _DESIGN_JOBS.values():
             engine_rows += "\nDesign\tIn progress…"
-        contents["inspector"] += "\n" + engine_rows
         contents["characters"] += "\n" + engine_rows
+        if "\nReference image\tAvailable" in engine_rows:
+            engine_rows += (f"\n!{DOCK_OPEN_CHARACTER_IMAGE}\tOpen reference image"
+                            "\nPaint over\tOpen it, edit, then Imanganation > Set "
+                            "Character Reference from Layer…")
+        contents["inspector"] += "\n" + engine_rows
     elif selected_id in {location_row_id(loc["name"]) for loc in manifest.get("locations", [])}:
         location = next(loc for loc in manifest.get("locations", [])
                         if location_row_id(loc["name"]) == selected_id)
@@ -2696,6 +2706,8 @@ def _dock_action(procedure, config, data):
             _design_selected_location()
         elif data == "open-location-image":
             _open_selected_location_image()
+        elif data == "open-character-image":
+            _open_selected_character_image()
         elif data == "setup-models":
             _show_setup_dialog()
         elif data == "render-engine":
@@ -3592,6 +3604,16 @@ def _design_selected_location():
     _refresh_project_docks()
 
 
+def _open_reference_image(path, parasite, root, name):
+    """Open a reference image in GIMP, tagged with its project and owner so the Set …
+    Reference from Layer command fills them in after painting over it."""
+    image = Gimp.file_load(Gimp.RunMode.NONINTERACTIVE, Gio.File.new_for_path(str(path)))
+    image.attach_parasite(Gimp.Parasite.new(
+        parasite, Gimp.PARASITE_PERSISTENT,
+        list(json.dumps({"project": str(root), "name": name}).encode())))
+    Gimp.Display.new(image)
+
+
 def _open_selected_location_image():
     """Open the selected location's reference image in GIMP, to look at or paint over."""
     root = _DOCK_CONTEXT["root"]
@@ -3602,12 +3624,25 @@ def _open_selected_location_image():
     record = _engine_location(root, manifest, location["name"])
     if record is None or not record.get("image"):
         raise ValueError(f"{location['name']} has no reference image yet")
-    image = Gimp.file_load(Gimp.RunMode.NONINTERACTIVE, Gio.File.new_for_path(record["image"]))
-    # Set Location Reference from Layer… reads this to know the project and the place
-    image.attach_parasite(Gimp.Parasite.new(
-        LOCATION_PARASITE, Gimp.PARASITE_PERSISTENT,
-        list(json.dumps({"project": str(root), "name": location["name"]}).encode())))
-    Gimp.Display.new(image)
+    _open_reference_image(record["image"], LOCATION_PARASITE, root, location["name"])
+
+
+def _open_selected_character_image():
+    """Open the selected character's active reference image in GIMP."""
+    root = _DOCK_CONTEXT["root"]
+    manifest = load_project(root)
+    character = next((c for c in manifest["cast"]
+                      if character_row_id(c["name"]) == _DOCK_CONTEXT.get("selected_id")),
+                     None)
+    if character is None:
+        raise ValueError("Select a character first")
+    query = urllib.parse.urlencode(_engine_project(root, manifest))
+    known = _http("GET", f"{ENGINE_URL}/characters?{query}", timeout=3)
+    record = next((c for c in known
+                   if c.get("name", "").casefold() == character["name"].casefold()), None)
+    if record is None or not record.get("reference"):
+        raise ValueError(f"{character['name']} has no reference image yet")
+    _open_reference_image(record["reference"], CHARACTER_PARASITE, root, record["name"])
 
 
 def _choose_new_location():
@@ -4266,6 +4301,7 @@ def _add_dock_callbacks(plugin):
         (DOCK_DELETE_CHARACTER, _dock_character_menu, "delete", True),
         (DOCK_DESIGN_LOCATION, _dock_action, "design-location", False),
         (DOCK_OPEN_LOCATION_IMAGE, _dock_action, "open-location-image", False),
+        (DOCK_OPEN_CHARACTER_IMAGE, _dock_action, "open-character-image", False),
         (DOCK_NEW_LOCATION, _dock_location_menu, "new", True),
         (DOCK_DESIGN_LOCATION_ITEM, _dock_location_menu, "design", True),
         (DOCK_DELETE_LOCATION, _dock_location_menu, "delete", True),
