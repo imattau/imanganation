@@ -147,7 +147,12 @@ later launches. **Open / Switch Project…**, **New Project…**, and
 in the first section of GIMP's **File** menu, including the toolbox File menu
 before an image is open. A dock you close
 stays closed on later launches; reopen it from
-*Windows → Imanganation*. Row callbacks carry stable IDs.
+*Windows → Imanganation*. If the workspace stops (GIMP reports that imanganation.py
+crashed and the docks vanish), *Windows → Imanganation → Restart Workspace* starts it
+again, with the engine, and shows every dock, without restarting GIMP; why it stopped
+is in `imanganation/workspace.log` in the GIMP profile. Dock actions run one at a time:
+a click that arrives while another is still working runs right after it. Row callbacks
+carry stable IDs.
 For container projects, generated and imported images are
 copied into immutable `takes/` files and linked through take IDs; XCF parasites and
 page placement metadata are still being migrated. The image procedures remain under

@@ -119,6 +119,7 @@ PROC_STATUS = "plug-in-imanganation-engine-status"
 PROC_PROJECT_DOCKS = "plug-in-imanganation-project-docks"
 PROC_CLOSE_PROJECT = "plug-in-imanganation-close-project"
 PROC_RELOAD_SCRIPT = "plug-in-imanganation-reload-script"
+PROC_RESTART_WORKSPACE = "plug-in-imanganation-restart-workspace"
 PROC_PAGE_LAYOUT = "plug-in-imanganation-page-layout"
 PROC_AUTOSTART = "extension-imanganation-ui"
 PROC_NEW_PROJECT_MANUAL = "plug-in-imanganation-new-project-manual"
@@ -4469,6 +4470,46 @@ def _dock_item_action(procedure, config, data):
         return _error(procedure, str(exc))
 
 
+_DOCK_BUSY = []  # the dock callback running now (at most one)
+
+
+class _SavedConfig:
+    """A dock call's arguments, kept to run it later (its config is GIMP's to free)."""
+
+    def __init__(self, values):
+        self._values = values
+
+    def get_property(self, name):
+        return self._values.get(name)
+
+
+def _one_at_a_time(callback, takes_item):
+    """Never run a dock callback inside another. While one waits on a GIMP call
+    (drawing a page thumbnail, say), libgimp delivers the next dock click right
+    there, and a GIMP call from that nested one crashes libgimp (a segfault in
+    gimp_value_array_new_from_types: Design character while a field edit redrew the
+    docks). A call that arrives meanwhile runs as soon as the current one is done."""
+    def run(procedure, config, data):
+        if not _DOCK_BUSY:
+            _DOCK_BUSY.append(callback)
+            try:
+                return callback(procedure, config, data)
+            finally:
+                _DOCK_BUSY.clear()
+        saved = _SavedConfig({"item": config.get_property("item")} if takes_item else {})
+
+        def later():
+            if _DOCK_BUSY:  # e.g. a dialog of the first is still open
+                return GLib.SOURCE_CONTINUE
+            run(procedure, saved, data)
+            return GLib.SOURCE_REMOVE
+
+        GLib.timeout_add(50, later)
+        return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+
+    return run
+
+
 def _add_dock_callbacks(plugin):
     callbacks = [
         (DOCK_ACTIONS[DOCK_PROJECT], _dock_action, "project-action", False),
@@ -4512,7 +4553,7 @@ def _add_dock_callbacks(plugin):
     ]
     for name, callback, data, takes_item in callbacks:
         procedure = Gimp.Procedure.new(plugin, name, Gimp.PDBProcType.TEMPORARY,
-                                       callback, data)
+                                       _one_at_a_time(callback, takes_item), data)
         if takes_item:
             procedure.add_string_argument("item", "Item id", "Stable project row id",
                                           "", GObject.ParamFlags.READWRITE)
@@ -4622,6 +4663,29 @@ def _project_docks_run(procedure, config, data):
     return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
 
 
+def _restart_workspace_run(procedure, config, data):
+    """Windows > Imanganation > Restart Workspace: after the workspace process has
+    died (GIMP says the plug-in crashed and its docks vanish), start it again, which
+    starts the engine too, and show every dock. If it is running, just show the docks."""
+    pdb = Gimp.get_pdb()
+    if pdb.lookup_procedure(DOCK_ACTIONS[DOCK_PROJECT]) is None:  # its docks' callbacks
+        workspace = pdb.lookup_procedure(PROC_AUTOSTART)
+        if workspace is None:
+            return _error(procedure, "The Imanganation workspace isn't installed")
+        # Returns once the workspace has registered its docks (persistent_ready)
+        status = workspace.run(workspace.create_config()).index(0)
+        if status != Gimp.PDBStatusType.SUCCESS:
+            return _error(procedure, "The Imanganation workspace did not start; see "
+                                     f"{Path(Gimp.directory()) / 'imanganation'}"
+                                     "/workspace.log")
+    for dock in DOCK_IDS:
+        try:
+            _dock_pdb_call("gimp-extension-panel-show", {"identifier": dock})
+        except Exception:
+            pass  # a dock the workspace did not register (an older install)
+    return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+
+
 def _show_dock_run(procedure, config, dock):
     """Reopen (or bring forward) one workspace dock registered by the extension."""
     try:
@@ -4705,7 +4769,7 @@ class Imanganation(Gimp.PlugIn):
                 PROC_PAGE_LAYOUT, PROC_AUTOSTART,
                 PROC_NEW_PROJECT_MANUAL, PROC_NEW_PROJECT,
                 PROC_SETUP_MODELS, PROC_RENDER_ENGINE,
-                *DOCK_SHOW.values()]
+                PROC_RESTART_WORKSPACE, *DOCK_SHOW.values()]
 
     def do_create_procedure(self, name):
         global _DOCK_PLUGIN
@@ -4716,6 +4780,20 @@ class Imanganation(Gimp.PlugIn):
             proc.set_documentation(
                 "Start the Imanganation workspace",
                 "Registers the Imanganation project docks at GIMP startup.", name)
+            proc.set_attribution("imanganation", "imanganation", "2026")
+            return proc
+        if name == PROC_RESTART_WORKSPACE:
+            proc = Gimp.Procedure.new(
+                self, name, Gimp.PDBProcType.PLUGIN, _restart_workspace_run, None)
+            proc.set_menu_label("_Restart Workspace")
+            proc.add_enum_argument("run-mode", "Run mode", "How to run the procedure",
+                                   Gimp.RunMode, Gimp.RunMode.INTERACTIVE,
+                                   GObject.ParamFlags.READWRITE)
+            proc.add_menu_path("<Image>/Windows/Imanganation")
+            proc.set_documentation(
+                "Restart the Imanganation workspace",
+                "Start the workspace (its docks and the engine) again after it stopped, "
+                "and show every Imanganation dock.", name)
             proc.set_attribution("imanganation", "imanganation", "2026")
             return proc
         dock = next((d for d, proc_name in DOCK_SHOW.items() if proc_name == name), None)
