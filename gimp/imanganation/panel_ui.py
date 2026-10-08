@@ -10,8 +10,10 @@ from urllib.parse import quote
 
 try:  # Installed plug-in imports siblings as top-level modules.
     from layouts import page_layout_availability
+    from project_store import location_key as _location_key
 except ImportError:  # Package import in tests and external tooling.
     from .layouts import page_layout_availability
+    from .project_store import location_key as _location_key
 
 
 def _label(value: Any) -> str:
@@ -63,6 +65,11 @@ def character_row_id(name: str) -> str:
     return "character:" + quote(name, safe="")
 
 
+def location_row_id(name: str) -> str:
+    """A location's row key; the engine finds its image by the place's name."""
+    return "location:" + quote(name, safe="")
+
+
 def rgb_png(width: int, height: int, pixels: bytes) -> bytes | None:
     """Encode packed RGB8 pixels as a small standards-compliant PNG."""
     if width < 1 or height < 1 or len(pixels) != width * height * 3:
@@ -91,7 +98,10 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
                 delete_character_menu: str = "",
                 reorder_pages_action: str = "", bubble_line_action: str = "",
                 bubbled: frozenset = frozenset(),
-                new_bubble_action: str = "") -> dict[str, str]:
+                new_bubble_action: str = "",
+                design_location_action: str = "", new_location_action: str = "",
+                design_location_menu: str = "",
+                delete_location_menu: str = "") -> dict[str, str]:
     """Build generic host content and stable selections from a project manifest.
 
     The Context (inspector) rows are editable fields; ``open_page_action``, a dock
@@ -108,18 +118,26 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
     gives each of a panel's dialogue and SFX lines a button in Context (item
     "<panel id>:<line>", line an index or "sfx<index>"): "Select bubble" for the lines
     in ``bubbled``, else "Bubble…". ``new_bubble_action`` adds a free "Bubble…" button
-    to a page's Context."""
+    to a page's Context. Locations mirror characters: ``new_location_action`` on the
+    Locations heading, ``design_location_menu`` and ``delete_location_menu`` on each
+    location's row, and ``design_location_action`` a "Design location" button in its
+    Context (its notes are the description)."""
     panels = manifest.get("panels", [])
     pages = manifest.get("pages", [])
     page_by_id = {page["id"]: page for page in pages}
     panel_by_id = {panel["id"]: panel for panel in panels}
     cast = manifest.get("cast", [])
     character_by_id = {character_row_id(c["name"]): c for c in cast}
-    if (selected_id not in panel_by_id and selected_id not in page_by_id
-            and selected_id not in character_by_id):
+    locations = manifest.get("locations", [])
+    location_by_id = {location_row_id(loc["name"]): loc for loc in locations}
+
+    def known(row_id):
+        return any(row_id in rows for rows in (panel_by_id, page_by_id, character_by_id,
+                                               location_by_id))
+
+    if not known(selected_id):
         selected_id = manifest.get("cursor", {}).get("next_panel")
-    if (selected_id not in panel_by_id and selected_id not in page_by_id
-            and selected_id not in character_by_id):
+    if not known(selected_id):
         selected_id = next(iter(panel_by_id), next(iter(page_by_id), ""))
 
     page_counts = {page["id"]: 0 for page in pages}
@@ -178,9 +196,8 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
             count = len(panel.get("takes", []))
             project_rows.append(
                 f"{panel['id']}\t{_panel_label(panel)} · {count} take{'s' if count != 1 else ''}")
-    locations = manifest.get("locations", [])
     props = manifest.get("props", [])
-    if cast or locations or props or new_character_action:
+    if cast or locations or props or new_character_action or new_location_action:
         project_rows.append("# Assets")
         if cast or new_character_action:
             heading_menu = (f"\t!{new_character_action}:New character…"
@@ -192,17 +209,25 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
                 f"\t\t{character_row_id(character['name'])}\t"
                 f"{_label(character.get('name'))}{row_menu}"
                 for character in cast)
-        for section, assets in (("Locations", locations), ("Props", props)):
-            if not assets:
-                continue
-            project_rows.append(f"\t# {section}")
-            for asset in assets:
-                name = _label(asset.get("name")) or section[:-1]
-                notes = _label(asset.get("notes"))
-                summary = f"{name} · {notes}" if notes else name
-                if len(summary) > 140:
-                    summary = summary[:137].rstrip() + "…"
-                project_rows.append(f"\t\t# {summary}")
+        def summary(asset, fallback):
+            name = _label(asset.get("name")) or fallback
+            notes = _label(asset.get("notes"))
+            text = f"{name} · {notes}" if notes else name
+            return text[:137].rstrip() + "…" if len(text) > 140 else text
+
+        if locations or new_location_action:
+            heading_menu = (f"\t!{new_location_action}:New location…"
+                            if new_location_action else "")
+            row_menu = _menu((design_location_menu, "Design location"),
+                             (delete_location_menu, "Delete location…"))
+            project_rows.append(f"\t# Locations{heading_menu}")
+            project_rows.extend(
+                f"\t\t{location_row_id(location['name'])}\t"
+                f"{summary(location, 'Location')}{row_menu}"
+                for location in locations)
+        if props:
+            project_rows.append("\t# Props")
+            project_rows.extend(f"\t\t# {summary(prop, 'Prop')}" for prop in props)
 
     previews = previews or {}
     page_menu = f"\t!{delete_page_action}:Delete page…" if delete_page_action else ""
@@ -435,6 +460,20 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
         ])
         if design_action:
             inspector_rows.append(f"!{design_action}\tDesign character")
+    elif selected_id in location_by_id:
+        location = location_by_id[selected_id]
+        key = _location_key(location.get("name", ""))
+        used = [p for p in panels if p.get("status") != "orphaned" and _location_key(
+            p.get("location") or p.get("scene_heading") or "") == key]
+        inspector_rows.extend([
+            "# Location",
+            f"Name\t{_label(location.get('name'))}",
+            f"Panels set here\t{len(used)}",
+            "# Description",
+            _field(selected_id, "notes", "Notes", location.get("notes")),
+        ])
+        if design_location_action:
+            inspector_rows.append(f"!{design_location_action}\tDesign location")
     else:
         inspector_rows.extend(["# Project", f"Title\t{title}",
                                f"Panels\t{len(panels)}", f"Pages\t{len(pages)}"])

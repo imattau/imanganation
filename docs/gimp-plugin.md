@@ -106,6 +106,23 @@ every panel that lists them (takes and dialogue stay), and the engine moves thei
 designs to `characters/.deleted/` in its identity store, from where they can be restored
 by hand. The engine has ComfyUI unload its models before an LLM
 step and unloads the LLM before a render, so both fit on 16 GB.
+**Locations** are designed the same way. Right-click **Locations** under Assets for
+**New location…** (a name as the script writes the place, and a description: inside
+or out, era, layout, landmarks; designed straight away if you like), or a location for
+**Design location** or **Delete location…**. Selecting a location shows its notes
+(editable; they are the description), how many panels are set there (by their
+location, else their scene heading, ignoring the time of day: "School rooftop — dusk"
+is School rooftop), and the engine's reference: **Design location** draws its
+establishing image from the notes (`POST /locations`, Qwen-Image 2.1, no people), or a
+new one if it has one (earlier images are kept), and **Open reference image** opens it
+in GIMP. To fix one by hand, paint over that image and run *Imanganation → Set Location
+Reference from Layer…*: the project and location are already filled in (the opened
+image carries them), and the selected layer, or its part inside a selection, becomes
+the new reference at its own proportions (`POST /locations/reference`; the earlier
+image is kept). Any project image works too; name the location and, if needed, the
+project folder. Deleting asks first; panels keep their location text and the engine moves the
+images to `locations/.deleted/`. Location images are used by Qwen-Image 2.1 renders
+only (Context says so when the project uses another engine).
 **Speech bubbles.** A placed panel's Context lists its dialogue and SFX lines, each with
 a **Bubble…** button. It opens the bubble picker on the tab for the line's kind (speech,
 thought, shout, whisper, narration, SFX) with the line's text ready to edit, and inserts
@@ -140,8 +157,8 @@ the top-level *Imanganation* menu:
   Script rows follow reading order and select the same panel in Project and Inspector.
   The Inspector shows panel placement, scene details, lettering counts, and take
   lineage. Cast rows select a character context with project notes and engine-owned
-  versions/reference availability. Locations and Props appear under Assets with
-  their project notes. GIMP restores dock placement and visibility through its normal
+  versions/reference availability. Locations (selectable, see above) and Props
+  appear under Assets with their project notes. GIMP restores dock placement and visibility through its normal
   session state.
 
 - **Render Panel into Frame…** (the main flow): needs a selection, which is the target
@@ -204,8 +221,8 @@ the top-level *Imanganation* menu:
   non-commercial one is flagged, with a warning when selected) and its install state,
   with **Install** for missing files (progress shown while the dialog stays open). The
   **face pass** checkbox repaints each face with the panel's expression after the render.
-  **Design Locations** draws an image of each place in the script for Qwen-Image to
-  keep consistent. Measured trade-offs: `docs/quality/2026-10-07_combined.md`. Engine:
+  **Design Locations** draws an image of each place in the script that has none yet
+  (a place's notes are its description) for Qwen-Image to keep consistent. Measured trade-offs: `docs/quality/2026-10-07_combined.md`. Engine:
   `GET /engines`, `POST /engines/{id}/install`, `POST /locations/design`.
 - **Set Up Models…**: the AI models aren't included with the app. This lists the files
   the engine needs (what each is for, size, state, a link to its licence), with

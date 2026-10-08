@@ -6,7 +6,7 @@ import copy
 import json
 from pathlib import Path
 
-from gimp.imanganation.panel_ui import build_docks, character_row_id, rgb_png
+from gimp.imanganation.panel_ui import build_docks, character_row_id, location_row_id, rgb_png
 
 
 EXAMPLE = json.loads((Path(__file__).resolve().parents[1] /
@@ -103,16 +103,47 @@ def test_rgb_thumbnail_png_encoding_and_filmstrip_reference():
     assert rgb_png(2, 1, b"\xff\x00\x00") is None
 
 
-def test_project_tree_groups_story_assets_and_shows_notes_without_fake_ids():
+def test_project_tree_groups_story_assets_and_shows_notes():
     manifest = copy.deepcopy(EXAMPLE)
 
     project_tree = build_docks(manifest)["project"]
 
+    rooftop = location_row_id("School rooftop")
     assert "# Assets\n\t# Characters" in project_tree
-    assert "\t# Locations\n\t\t# School rooftop · Chain-link fence, late afternoon light" in project_tree
+    assert (f"\t# Locations\n\t\t{rooftop}\tSchool rooftop · Chain-link fence, late "
+            "afternoon light") in project_tree  # selectable, like a character
     assert "\t# Props\n\t\t# Akira's lunchbox" in project_tree
-    assert "asset:location" not in project_tree
     assert "asset:prop" not in project_tree
+
+
+def test_locations_heading_and_rows_carry_right_click_menus():
+    manifest = copy.deepcopy(EXAMPLE)
+    tree = build_docks(manifest, new_location_action="new-proc",
+                       design_location_menu="design-proc",
+                       delete_location_menu="delete-proc")["project"]
+    assert "\t# Locations\t!new-proc:New location…" in tree
+    rooftop = location_row_id("School rooftop")
+    assert (f"\t\t{rooftop}\tSchool rooftop · Chain-link fence, late afternoon light"
+            "\t!design-proc:Design location|delete-proc:Delete location…") in tree
+    manifest["locations"] = []  # the heading stays, so the first place can be added
+    assert "\t# Locations\t!new-proc:New location…" in build_docks(
+        manifest, new_location_action="new-proc")["project"]
+
+
+def test_a_selected_location_shows_its_notes_and_design_button():
+    manifest = copy.deepcopy(EXAMPLE)
+    rooftop = location_row_id("School rooftop")
+    manifest["panels"][0]["location"] = "School rooftop — late afternoon"
+    manifest["panels"][1]["location"] = "the school rooftop, cont."
+    docks = build_docks(manifest, rooftop, design_location_action="design-proc")
+    assert docks["selected_id"] == rooftop
+    inspector = docks["inspector"]
+    assert "# Location\nName\tSchool rooftop" in inspector
+    assert f"@{rooftop}.notes\tNotes\tChain-link fence, late afternoon light" in inspector
+    assert "!design-proc\tDesign location" in inspector
+    assert "Panels set here\t4" in inspector  # by location, else scene heading
+    assert "Panels set here\t1" in build_docks(manifest, location_row_id("Stairwell"))[
+        "inspector"]
 
 
 def test_context_rows_are_editable_fields_keyed_by_row_id():

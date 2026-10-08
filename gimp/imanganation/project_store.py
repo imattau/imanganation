@@ -377,12 +377,13 @@ def format_expressions(expressions: dict[str, str]) -> str:
 
 
 def apply_field_edit(document: dict[str, Any], key: str, value: str,
-                     character_id=None) -> str:
+                     character_id=None, location_id=None) -> str:
     """Apply one edited Context field to the loaded manifest (the caller saves it).
 
-    ``key`` is ``<panel/page/character row id>.<field>``; ``value`` is the field's
-    text, collapsed to one line. ``character_id`` maps a cast name to its row id.
-    Returns the id of the edited row. Raises ProjectFileError on a bad key or value.
+    ``key`` is ``<panel/page/character/location row id>.<field>``; ``value`` is the
+    field's text, collapsed to one line. ``character_id`` maps a cast name to its row
+    id, ``location_id`` a location's. Returns the id of the edited row. Raises
+    ProjectFileError on a bad key or value.
     """
     row_id, _, field = key.rpartition(".")
     value = " ".join(value.split())
@@ -456,7 +457,57 @@ def apply_field_edit(document: dict[str, Any], key: str, value: str,
         else:
             raise ProjectFileError(f"characters have no editable field {field!r}")
         return row_id
+    location = next((loc for loc in document.get("locations", [])
+                     if location_id is not None and location_id(loc["name"]) == row_id),
+                    None)
+    if location is not None:
+        if field != "notes":
+            raise ProjectFileError(f"locations have no editable field {field!r}")
+        if value:
+            location["notes"] = value
+        else:
+            location.pop("notes", None)
+        return row_id
     raise ProjectFileError(f"{row_id} is no longer in the project")
+
+
+_CONTINUED = re.compile(r"\s*[-—–:,]?\s*\(?\b(?:cont(?:'d|inued)?|contd)\.?\)?\s*$",
+                        re.IGNORECASE)
+_PLACE_SPLIT = re.compile(r"\s+[—–-]\s+|\s*[,;(]\s*")
+
+
+def location_key(place: str) -> str:
+    """The engine's key for a place (manganation/locations.py): no time, no
+    continuation, no article. "School rooftop — dusk" -> "school rooftop"."""
+    place = _CONTINUED.sub("", place.strip())
+    head = _PLACE_SPLIT.split(place, maxsplit=1)[0]
+    head = re.sub(r"^(?:the|a|an)\s+", "", head.strip(), flags=re.IGNORECASE)
+    return " ".join(head.lower().split())
+
+
+def find_location(document: dict[str, Any], name: str) -> dict[str, Any] | None:
+    """The project location that is this place (same key, any time of day), or None."""
+    key = location_key(name)
+    return next((loc for loc in document.get("locations", [])
+                 if location_key(loc.get("name", "")) == key), None)
+
+
+def panels_at_location(document: dict[str, Any], name: str) -> list[dict[str, Any]]:
+    """Panels set at this place: their location, or else their scene heading."""
+    key = location_key(name)
+    return [panel for panel in document["panels"]
+            if location_key(panel.get("location") or panel.get("scene_heading") or "")
+            == key]
+
+
+def delete_location(document: dict[str, Any], name: str) -> dict[str, Any]:
+    """Remove a location from the project's assets. Panels keep their location text
+    (it is script text). Returns the removed entry."""
+    location = find_location(document, name)
+    if location is None:
+        raise ProjectFileError(f"{name} is not one of this project's locations")
+    document["locations"].remove(location)
+    return location
 
 
 def _location_name(heading: str) -> str:

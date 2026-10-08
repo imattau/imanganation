@@ -16,7 +16,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field, model_validator
 
 from manganation.project import projects_root
@@ -194,7 +194,8 @@ class ScriptParseRequest(BaseModel):
     title: str = ""
 
 
-JobKind = Literal["render", "refine", "inpaint", "character", "parse", "locations"]
+JobKind = Literal["render", "refine", "inpaint", "character", "parse", "locations",
+                  "location"]
 
 
 class LocationsRequest(BaseModel):
@@ -203,6 +204,28 @@ class LocationsRequest(BaseModel):
     project: str = Field(pattern=r"^prj_[a-z0-9]{6,}$")
     panels: list[dict] = Field(min_length=1)
     force: bool = False  # redesign locations that already have an image
+    # The project's locations ({"name", "notes"}): a place's notes are its description
+    locations: list[dict] = Field(default_factory=list)
+
+
+class LocationReferenceRequest(BaseModel):
+    """An image (e.g. a designed one painted over in GIMP) as a place's reference."""
+
+    project: str = Field(pattern=r"^prj_[a-z0-9]{6,}$")
+    name: str = Field(min_length=1, max_length=120)
+    image_path: str = Field(description="PNG under the projects root, e.g. exported by GIMP")
+
+
+class LocationRequest(BaseModel):
+    """Design one location from the author's description, like a character: an
+    establishing image with no people (Qwen-Image 2.1), queued with the renders."""
+
+    project: str = Field(pattern=r"^prj_[a-z0-9]{6,}$")
+    name: str = Field(min_length=1, max_length=120)
+    description: str = Field(default="", max_length=4000)
+    seed: int | None = None
+    # A location that has an image: draw a new one (the old is kept in ``previous``)
+    redesign: bool = False
 
 
 @dataclass
@@ -284,6 +307,7 @@ def create_app(
     comfy_process=None,
     design_locations=None,
     engines_report=None,
+    design_location=None,
 ) -> FastAPI:
     app = FastAPI(title="imanganation engine")
     jobs: dict[str, Job] = {}
@@ -304,7 +328,8 @@ def create_app(
         try:
             result = work()
             with lock:
-                job.result, job.status = asdict(result), "done"
+                job.result = result if isinstance(result, dict) else asdict(result)
+                job.status = "done"
         except Exception as exc:  # surface any failure to the polling client
             with lock:
                 job.error, job.status = str(exc), "error"
@@ -472,18 +497,106 @@ def create_app(
             from manganation import locations as lc
 
             registry = lc.LocationRegistry.from_path(identity)
+            notes = {lc.location_key(entry.get("name", "")): entry.get("notes", "")
+                     for entry in req.locations if entry.get("name")}
             designed, existing = [], []
             for key, found in lc.gather(specs).items():
                 if key in registry.locations and not req.force \
                         and registry.reference_path(key) is not None:
                     existing.append(key)
                     continue
-                loc = lc.design(identity, key, found["name"], found["details"])
+                loc = lc.design(identity, key, found["name"], found["details"],
+                                description=notes.get(key) or None)
                 designed.append({"key": loc.key, "name": loc.name, "details": loc.details,
                                  "image": str(registry.root / loc.image)})
             return LocationsResult(designed=designed, existing=existing)
 
         return submit_job("locations", req.model_dump(), work)
+
+    def _location_registry(project: str):
+        from manganation import locations as lc
+        from manganation.identity import IdentityError, identity_root
+
+        try:
+            return lc.LocationRegistry.from_path(identity_root(project, root=root))
+        except IdentityError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    def _location_record(registry, location) -> dict:
+        image = registry.root / location.image
+        return {"key": location.key, "name": location.name,
+                "description": location.description, "details": location.details,
+                "image": str(image) if image.is_file() else None,
+                "previous": [str(registry.root / p) for p in location.previous],
+                "seed": location.seed, "created_at": location.created_at}
+
+    @app.get("/locations")
+    def locations_list(project: str = Query(pattern=r"^prj_[a-z0-9]{6,}$")) -> list[dict]:
+        """The project's designed locations: key, name, the author's description, the
+        setting tags, the reference image (None if its file is gone) and older images."""
+        registry = _location_registry(project)
+        return [_location_record(registry, loc) for loc in registry.locations.values()]
+
+    @app.post("/locations", status_code=202)
+    def location_design(req: LocationRequest) -> Job:
+        """Design (or, with ``redesign``, draw anew) one location from its description.
+        Its key is the place without a time ("School rooftop — dusk" -> school rooftop),
+        the same key renders look it up by."""
+        from manganation import locations as lc
+        from manganation.identity import identity_root
+
+        registry = _location_registry(req.project)
+        key = lc.location_key(req.name)
+        if not any(ch.isalnum() for ch in key):
+            raise HTTPException(422, f"no place in {req.name!r}")
+        if registry.reference_path(key) is not None and not req.redesign:
+            raise HTTPException(409, f"{req.name} already has a design; send redesign "
+                                     "to draw a new one")
+        identity = identity_root(req.project, root=root)
+        name = " ".join(req.name.split())
+
+        def work():
+            design = design_location or lc.design
+            loc = design(identity, key, name, [], seed=req.seed,
+                         description=req.description.strip() or None)
+            return _location_record(lc.LocationRegistry.from_path(identity), loc)
+
+        return submit_job("location", req.model_dump(), work)
+
+    @app.post("/locations/reference")
+    def location_reference(req: LocationReferenceRequest) -> dict:
+        """Register an image as a location's new reference (earlier images are kept).
+        Synchronous: a file copy, no GPU."""
+        from PIL import Image, UnidentifiedImageError
+
+        from manganation.locations import location_key
+
+        registry = _location_registry(req.project)
+        if not any(ch.isalnum() for ch in location_key(req.name)):
+            raise HTTPException(422, f"no place in {req.name!r}")
+        image = _engine_file(req.image_path, "image")
+        try:
+            with Image.open(image) as im:
+                im.verify()
+        except (UnidentifiedImageError, OSError) as exc:
+            raise HTTPException(400, f"not a readable image: {exc}") from exc
+        before = registry.locations.get(location_key(req.name))
+        location = registry.set_reference(req.name, image)
+        return {**_location_record(registry, location),
+                "replaced": str(registry.root / before.image) if before else None}
+
+    @app.delete("/locations")
+    def location_delete(name: str,
+                        project: str = Query(pattern=r"^prj_[a-z0-9]{6,}$")) -> dict:
+        """Forget a location. Its images move to ``locations/.deleted/``, not erased."""
+        registry = _location_registry(project)
+        removed = registry.remove(name)
+        if removed is None:
+            known = ", ".join(registry.locations) or "none"
+            raise HTTPException(404, f"no location {name!r} (known: {known})")
+        location, moved = removed
+        return {"key": location.key, "name": location.name,
+                "moved_to": str(moved) if moved else None}
 
     @app.get("/health")
     def health() -> dict:

@@ -7,13 +7,17 @@ shows the same place: the fence, the city behind it, the light. Without it two-s
 came out on near-empty backgrounds ("rooftop" 0% in the model trial).
 
 Stored beside the characters in the identity folder: ``locations/locations.json`` and
-``locations/<slug>.png``.
+``locations/<slug>.png``. The author can also design one place at a time from their own
+description (the plug-in's Design location), like a character; a redesign writes a new
+image and keeps the earlier ones listed in ``previous``.
 """
 
 from __future__ import annotations
 
 import json
+import random
 import re
+import shutil
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -44,6 +48,8 @@ class Location:
     details: list[str] = field(default_factory=list)  # setting tags from the script
     prompt: str = ""
     seed: int | None = None
+    description: str = ""  # the author's words for the place (the project's notes)
+    previous: list[str] = field(default_factory=list)  # earlier images, oldest first
     created_at: str = field(
         default_factory=lambda: datetime.now(UTC).isoformat(timespec="seconds"))
 
@@ -71,6 +77,55 @@ class LocationRegistry:
         self.locations[location.key] = location
         self.save()
 
+    def remove(self, place: str) -> tuple[Location, Path | None] | None:
+        """Drop a location; its images move to ``locations/.deleted/<slug>-<time>/``
+        rather than being erased. -> (location, folder they moved to) or None."""
+        location = self.locations.pop(location_key(place), None)
+        if location is None:
+            return None
+        images = [self.root / name for name in (*location.previous, location.image)]
+        images = [path for path in images if path.is_file()]
+        moved = None
+        if images:
+            stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+            moved = self.root / ".deleted" / f"{slug(location.key)}-{stamp}"
+            moved.mkdir(parents=True, exist_ok=True)
+            for path in images:
+                shutil.move(str(path), moved / path.name)
+        self.save()
+        return location, moved
+
+    def set_reference(self, name: str, image: Path) -> Location:
+        """Make a picture (the author's, e.g. painted over in GIMP) a place's reference:
+        a copy beside the designed ones, the earlier image kept in ``previous``. A place
+        with no record yet gets one, named as given."""
+        key = location_key(name)
+        before = self.locations.get(key)
+        self.root.mkdir(parents=True, exist_ok=True)
+        stored = self.next_image(key)
+        shutil.copyfile(image, self.root / stored)
+        if before is None:
+            location = Location(key=key, name=" ".join(name.split()), image=stored)
+        else:
+            previous = [*before.previous, before.image]
+            location = Location(**{**asdict(before), "image": stored, "prompt": "",
+                                   "seed": None,
+                                   "previous": [p for p in previous
+                                                if (self.root / p).is_file()],
+                                   "created_at": datetime.now(UTC).isoformat(
+                                       timespec="seconds")})
+        self.add(location)
+        return location
+
+    def next_image(self, key: str) -> str:
+        """A file name no image of this location uses yet: <slug>.png, <slug>-2.png…"""
+        base, n = slug(key), 1
+        name = f"{base}.png"
+        while (self.root / name).exists():
+            n += 1
+            name = f"{base}-{n}.png"
+        return name
+
     def save(self) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
         self.file.write_text(json.dumps(
@@ -78,13 +133,20 @@ class LocationRegistry:
             ensure_ascii=False))
 
 
-def location_prompt(name: str, details: list[str]) -> str:
-    """An establishing view of the place, empty, for the renderer to keep."""
+def location_prompt(name: str, details: list[str], description: str = "") -> str:
+    """An establishing view of the place, empty, for the renderer to keep. The author's
+    description comes first: Qwen-Image reads prose, so their words go in as written."""
     extra = ", ".join(d for d in details if d not in ("indoors", "outdoors"))
     inside = "indoors" in details and "outdoors" not in details
+    description = " ".join(description.split()).rstrip(".")
+    # The author's words say whether it is inside; without tags, don't contradict them
+    kind = ("An interior" if inside else "An outdoor scene"
+            if "outdoors" in details or not description else "The place")
     return ("A full-colour anime background illustration for a manga: an establishing "
-            f"view of {name}" + (f", with {extra}" if extra else "") + ". "
-            f"{'An interior' if inside else 'An outdoor scene'} seen at eye level, wide "
+            f"view of {name}" + (f". {description}" if description else "")
+            + (f", with {extra}" if extra and not description else "")
+            + (f". Also shown: {extra}" if extra and description else "") + ". "
+            f"{kind} seen at eye level, wide "
             "enough to show the whole place and its surroundings. No people, no "
             "characters, no text. Clean line art and cel-shaded colour, detailed "
             "background art.")
@@ -111,28 +173,43 @@ def gather(panels, settings=None) -> dict[str, dict]:
 
 
 def design(identity: Path, key: str, name: str, details: list[str], *, client=None,
-           seed: int = 7, width: int = 1344, height: int = 768) -> Location:
-    """Render a location's reference image (Qwen-Image 2.1, no people) and register it."""
+           seed: int | None = None, width: int = 1344, height: int = 768,
+           description: str | None = None) -> Location:
+    """Render a location's reference image (Qwen-Image 2.1, no people) and register it.
+
+    A place designed before is redesigned: a new image (a new seed unless one is given),
+    the old one kept in ``previous``; ``description`` None keeps the last one, and the
+    setting tags gathered before are kept when none are given."""
     from manganation.config import load_models, load_settings
     from manganation.render import graphs
     from manganation.render.comfy_client import ComfyClient
     from manganation.render.panel import trial_files
 
-    settings = load_settings()
-    client = client or ComfyClient(settings.comfyui.base_url)
+    registry = LocationRegistry.from_path(identity)
+    before = registry.locations.get(key)
+    if description is None:
+        description = before.description if before else ""
+    if not details and before:
+        details = before.details
+    if seed is None:
+        seed = random.randrange(2**31) if before else 7
+    if client is None:
+        settings = load_settings()
+        client = ComfyClient(settings.comfyui.base_url)
     files = trial_files(load_models(), "qwen_image_21")
-    prompt = location_prompt(name, details)
+    prompt = location_prompt(name, details, description)
     graph = graphs.qwen_image21(unet=files["model"], clip=files["text_encoder"],
                                 vae=files["vae"], prompt=prompt, refs=[], width=width,
                                 height=height, seed=seed, prefix="imanganation_location")
     blobs = client.run(graph)
     if not blobs:
         raise RuntimeError("ComfyUI returned no image")
-    registry = LocationRegistry.from_path(identity)
     registry.root.mkdir(parents=True, exist_ok=True)
-    image = f"{slug(key)}.png"
+    image = registry.next_image(key)
     (registry.root / image).write_bytes(blobs[0])
+    previous = [*before.previous, before.image] if before else []
     location = Location(key=key, name=name, image=image, details=details, prompt=prompt,
-                        seed=seed)
+                        seed=seed, description=description,
+                        previous=[p for p in previous if (registry.root / p).is_file()])
     registry.add(location)
     return location

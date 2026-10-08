@@ -139,8 +139,9 @@ own panel.
 ### `cast`, `locations`, `props`
 Story-side lists. `cast` entries: `name`, `aliases`, `notes` (story notes, e.g. "Yuki
 is energetic, always grinning"). **No traits or images**, which are engine state.
-`locations` and `props` hold `name` and `notes` now, with room for engine refs later
-(recurring-location consistency).
+`locations` and `props` hold `name` and `notes`. A location's notes are its description
+for **Design location**; its reference image is engine state (the identity folder's
+`locations/`), found by the place's name without its time of day.
 
 ### `cursor`
 `{"next_panel": "pnl_…"}`. The place-next/render-next pointer (today's

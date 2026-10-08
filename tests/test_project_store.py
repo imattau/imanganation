@@ -9,18 +9,19 @@ from pathlib import Path
 import jsonschema
 import pytest
 
+from gimp.imanganation.panel_ui import character_row_id, location_row_id
 from gimp.imanganation.project_store import (
     ProjectFileError,
     apply_field_edit,
     delete_character,
+    delete_location,
     load_project,
     new_id,
+    panels_at_location,
     record_take,
     save_project,
 )
-from gimp.imanganation.panel_ui import character_row_id
 from manganation.project_container import integrity_errors
-
 
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = json.loads((ROOT / "docs/project-container.example.json").read_text())
@@ -251,3 +252,30 @@ def test_deleting_a_character_takes_them_out_of_the_cast_and_their_panels(tmp_pa
 
     with pytest.raises(ProjectFileError, match="not in this project's cast"):
         delete_character(document, "Yuki")
+
+
+def test_location_notes_are_edited_in_context_and_deleting_keeps_panel_text(tmp_path):
+    document = copy.deepcopy(EXAMPLE)
+    rooftop = location_row_id("School rooftop")
+    apply_field_edit(document, f"{rooftop}.notes", "  rusty   water tank ",
+                     character_row_id, location_row_id)
+    assert document["locations"][0] == {"name": "School rooftop",
+                                        "notes": "rusty water tank"}
+    apply_field_edit(document, f"{rooftop}.notes", "", character_row_id, location_row_id)
+    assert "notes" not in document["locations"][0]
+    with pytest.raises(ProjectFileError, match="no editable field"):
+        apply_field_edit(document, f"{rooftop}.name", "Roof", character_row_id,
+                         location_row_id)
+
+    at_rooftop = panels_at_location(document, "the School Rooftop — dusk")
+    assert len(at_rooftop) == 4  # scene headings "School rooftop — late afternoon/cont."
+    headings = {p["id"]: (p["scene_heading"], p["location"]) for p in document["panels"]}
+    removed = delete_location(document, "school rooftop")
+    assert removed["name"] == "School rooftop"
+    assert [loc["name"] for loc in document["locations"]] == ["Stairwell"]
+    assert {p["id"]: (p["scene_heading"], p["location"])
+            for p in document["panels"]} == headings  # script text stays
+    with pytest.raises(ProjectFileError, match="not one of"):
+        delete_location(document, "School rooftop")
+    save_project(tmp_path, document)
+    jsonschema.validate(load_project(tmp_path), SCHEMA)

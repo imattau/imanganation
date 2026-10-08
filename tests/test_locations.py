@@ -63,3 +63,11 @@ def test_background_tags_ignore_the_people():
              "skirt": 0.8}
     assert ev.background_tags(probs) == {"sky": 0.6, "chain-link fence": 0.5,
                                          "night sky": 0.2}
+
+
+def test_the_authors_description_leads_the_location_prompt():
+    text = lc.location_prompt("Kitchen", ["stove"], "A cramped kitchen, dishes piled up.")
+    assert "establishing view of Kitchen. A cramped kitchen, dishes piled up. " \
+           "Also shown: stove." in text
+    assert "The place seen at eye level" in text  # not called outdoors against its words
+    assert "An outdoor scene" in lc.location_prompt("the pier", [])

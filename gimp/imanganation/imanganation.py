@@ -61,15 +61,25 @@ try:
     import setup_ui
     from layouts import frame_rings, layout_preview_rgb, page_layout_availability
     from panel_ui import _panel_label as panel_label
-    from panel_ui import build_docks, build_welcome_docks, character_row_id, rgb_png
+    from panel_ui import (
+        build_docks,
+        build_welcome_docks,
+        character_row_id,
+        location_row_id,
+        rgb_png,
+    )
     from project_store import (
         ProjectFileError,
         apply_field_edit,
         delete_character,
+        delete_location,
         delete_page,
+        find_location,
         load_project,
+        location_key,
         new_id,
         new_project_document,
+        panels_at_location,
         project_from_script,
         record_take,
         reorder_pages,
@@ -82,11 +92,12 @@ except ImportError:  # Keep older single-file plug-in installs usable for legacy
     project_from_script = parse_script_text = script_looks_canonical = None
     lettering = bubble_templates = setup_ui = engine_services = engine_ui = None
     load_project = record_take = save_project = apply_field_edit = None
-    delete_character = None
+    delete_character = delete_location = find_location = None
+    location_key = panels_at_location = None
     new_id = None
     new_project_document = None
     build_docks = None
-    character_row_id = None
+    character_row_id = location_row_id = None
     panel_label = None
     rgb_png = None
     build_welcome_docks = None
@@ -98,6 +109,7 @@ PROC_PLACE = "plug-in-imanganation-place-panel"
 PROC_REFINE = "plug-in-imanganation-refine-panel"
 PROC_REGEN = "plug-in-imanganation-regenerate-panel"
 PROC_SETREF = "plug-in-imanganation-set-character-reference"
+PROC_SET_LOCATION_REF = "plug-in-imanganation-set-location-reference"
 PROC_INPAINT = "plug-in-imanganation-inpaint-selection"
 PROC_STATUS = "plug-in-imanganation-engine-status"
 PROC_PROJECT_DOCKS = "plug-in-imanganation-project-docks"
@@ -135,6 +147,12 @@ DOCK_DESIGN_CHARACTER = "plug-in-imanganation-dock-design-character"
 DOCK_NEW_CHARACTER = "plug-in-imanganation-dock-new-character"
 DOCK_DESIGN_CHARACTER_ITEM = "plug-in-imanganation-dock-design-character-item"
 DOCK_DELETE_CHARACTER = "plug-in-imanganation-dock-delete-character"
+# Locations, like characters: Context buttons, and the tree's right-click menus
+DOCK_DESIGN_LOCATION = "plug-in-imanganation-dock-design-location"
+DOCK_OPEN_LOCATION_IMAGE = "plug-in-imanganation-dock-open-location-image"
+DOCK_NEW_LOCATION = "plug-in-imanganation-dock-new-location"
+DOCK_DESIGN_LOCATION_ITEM = "plug-in-imanganation-dock-design-location-item"
+DOCK_DELETE_LOCATION = "plug-in-imanganation-dock-delete-location"
 # Page strip / Project tree: right-click Delete page… and drag to reorder
 DOCK_DELETE_PAGE = "plug-in-imanganation-dock-delete-page"
 DOCK_REORDER_PAGES = "plug-in-imanganation-dock-reorder-pages"
@@ -160,11 +178,14 @@ DOCK_ITEMS = {
     DOCK_CHARACTERS: "plug-in-imanganation-dock-characters-item",
 }
 REF_MAX = 1024  # reference export cap; the CLIP encoder only sees 224-448 px anyway
+LOCATION_REF_MAX = 1344  # a location's long side, as the engine designs them
 PARASITE = "imanganation-panelspec"
 LAYOUT_PARASITE = "imanganation-layout"
 PROJECT_PARASITE = "imanganation-project"
 PANEL_PARASITE = "imanganation-panel"
 TAKE_PARASITE = "imanganation-take"
+# On a location's reference image opened from Context: {"project": root, "name": place}
+LOCATION_PARASITE = "imanganation-location"
 CURSOR_FILE = "gimp_cursor.json"  # per project: which panel comes next
 ENGINE_URL = "http://127.0.0.1:8790"
 RENDER_TIMEOUT = 600  # seconds
@@ -1219,12 +1240,14 @@ def _image_project(image):
     return walk(image.get_layers())
 
 
-def _export_reference(image, drawable, path):
-    """Export ``drawable`` (or its part inside the selection) as a square PNG.
+def _export_reference(image, drawable, path, square=True, max_side=REF_MAX):
+    """Export ``drawable`` (or its part inside the selection) as a PNG.
 
-    The CLIP encoder centre-crops references to a square, so the region is grown to
-    a square around its centre here, on white, instead of being cropped there. Layer
-    masks apply (a panel's frame clip), so only what the artist sees is exported."""
+    The CLIP encoder centre-crops character references to a square, so the region is
+    grown to a square around its centre here, on white, instead of being cropped there;
+    ``square=False`` (a location, given to Qwen-Image whole) keeps its proportions.
+    Layer masks apply (a panel's frame clip), so only what the artist sees is exported.
+    -> the exported region's longest side, before any scaling down to ``max_side``."""
     _, lx, ly = drawable.get_offsets()
     lw, lh = drawable.get_width(), drawable.get_height()
     x1, y1, x2, y2 = lx, ly, lx + lw, ly + lh
@@ -1234,9 +1257,13 @@ def _export_reference(image, drawable, path):
         if x2 <= x1 or y2 <= y1:
             raise ValueError("The selection doesn't overlap the selected layer.")
     side = max(x2 - x1, y2 - y1)
-    ox, oy = (x1 + x2) // 2 - side // 2, (y1 + y2) // 2 - side // 2
+    if square:
+        width = height = side
+        ox, oy = (x1 + x2) // 2 - side // 2, (y1 + y2) // 2 - side // 2
+    else:
+        width, height, ox, oy = x2 - x1, y2 - y1, x1, y1
 
-    out = Gimp.Image.new(side, side, image.get_base_type())
+    out = Gimp.Image.new(width, height, image.get_base_type())
     try:
         copy = Gimp.Layer.new_from_drawable(drawable, out)
         copy.set_visible(True)
@@ -1244,14 +1271,16 @@ def _export_reference(image, drawable, path):
         copy.set_offsets(lx - ox, ly - oy)
         bg_type = (Gimp.ImageType.RGB_IMAGE if image.get_base_type() == Gimp.ImageBaseType.RGB
                    else Gimp.ImageType.GRAY_IMAGE)
-        bg = Gimp.Layer.new(out, "white", side, side, bg_type, 100, Gimp.LayerMode.NORMAL)
+        bg = Gimp.Layer.new(out, "white", width, height, bg_type, 100,
+                            Gimp.LayerMode.NORMAL)
         out.insert_layer(bg, None, 1)
         bg.fill(Gimp.FillType.WHITE)
         out.flatten()
         if out.get_base_type() != Gimp.ImageBaseType.RGB:
             out.convert_rgb()
-        if side > REF_MAX:
-            out.scale(REF_MAX, REF_MAX)
+        if side > max_side:
+            out.scale(max(1, round(width * max_side / side)),
+                      max(1, round(height * max_side / side)))
         path.parent.mkdir(parents=True, exist_ok=True)
         Gimp.file_save(Gimp.RunMode.NONINTERACTIVE, out, Gio.File.new_for_path(str(path)), None)
     finally:
@@ -1299,6 +1328,71 @@ def set_character_reference(procedure, run_mode, image, drawables, config, data)
     Gimp.message(f"{result['name']}'s reference is now {result['version']} ({side}px square; "
                  f"was {result['previous']}). New renders of {result['name']} use it; earlier "
                  f"versions are kept in characters/{slug}/.")
+    return _success(procedure, layers[0])
+
+
+def _location_reference_target(image):
+    """(project root, place name) recorded on a location image opened from Context."""
+    parasite = image.get_parasite(LOCATION_PARASITE)
+    if parasite is None:
+        return None, ""
+    try:
+        meta = json.loads(bytes(parasite.get_data()))
+        return Path(meta["project"]), meta.get("name", "")
+    except (TypeError, ValueError, KeyError):
+        return None, ""
+
+
+def set_location_reference(procedure, run_mode, image, drawables, config, data):
+    """Use the selected layer (or its part inside the selection) as a location's
+    reference: Open reference image from Context, paint over it, then this. The
+    engine keeps the earlier images."""
+    layers = [d for d in drawables if isinstance(d, Gimp.Layer)]
+    if not layers:
+        return _error(procedure, "Select the layer that shows the place.")
+    root, recorded = _location_reference_target(image)
+    if recorded and not config.get_property("location"):
+        config.set_property("location", recorded)
+    if run_mode == Gimp.RunMode.INTERACTIVE and not _dialog(procedure, config,
+                                                            PROC_SET_LOCATION_REF):
+        return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
+
+    root = root or _image_project(image)
+    if root is None:
+        chosen = config.get_property("project-dir")
+        if chosen is None:
+            return _error(procedure, "This image isn't from a project; choose the project "
+                                     "folder.")
+        root = Path(chosen.get_path())
+    name = (config.get_property("location") or "").strip()
+    engine = config.get_property("engine-url").rstrip("/")
+    try:
+        manifest = _manifest_for(root)
+        if manifest is None:
+            raise ValueError(f"{root} has no project.json; locations need a project "
+                             "container")
+        location = find_location(manifest, name) if name else None
+        if location is None:
+            known = ", ".join(loc["name"] for loc in manifest.get("locations", []))
+            raise ValueError(f"Unknown location {name!r}. This project has: "
+                             f"{known or 'none'} (add one with New location… first).")
+        slug = re.sub(r"[^a-z0-9]+", "_", location_key(location["name"])).strip("_")
+        path = (root / "tmp"
+                / f"gimp_location_{slug or 'place'}_{time.strftime('%Y%m%d-%H%M%S')}.png")
+        side = _export_reference(image, layers[0], path, square=False,
+                                 max_side=LOCATION_REF_MAX)
+        result = _http("POST", f"{engine}/locations/reference",
+                       {"project": manifest["project"]["id"], "name": location["name"],
+                        "image_path": str(path)})
+    except (EngineError, ValueError) as exc:
+        return _error(procedure, str(exc))
+
+    scaled = f", scaled from {side}px" if side > LOCATION_REF_MAX else ""
+    Gimp.message(f"{location['name']}'s reference is now {Path(result['image']).name}"
+                 f"{scaled}" + (f" (was {Path(result['replaced']).name}, kept)"
+                                if result.get("replaced") else "")
+                 + ". New Qwen-Image renders set there use it.")
+    _notify_project_docks(root)
     return _success(procedure, layers[0])
 
 
@@ -1928,6 +2022,42 @@ def _engine_character_rows(root, character_name):
     ]
 
 
+def _engine_location(root, manifest, name):
+    """The engine's record of this place ({"key", "image", "description", …}), or None
+    if it has none. Raises EngineError when the engine isn't answering."""
+    query = urllib.parse.urlencode(_engine_project(root, manifest))
+    known = _http("GET", f"{ENGINE_URL}/locations?{query}", timeout=3)
+    key = location_key(name)
+    return next((loc for loc in known if loc.get("key") == key), None)
+
+
+def _engine_location_rows(root, manifest, name):
+    rows = ["# Engine location reference"]
+    if location_key(name) in _LOCATION_DESIGN_JOBS.values():
+        rows.append("Design\tIn progress…")
+    try:
+        record = _engine_location(root, manifest, name)
+    except EngineError as exc:
+        return rows + [f"Status\t{_engine_status(exc)}"]
+    if record is None or not record.get("image"):
+        rows.append("Reference image\tNot designed yet")
+    else:
+        versions = len(record.get("previous", [])) + 1
+        rows.extend([
+            f"Reference image\t{Path(record['image']).name}"
+            + (f" · {versions} versions" if versions > 1 else ""),
+            f"Designed\t{record.get('created_at') or 'Unknown'}",
+            f"!{DOCK_OPEN_LOCATION_IMAGE}\tOpen reference image",
+            "Paint over\tOpen it, edit, then Imanganation > Set Location Reference "
+            "from Layer…",
+        ])
+        if record.get("details"):
+            rows.append(f"Setting tags\t{', '.join(record['details'])}")
+    if engine_ui is not None and engine_ui.project_render(manifest)["engine"] != "qwen_image_21":
+        rows.append("Used by\tQwen-Image 2.1 renders only (Render Engine…)")
+    return rows
+
+
 def _canvas_take_rows(manifest):
     """Describe the selected canvas layer when it has a project take reference."""
     try:
@@ -2128,6 +2258,11 @@ def _refresh_project_docks(sync_canvas=False):
             engine_rows += "\nDesign\tIn progress…"
         contents["inspector"] += "\n" + engine_rows
         contents["characters"] += "\n" + engine_rows
+    elif selected_id in {location_row_id(loc["name"]) for loc in manifest.get("locations", [])}:
+        location = next(loc for loc in manifest.get("locations", [])
+                        if location_row_id(loc["name"]) == selected_id)
+        contents["inspector"] += "\n" + "\n".join(
+            _engine_location_rows(root, manifest, location["name"]))
 
     for identifier, content_key, selection_key in (
             (DOCK_PROJECT, "project", "project_selected"),
@@ -2557,6 +2692,10 @@ def _dock_action(procedure, config, data):
             _create_manual_project(**options)
         elif data == "design-character":
             _design_selected_character()
+        elif data == "design-location":
+            _design_selected_location()
+        elif data == "open-location-image":
+            _open_selected_location_image()
         elif data == "setup-models":
             _show_setup_dialog()
         elif data == "render-engine":
@@ -3366,7 +3505,8 @@ def _queue_location_design(root):
     """Ask the engine to design every location the project's panels use."""
     manifest = load_project(root)
     job = _http("POST", f"{ENGINE_URL}/locations/design",
-                {"project": manifest["project"]["id"], "panels": manifest["panels"]})
+                {"project": manifest["project"]["id"], "panels": manifest["panels"],
+                 "locations": manifest.get("locations", [])})
     if not _LOCATION_JOBS:
         GLib.timeout_add_seconds(3, _poll_location_jobs)
     _LOCATION_JOBS[job["id"]] = root
@@ -3390,7 +3530,210 @@ def _poll_location_jobs():
             Gimp.message("Locations designed: " + (", ".join(made) or "none new")
                          + (f" (already had: {', '.join(result['existing'])})"
                             if result.get("existing") else ""))
+        try:
+            _refresh_project_docks()
+        except Exception:
+            pass
     return GLib.SOURCE_CONTINUE if _LOCATION_JOBS else GLib.SOURCE_REMOVE
+
+
+_LOCATION_DESIGN_JOBS = {}  # engine job id -> location key, while one place renders
+
+
+def _queue_single_location_design(root, manifest, location, redesign=False):
+    """Ask the engine to design one location from its notes; the docks refresh when
+    the image is ready."""
+    body = {"project": manifest["project"]["id"], "name": location["name"],
+            "description": location.get("notes", ""), "redesign": redesign}
+    job = _http("POST", f"{ENGINE_URL}/locations", body)
+    if not _LOCATION_DESIGN_JOBS:
+        GLib.timeout_add_seconds(3, _poll_single_location_jobs)
+    _LOCATION_DESIGN_JOBS[job["id"]] = location_key(location["name"])
+
+
+def _poll_single_location_jobs():
+    for job_id, key in list(_LOCATION_DESIGN_JOBS.items()):
+        try:
+            job = _http("GET", f"{ENGINE_URL}/jobs/{job_id}", timeout=3)
+        except EngineError:
+            continue  # engine restarting: try again next tick
+        if job["status"] in ("queued", "running"):
+            continue
+        del _LOCATION_DESIGN_JOBS[job_id]
+        if job["status"] == "error":
+            Gimp.message(f"Designing {job['request'].get('name', key)} failed: "
+                         f"{job.get('error')}")
+        try:
+            _refresh_project_docks()
+        except Exception:
+            pass
+    return GLib.SOURCE_CONTINUE if _LOCATION_DESIGN_JOBS else GLib.SOURCE_REMOVE
+
+
+def _selected_location(manifest):
+    selected = _DOCK_CONTEXT.get("selected_id")
+    return next((loc for loc in manifest.get("locations", [])
+                 if location_row_id(loc["name"]) == selected), None)
+
+
+def _design_selected_location():
+    """Context's Design location: design (or redesign) the selected place from its
+    notes. A place with no notes is drawn from its name alone."""
+    root = _DOCK_CONTEXT["root"]
+    manifest = load_project(root)
+    location = _selected_location(manifest)
+    if location is None:
+        raise ValueError("Select a location first")
+    if location_key(location["name"]) in _LOCATION_DESIGN_JOBS.values():
+        raise ValueError(f"{location['name']} is already being designed")
+    record = _engine_location(root, manifest, location["name"])
+    _queue_single_location_design(root, manifest, location,
+                                  redesign=bool(record and record.get("image")))
+    _refresh_project_docks()
+
+
+def _open_selected_location_image():
+    """Open the selected location's reference image in GIMP, to look at or paint over."""
+    root = _DOCK_CONTEXT["root"]
+    manifest = load_project(root)
+    location = _selected_location(manifest)
+    if location is None:
+        raise ValueError("Select a location first")
+    record = _engine_location(root, manifest, location["name"])
+    if record is None or not record.get("image"):
+        raise ValueError(f"{location['name']} has no reference image yet")
+    image = Gimp.file_load(Gimp.RunMode.NONINTERACTIVE, Gio.File.new_for_path(record["image"]))
+    # Set Location Reference from Layer… reads this to know the project and the place
+    image.attach_parasite(Gimp.Parasite.new(
+        LOCATION_PARASITE, Gimp.PARASITE_PERSISTENT,
+        list(json.dumps({"project": str(root), "name": location["name"]}).encode())))
+    Gimp.Display.new(image)
+
+
+def _choose_new_location():
+    """New Location dialog -> (name, description, design now) or None."""
+    dialog = Gtk.Dialog(title="New Location", flags=Gtk.DialogFlags.MODAL)
+    dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+                       "Create", Gtk.ResponseType.OK)
+    dialog.set_default_response(Gtk.ResponseType.OK)
+    grid = Gtk.Grid(column_spacing=12, row_spacing=8, margin=12)
+    name = Gtk.Entry(activates_default=True, hexpand=True,
+                     placeholder_text="As the script names it, e.g. School rooftop")
+    description = Gtk.TextView(wrap_mode=Gtk.WrapMode.WORD_CHAR, accepts_tab=False,
+                               left_margin=4, right_margin=4, top_margin=4, bottom_margin=4)
+    scrolled = Gtk.ScrolledWindow(hexpand=True, vexpand=True)
+    scrolled.set_size_request(380, 120)
+    scrolled.set_shadow_type(Gtk.ShadowType.IN)
+    scrolled.add(description)
+    hint = Gtk.Label(label="Inside or outside, era, layout, landmarks, materials, what "
+                           "lies beyond. Leave out the time of day: one image serves "
+                           "every panel set here.",
+                     xalign=0.0, wrap=True, max_width_chars=48)
+    hint.get_style_context().add_class("dim-label")
+    design = Gtk.CheckButton(label="Design the location now (uses the engine)", active=True)
+    for row, (label, widget) in enumerate((("Name", name), ("Description", scrolled))):
+        caption = Gtk.Label(label=label, xalign=0.0, valign=Gtk.Align.START)
+        grid.attach(caption, 0, row, 1, 1)
+        grid.attach(widget, 1, row, 1, 1)
+    grid.attach(hint, 1, 2, 1, 1)
+    grid.attach(design, 1, 3, 1, 1)
+    dialog.get_content_area().add(grid)
+    dialog.show_all()
+    try:
+        while dialog.run() == Gtk.ResponseType.OK:
+            buffer = description.get_buffer()
+            text = buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), False)
+            chosen = (" ".join(name.get_text().split()), " ".join(text.split()),
+                      design.get_active())
+            if any(ch.isalnum() for ch in location_key(chosen[0])):
+                return chosen
+            Gimp.message("Give the location a name.")
+        return None
+    finally:
+        dialog.destroy()
+
+
+def _dock_location_menu(procedure, config, data):
+    """Project tree right-click: New location… (Locations heading), or Design
+    location / Delete location… (a location row, whose id is the item)."""
+    try:
+        root = _DOCK_CONTEXT["root"]
+        if data == "design":
+            _DOCK_CONTEXT["selected_id"] = config.get_property("item")
+            _design_selected_location()
+            return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+        if data == "delete":
+            if not _delete_location(root, config.get_property("item")):
+                return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
+            return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+        chosen = _choose_new_location()
+        if chosen is None:
+            return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
+        name, description, design = chosen
+        manifest = load_project(root)
+        if find_location(manifest, name) is not None:
+            raise ValueError(f"{find_location(manifest, name)['name']} is already a location")
+        location = {"name": name}
+        if description:
+            location["notes"] = description
+        manifest.setdefault("locations", []).append(location)
+        save_project(root, manifest)
+        _DOCK_CONTEXT["selected_id"] = location_row_id(name)
+        if design:
+            try:
+                _queue_single_location_design(root, manifest, location)
+            except EngineError as exc:
+                Gimp.message(f"{name} was added but not designed: {_engine_status(exc)}. "
+                             "Use Design location when the engine runs.")
+        _refresh_project_docks()
+    except Exception as exc:
+        return _error(procedure, str(exc))
+    return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+
+
+def _delete_location(root, row_id):
+    """Delete location…: confirm, take it out of the project's locations, and have the
+    engine set its images aside. Panels keep their location text. -> False if
+    cancelled."""
+    manifest = load_project(root)
+    location = next((loc for loc in manifest.get("locations", [])
+                     if location_row_id(loc["name"]) == row_id), None)
+    if location is None:
+        raise ValueError("That location is no longer in the project")
+    name = location["name"]
+    if location_key(name) in _LOCATION_DESIGN_JOBS.values():
+        raise ValueError(f"{name} is being designed; delete it when the design finishes")
+    try:
+        record, engine_down = _engine_location(root, manifest, name), None
+    except EngineError as exc:
+        record, engine_down = None, exc
+    panels = len(panels_at_location(manifest, name))
+    detail = f"{name} is removed from the project's locations."
+    if panels:
+        detail += (f" {panels} panel{'s' if panels != 1 else ''} set there keep "
+                   f"{'their' if panels != 1 else 'its'} location text.")
+    if record is not None:
+        detail += (" Its reference images move to the engine's locations/.deleted "
+                   "folder, where they can be restored by hand.")
+    elif engine_down is not None:
+        detail += (f" The engine isn't reachable ({_engine_status(engine_down)}), so any "
+                   "reference image stays in the engine and Qwen-Image renders keep "
+                   "using it.")
+    if not _confirm(f"Delete {name}?", detail, "Delete"):
+        return False
+    delete_location(manifest, name)
+    save_project(root, manifest)
+    if record is not None:
+        query = urllib.parse.urlencode({**_engine_project(root, manifest), "name": name})
+        try:
+            _http("DELETE", f"{ENGINE_URL}/locations?{query}", timeout=10)
+        except EngineError as exc:
+            Gimp.message(f"{name} was removed from the project, but the engine kept its "
+                         f"image: {_engine_status(exc)}")
+    if _DOCK_CONTEXT.get("selected_id") == row_id:
+        _DOCK_CONTEXT["selected_id"] = None
+    _refresh_project_docks()
+    return True
 
 
 _SETUP_DIALOG = {}  # the open Set Up Models dialog's widgets, while it's shown
@@ -3664,7 +4007,11 @@ def _dock_actions(root, manifest):
             "delete_page_action": DOCK_DELETE_PAGE,
             "reorder_pages_action": DOCK_REORDER_PAGES,
             "bubble_line_action": DOCK_BUBBLE_LINE, "bubbled": frozenset(bubbled),
-            "new_bubble_action": DOCK_NEW_BUBBLE}
+            "new_bubble_action": DOCK_NEW_BUBBLE,
+            "design_location_action": DOCK_DESIGN_LOCATION,
+            "new_location_action": DOCK_NEW_LOCATION,
+            "design_location_menu": DOCK_DESIGN_LOCATION_ITEM,
+            "delete_location_menu": DOCK_DELETE_LOCATION}
 
 
 def _selected_bubble(image=None):
@@ -3863,7 +4210,7 @@ def _dock_field_edit(procedure, config, data):
             return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
         root = _DOCK_CONTEXT["root"]
         manifest = load_project(root)
-        apply_field_edit(manifest, key, value, character_row_id)
+        apply_field_edit(manifest, key, value, character_row_id, location_row_id)
         save_project(root, manifest)
         _refresh_project_docks()
     except Exception as exc:
@@ -3878,6 +4225,7 @@ def _dock_item_action(procedure, config, data):
         valid = {p["id"] for p in manifest["panels"]}
         valid.update(page["id"] for page in manifest["pages"])
         valid.update(character_row_id(c["name"]) for c in manifest["cast"])
+        valid.update(location_row_id(loc["name"]) for loc in manifest.get("locations", []))
         if item not in valid:
             raise ValueError(f"Unknown project item id: {item}")
         if data == DOCK_SCRIPT:
@@ -3916,6 +4264,11 @@ def _add_dock_callbacks(plugin):
         (DOCK_NEW_CHARACTER, _dock_character_menu, "new", True),
         (DOCK_DESIGN_CHARACTER_ITEM, _dock_character_menu, "design", True),
         (DOCK_DELETE_CHARACTER, _dock_character_menu, "delete", True),
+        (DOCK_DESIGN_LOCATION, _dock_action, "design-location", False),
+        (DOCK_OPEN_LOCATION_IMAGE, _dock_action, "open-location-image", False),
+        (DOCK_NEW_LOCATION, _dock_location_menu, "new", True),
+        (DOCK_DESIGN_LOCATION_ITEM, _dock_location_menu, "design", True),
+        (DOCK_DELETE_LOCATION, _dock_location_menu, "delete", True),
         (DOCK_DELETE_PAGE, _dock_page_menu, "delete", True),
         (DOCK_REORDER_PAGES, _dock_page_menu, "reorder", True),
         (DOCK_BUBBLE_LINE, _dock_bubble, "line", True),
@@ -4084,6 +4437,7 @@ class Imanganation(Gimp.PlugIn):
 
     def do_query_procedures(self):
         return [PROC_RENDER, PROC_NEXT, PROC_REGEN, PROC_INPAINT, PROC_REFINE, PROC_SETREF,
+                PROC_SET_LOCATION_REF,
                 PROC_PLACE, PROC_STATUS, PROC_PROJECT_DOCKS, PROC_PAGE_LAYOUT, PROC_AUTOSTART,
                 PROC_NEW_PROJECT_MANUAL, PROC_NEW_PROJECT,
                 PROC_SETUP_MODELS, PROC_RENDER_ENGINE,
@@ -4200,6 +4554,7 @@ class Imanganation(Gimp.PlugIn):
         run = {PROC_RENDER: render_panel, PROC_NEXT: place_next_panel,
                PROC_REFINE: refine_panel, PROC_REGEN: regenerate_panel,
                PROC_SETREF: set_character_reference, PROC_INPAINT: inpaint_selection,
+               PROC_SET_LOCATION_REF: set_location_reference,
                PROC_PLACE: place_panel, PROC_STATUS: engine_status,
                PROC_PAGE_LAYOUT: page_layout}[name]
         proc = Gimp.ImageProcedure.new(self, name, Gimp.PDBProcType.PLUGIN, run, None)
@@ -4289,6 +4644,27 @@ class Imanganation(Gimp.PlugIn):
             proc.add_file_argument(
                 "project-dir", "_Project folder", "Only needed if no placed panel is in "
                 "this image", Gimp.FileChooserAction.SELECT_FOLDER, True, None,
+                GObject.ParamFlags.READWRITE)
+            proc.add_string_argument(
+                "engine-url", "_Engine URL", "imanganation engine (manganation serve)",
+                ENGINE_URL, GObject.ParamFlags.READWRITE)
+            return proc
+
+        if name == PROC_SET_LOCATION_REF:
+            proc.set_menu_label("Set _Location Reference from Layer...")
+            proc.set_documentation(
+                "Use the selected layer as a location's reference",
+                "Export the selected layer (or its part inside the selection), keeping "
+                "its proportions, and register it as the location's reference for "
+                "Qwen-Image renders. Earlier images are kept. On a reference image "
+                "opened from Context, the project and location are filled in.",
+                name)
+            proc.add_string_argument(
+                "location", "_Location", "Location name in the project (any time of day)",
+                "", GObject.ParamFlags.READWRITE)
+            proc.add_file_argument(
+                "project-dir", "_Project folder", "Only needed if this image isn't from "
+                "the project", Gimp.FileChooserAction.SELECT_FOLDER, True, None,
                 GObject.ParamFlags.READWRITE)
             proc.add_string_argument(
                 "engine-url", "_Engine URL", "imanganation engine (manganation serve)",
