@@ -93,7 +93,9 @@ Where the panels came from: `file` (relative path), `sha256` of the source text 
 detect edits since parsing), `format` (`canonical` / `prose` / `mangaplay`),
 `parsed_at`, and `parser` (e.g. `{"kind": "llm", "model": "qwen3.5:latest"}`).
 Re-parsing creates **new panels** and keeps old ones that have takes, marked
-`"status": "orphaned"`, so placed work is never silently dropped.
+`"status": "orphaned"`, so placed work is never silently dropped. A panel whose script
+content is identical (its `source` fingerprint, below) is kept as it is, renumbered:
+that is the same panel, not a guess by label or position.
 
 ### `panels` (ordered)
 The panel spec, the same fields the engine's `PanelSpec` uses, plus identity and
@@ -111,6 +113,7 @@ production state.
 | `size` | Frame size hint from `[FRAME: …]`: `small`, `large` or `splash`. Absent = no hint (the shot is used). Ranks page layouts. |
 | `seed` | Optional pinned seed. |
 | `status` | `unplaced`, `placed` or `orphaned` |
+| `source` | Optional: a hash of the panel's script content when parsed (not its numbering), which Reload script matches unchanged panels by |
 | `placement` | `{"page": "pg_…", "frame": [x, y, w, h]}` once placed. The page id is the source of truth for "which page is this panel on". |
 | `takes` | Take ids for this panel, oldest first |
 | `active_take` | The take the page shows, or null |

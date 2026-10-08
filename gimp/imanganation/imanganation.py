@@ -25,6 +25,8 @@ frame ink. The template is re-selected after each placement so the next Fuzzy Se
 click samples the frames, not the last render.
 """
 
+import copy
+import hashlib
 import json
 import os
 import random
@@ -70,6 +72,7 @@ try:
     )
     from project_store import (
         ProjectFileError,
+        adopt_script_fingerprints,
         apply_field_edit,
         delete_character,
         delete_location,
@@ -83,6 +86,7 @@ try:
         project_from_script,
         record_take,
         reorder_pages,
+        reparse_script,
         save_project,
     )
     from script_canonical import looks_canonical as script_looks_canonical
@@ -114,6 +118,7 @@ PROC_INPAINT = "plug-in-imanganation-inpaint-selection"
 PROC_STATUS = "plug-in-imanganation-engine-status"
 PROC_PROJECT_DOCKS = "plug-in-imanganation-project-docks"
 PROC_CLOSE_PROJECT = "plug-in-imanganation-close-project"
+PROC_RELOAD_SCRIPT = "plug-in-imanganation-reload-script"
 PROC_PAGE_LAYOUT = "plug-in-imanganation-page-layout"
 PROC_AUTOSTART = "extension-imanganation-ui"
 PROC_NEW_PROJECT_MANUAL = "plug-in-imanganation-new-project-manual"
@@ -139,6 +144,8 @@ DOCK_ACTIONS = {
 }
 DOCK_OPEN_PROJECT = "plug-in-imanganation-dock-open-project"
 DOCK_CLOSE_PROJECT = "plug-in-imanganation-dock-close-project"
+DOCK_RELOAD_SCRIPT = "plug-in-imanganation-dock-reload-script"
+DOCK_LOAD_SCRIPT = "plug-in-imanganation-dock-load-script"
 DOCK_OPEN_PAGE = "plug-in-imanganation-dock-open-page"  # Context's "Open page" button
 DOCK_NEW_PROJECT = "plug-in-imanganation-dock-new-project"
 DOCK_NEW_MANUAL_PROJECT = "plug-in-imanganation-dock-new-manual-project"
@@ -1897,6 +1904,7 @@ def _activate_project(root):
     if not selected and manifest["pages"]:
         selected = manifest["pages"][0]["id"]
     _remember_project(root)
+    _adopt_fingerprints(root)
     _DOCK_CONTEXT.update(root=root, selected_id=selected,
                          orphan_id=None, candidate_id=None)
     _register_project_docks(_DOCK_PLUGIN)
@@ -2713,6 +2721,9 @@ def _dock_action(procedure, config, data):
             if options is None:
                 return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
             _create_manual_project(**options)
+        elif data in ("reload-script", "load-script"):
+            if not _reload_script(_DOCK_CONTEXT["root"], choose=data == "load-script"):
+                return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
         elif data == "close-project":
             if not _close_project():
                 return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
@@ -3025,11 +3036,12 @@ def _parse_script(text, title):
              "problems": result.get("problems", [])}, result["format"])
 
 
-def _confirm_script_problems(problems):
-    """List the script's format problems -> True to build the project anyway."""
+def _confirm_script_problems(problems, action="Create anyway",
+                             without="create the project without them"):
+    """List the script's format problems -> True to go ahead anyway."""
     dialog = Gtk.Dialog(title="Script problems", flags=Gtk.DialogFlags.MODAL)
     dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
-                       "Create anyway", Gtk.ResponseType.OK)
+                       action, Gtk.ResponseType.OK)
     dialog.set_default_response(Gtk.ResponseType.CANCEL)
     dialog.set_default_size(560, 360)
     box = dialog.get_content_area()
@@ -3038,7 +3050,7 @@ def _confirm_script_problems(problems):
         label=(f"{len(problems)} lines of the script don't" if len(problems) != 1
                else "1 line of the script doesn't")
               + " fit the format (see docs/script-template.md). Fix the script and try "
-              "again, or create the project without them.",
+              f"again, or {without}.",
         xalign=0.0, wrap=True, max_width_chars=70, margin=8)
     box.pack_start(intro, False, False, 0)
     view = Gtk.TextView(editable=False, cursor_visible=False, monospace=True,
@@ -3054,6 +3066,105 @@ def _confirm_script_problems(problems):
         return dialog.run() == Gtk.ResponseType.OK
     finally:
         dialog.destroy()
+
+
+def _choose_script_file(start=None):
+    """Open a script file -> its path, or None if cancelled."""
+    dialog = Gtk.FileChooserDialog(title="Load Script", action=Gtk.FileChooserAction.OPEN)
+    dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+                       Gtk.STOCK_OPEN, Gtk.ResponseType.ACCEPT)
+    dialog.set_default_response(Gtk.ResponseType.ACCEPT)
+    text_filter = Gtk.FileFilter()
+    text_filter.set_name("Scripts (.md, .txt, .fountain)")
+    for pattern in ("*.md", "*.txt", "*.fountain", "*.markdown"):
+        text_filter.add_pattern(pattern)
+    dialog.add_filter(text_filter)
+    if start is not None:
+        dialog.set_current_folder(str(start))
+    try:
+        return (Path(dialog.get_filename()) if dialog.run() == Gtk.ResponseType.ACCEPT
+                else None)
+    finally:
+        dialog.destroy()
+
+
+def _adopt_fingerprints(root):
+    """A project from before Reload script: record which script text each panel came
+    from while the script is still the one it was parsed from, so later edits are
+    matched panel by panel. Page/panel scripts only (instant, no engine)."""
+    try:
+        manifest = load_project(root)
+        script = manifest.get("script") or {}
+        path = Path(root) / script.get("file", "")
+        if script.get("format") != "canonical" or not path.is_file():
+            return
+        text = path.read_text(encoding="utf-8")
+        if script.get("sha256") != hashlib.sha256(text.encode("utf-8")).hexdigest():
+            return
+        if adopt_script_fingerprints(manifest, parse_script_text(text)):
+            save_project(root, manifest)
+    except Exception:  # an optimisation: never stop a project opening
+        pass
+
+
+def _reload_script(root, choose=False):
+    """Reload script: read the project's script again (after editing it) and bring the
+    panels up to it. Load script from file…: the same with another file, copied into
+    the project as its script. Unchanged panels keep their takes, placement and
+    Context edits; edited ones with work go to Needs matching (asked first).
+    -> False if cancelled."""
+    if root is None:
+        raise ValueError("Open a project first (File > Open / Switch Project)")
+    manifest = load_project(root)
+    script = manifest.get("script") or {}
+    current = Path(root) / script["file"] if script.get("file") else None
+    source = current
+    if choose or current is None or not current.is_file():
+        source = _choose_script_file(current.parent if current else root)
+        if source is None:
+            return False
+    text = source.read_text(encoding="utf-8")
+    if source == current and script.get("sha256") == hashlib.sha256(
+            text.encode("utf-8")).hexdigest():
+        _adopt_fingerprints(root)
+        Gimp.message(f"{current.name} hasn't changed since it was last read.")
+        return True
+    title = manifest["project"].get("title") or Path(root).name
+    parsed, script_format = _parse_script(text, title)
+    if parsed.get("problems") and not _confirm_script_problems(
+            parsed["problems"], "Reload anyway", "reload without them"):
+        return False
+    relative = (script["file"] if source == current
+                else f"script/script{source.suffix or '.md'}")
+    updated = copy.deepcopy(manifest)
+    summary = reparse_script(updated, parsed, script_file=relative, script_text=text,
+                             script_format=script_format)
+    counts = {key: len(ids) for key, ids in summary.items()}
+    if counts["orphaned"] or counts["removed"]:
+        detail = (f"{counts['kept']} panels are unchanged and {counts['added']} are new "
+                  "or edited.")
+        if counts["orphaned"]:
+            detail += (f" {counts['orphaned']} edited panel"
+                       f"{'s' if counts['orphaned'] != 1 else ''} with takes or a place on "
+                       "a page move to Needs matching, where Match selected joins one to "
+                       "its new panel.")
+        if counts["removed"]:
+            detail += (f" {counts['removed']} panel{'s' if counts['removed'] != 1 else ''}"
+                       " with no work yet are replaced (their Context edits are lost).")
+        if not _confirm(f"Reload the script into {title}?", detail, "Reload"):
+            return False
+    if source != current:
+        destination = Path(root) / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(text, encoding="utf-8")
+    save_project(root, updated)
+    if _DOCK_CONTEXT.get("selected_id") in set(summary["orphaned"] + summary["removed"]):
+        _DOCK_CONTEXT["selected_id"] = None
+    _refresh_project_docks()
+    Gimp.message(f"Script reloaded: {counts['kept']} unchanged, {counts['added']} new or "
+                 f"edited" + (f", {counts['orphaned']} to match" if counts["orphaned"]
+                              else "") + ".")
+    return True
 
 
 def _create_project_from_script(script_path, title, parent, page_size, design):
@@ -3347,8 +3458,9 @@ def _close_project():
 
 
 def _close_project_run(procedure, config, data):
-    """File > Close Imanganation Project: the workspace extension does the closing."""
-    close = Gimp.get_pdb().lookup_procedure(DOCK_CLOSE_PROJECT)
+    """File > Close Imanganation Project / Reload Imanganation Script: the workspace
+    extension does the work (``data``: its dock procedure)."""
+    close = Gimp.get_pdb().lookup_procedure(data)
     if close is None:
         return _error(procedure, "The Imanganation workspace is not running; restart GIMP "
                                  "to start it")
@@ -4117,7 +4229,9 @@ def _dock_actions(root, manifest):
             "new_location_action": DOCK_NEW_LOCATION,
             "design_location_menu": DOCK_DESIGN_LOCATION_ITEM,
             "delete_location_menu": DOCK_DELETE_LOCATION,
-            "close_project_action": DOCK_CLOSE_PROJECT}
+            "close_project_action": DOCK_CLOSE_PROJECT,
+            "reload_script_action": DOCK_RELOAD_SCRIPT,
+            "load_script_action": DOCK_LOAD_SCRIPT}
 
 
 def _selected_bubble(image=None):
@@ -4360,6 +4474,8 @@ def _add_dock_callbacks(plugin):
         (DOCK_ACTIONS[DOCK_PROJECT], _dock_action, "project-action", False),
         (DOCK_OPEN_PROJECT, _dock_action, "open-project", False),
         (DOCK_CLOSE_PROJECT, _dock_action, "close-project", True),  # also a menu
+        (DOCK_RELOAD_SCRIPT, _dock_action, "reload-script", True),
+        (DOCK_LOAD_SCRIPT, _dock_action, "load-script", True),
         (DOCK_NEW_MANUAL_PROJECT, _dock_action, "new-manual-project", False),
         (DOCK_ACTIONS[DOCK_INSPECTOR], _dock_action, "generate", False),
         (DOCK_ITEMS[DOCK_INSPECTOR], _dock_field_edit, "field", True),
@@ -4516,11 +4632,43 @@ def _show_dock_run(procedure, config, dock):
     return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
 
 
+_CRASH_LOG = None  # kept open: faulthandler writes to it when the process dies
+
+
+def _start_crash_log():
+    """The workspace runs for the whole GIMP session; when it dies GIMP only says
+    "plug-in crashed". Record why in <GIMP profile>/imanganation/workspace.log: a fatal
+    signal's Python stack (faulthandler) and any uncaught exception."""
+    global _CRASH_LOG
+    import faulthandler
+    import traceback
+
+    try:
+        path = Path(Gimp.directory()) / "imanganation" / "workspace.log"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.is_file() and path.stat().st_size > 1_000_000:
+            path.replace(path.with_suffix(".log.old"))
+        _CRASH_LOG = path.open("a", encoding="utf-8", buffering=1)
+        _CRASH_LOG.write(f"\n--- workspace started {datetime.now().isoformat(timespec='seconds')}"
+                         f" (pid {os.getpid()})\n")
+        faulthandler.enable(file=_CRASH_LOG, all_threads=True)
+
+        def log_uncaught(kind, value, tb):
+            _CRASH_LOG.write("".join(traceback.format_exception(kind, value, tb)))
+            sys.__excepthook__(kind, value, tb)
+
+        sys.excepthook = log_uncaught
+    except OSError:
+        pass  # no log is no reason not to start
+
+
 def _autostart_run(procedure, config, data):
     """Install the default workspace before GIMP restores its dock layout."""
+    _start_crash_log()
     try:
         root = _open_project()
         if root is not None:
+            _adopt_fingerprints(root)
             manifest = load_project(root)
             selected = manifest.get("cursor", {}).get("next_panel")
             if not selected:
@@ -4553,6 +4701,7 @@ class Imanganation(Gimp.PlugIn):
         return [PROC_RENDER, PROC_NEXT, PROC_REGEN, PROC_INPAINT, PROC_REFINE, PROC_SETREF,
                 PROC_SET_LOCATION_REF,
                 PROC_PLACE, PROC_STATUS, PROC_PROJECT_DOCKS, PROC_CLOSE_PROJECT,
+                PROC_RELOAD_SCRIPT,
                 PROC_PAGE_LAYOUT, PROC_AUTOSTART,
                 PROC_NEW_PROJECT_MANUAL, PROC_NEW_PROJECT,
                 PROC_SETUP_MODELS, PROC_RENDER_ENGINE,
@@ -4644,9 +4793,27 @@ class Imanganation(Gimp.PlugIn):
                 "script's locations.", name)
             proc.set_attribution("imanganation", "imanganation", "2026")
             return proc
+        if name == PROC_RELOAD_SCRIPT:
+            proc = Gimp.Procedure.new(
+                self, name, Gimp.PDBProcType.PLUGIN, _close_project_run,
+                DOCK_RELOAD_SCRIPT)
+            proc.set_menu_label("_Reload Imanganation Script")
+            proc.add_enum_argument("run-mode", "Run mode", "How to run the procedure",
+                                   Gimp.RunMode, Gimp.RunMode.INTERACTIVE,
+                                   GObject.ParamFlags.READWRITE)
+            proc.add_menu_path("<Toolbox>/File/[Open]")
+            proc.add_menu_path("<Image>/File/[Open]")
+            proc.set_documentation(
+                "Read the open project's script again",
+                "After editing the project's script: unchanged panels keep their takes, "
+                "placement and edits; edited ones with work go to Needs matching.", name)
+            proc.set_attribution("imanganation", "imanganation", "2026")
+            return proc
+
         if name == PROC_CLOSE_PROJECT:
             proc = Gimp.Procedure.new(
-                self, name, Gimp.PDBProcType.PLUGIN, _close_project_run, None)
+                self, name, Gimp.PDBProcType.PLUGIN, _close_project_run,
+                DOCK_CLOSE_PROJECT)
             proc.set_menu_label("_Close Imanganation Project")
             proc.add_enum_argument("run-mode", "Run mode", "How to run the procedure",
                                    Gimp.RunMode, Gimp.RunMode.INTERACTIVE,

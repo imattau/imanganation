@@ -156,6 +156,8 @@
                  "description": "Frame size hint for layout ranking; absent = none"},
         "seed": {"type": ["integer", "null"], "minimum": 0},
         "status": {"enum": ["unplaced", "placed", "orphaned"]},
+        "source": {"type": "string", "pattern": "^[0-9a-f]{16}$",
+                   "description": "Hash of the panel's script content when parsed (Reload script)"},
         "placement": {
           "oneOf": [
             {"type": "null"},

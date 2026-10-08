@@ -279,3 +279,94 @@ def test_location_notes_are_edited_in_context_and_deleting_keeps_panel_text(tmp_
         delete_location(document, "School rooftop")
     save_project(tmp_path, document)
     jsonschema.validate(load_project(tmp_path), SCHEMA)
+
+
+_SCRIPT = ("[CHARACTERS]\nYUKI: silver bob\n\nPAGE 1\n[SCENE: School rooftop — dusk]\n"
+           "PANEL 1\n[ACTION]\nYuki waves.\n"
+           "PANEL 2\n[ACTION]\nAkira sighs.\n"
+           "PANEL 3\n[ACTION]\nThey sit.\n")
+
+
+def _script_project(text=_SCRIPT):
+    from gimp.imanganation.project_store import project_from_script
+    from manganation.script.formats import canonical
+
+    return project_from_script(canonical.parse(text), title="Roof",
+                               script_file="script/script.md", script_text=text,
+                               script_format="canonical")
+
+
+def _reparse(document, text):
+    from gimp.imanganation.project_store import reparse_script
+    from manganation.script.formats import canonical
+
+    return reparse_script(document, canonical.parse(text), script_file="script/script.md",
+                          script_text=text, script_format="canonical")
+
+
+def test_reloading_an_edited_script_keeps_unchanged_panels_and_their_work(tmp_path):
+    document = _script_project()
+    waves, sighs, sit = document["panels"]
+    waves["takes"], waves["active_take"] = [], None
+    sighs["placement"] = None
+    sit["takes"] = ["tk_aaaaaaaaaaaa"]  # work on a panel the edit changes
+    document["takes"]["tk_aaaaaaaaaaaa"] = {
+        "panel": sit["id"], "file": "takes/a.png", "width": 8, "height": 8,
+        "kind": "render", "parent": None, "origin": "tk_aaaaaaaaaaaa",
+        "created": "2026-10-08T10:00:00+11:00"}
+    waves["location"] = "the stairwell"  # a Context edit: no longer the script's words
+    edited = _SCRIPT.replace("PANEL 1\n[ACTION]\nYuki waves.\n",
+                             "PANEL 1\n[ACTION]\nYuki runs in.\n"
+                             "PANEL 2\n[ACTION]\nYuki waves.\n") \
+                    .replace("PANEL 2\n[ACTION]\nAkira sighs.", "PANEL 3\n[ACTION]\nAkira sighs.") \
+                    .replace("PANEL 3\n[ACTION]\nThey sit.", "PANEL 4\n[ACTION]\nThey sit down.") \
+                    .replace("YUKI: silver bob", "YUKI: silver bob\nHANA: twin tails")
+    summary = _reparse(document, edited)
+
+    assert summary["kept"] == [waves["id"], sighs["id"]]  # moved down, kept whole
+    assert waves["location"] == "the stairwell" and waves["label"]["panel"] == 2
+    assert summary["orphaned"] == [sit["id"]] and sit["status"] == "orphaned"
+    assert summary["removed"] == [] and len(summary["added"]) == 2
+    reading = [p for p in document["panels"] if p["status"] != "orphaned"]
+    assert [p["action"] for p in reading] == ["Yuki runs in.", "Yuki waves.",
+                                              "Akira sighs.", "They sit down."]
+    assert document["panels"][-1] is sit  # Needs matching, after the reading order
+    assert {"name": "Hana", "aliases": [], "notes": "twin tails"} in document["cast"]
+    (tmp_path / "script").mkdir()
+    (tmp_path / "script/script.md").write_text(edited)
+    (tmp_path / "takes").mkdir()
+    (tmp_path / "takes/a.png").write_bytes(b"png")
+    save_project(tmp_path, document)
+    jsonschema.validate(load_project(tmp_path), SCHEMA)
+
+
+def test_reloading_drops_changed_panels_that_had_no_work_and_keeps_notes():
+    document = _script_project()
+    document["cast"][0]["notes"] = "my own notes"
+    summary = _reparse(document, _SCRIPT.replace("They sit.", "They stand.")
+                       .replace("silver bob", "gold bob"))
+    assert len(summary["kept"]) == 2 and len(summary["added"]) == 1
+    assert len(summary["removed"]) == 1 and summary["orphaned"] == []
+    assert document["cast"][0]["notes"] == "my own notes"  # the project's words win
+    assert document["cursor"]["next_panel"] in {p["id"] for p in document["panels"]}
+    unchanged = _reparse(document, _SCRIPT.replace("They sit.", "They stand."))
+    assert unchanged["added"] == [] and len(unchanged["kept"]) == 3
+
+
+def test_an_older_project_adopts_fingerprints_from_its_unchanged_script():
+    from gimp.imanganation.project_store import adopt_script_fingerprints
+    from manganation.script.formats import canonical
+
+    document = _script_project()
+    for panel in document["panels"]:  # as an older parser or version left them
+        del panel["source"]
+        panel["action"] = "Wide shot. " + panel["action"]
+    assert adopt_script_fingerprints(document, canonical.parse(_SCRIPT))
+    assert not adopt_script_fingerprints(document, canonical.parse(_SCRIPT))  # done once
+    summary = _reparse(document, _SCRIPT.replace("They sit.", "They stand."))
+    assert len(summary["kept"]) == 2 and len(summary["added"]) == 1
+    shifted = _script_project()
+    for panel in shifted["panels"]:
+        del panel["source"]
+    one_more = _SCRIPT + "PANEL 4\n[ACTION]\nThe bell rings.\n"
+    assert not adopt_script_fingerprints(shifted, canonical.parse(one_more))  # no guessing

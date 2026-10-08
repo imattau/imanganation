@@ -530,51 +530,9 @@ def project_from_script(parsed: dict[str, Any], *, title: str, script_file: str,
     if not parsed.get("panels"):
         raise ProjectFileError("the script has no panels")
     now = datetime.now().astimezone().isoformat(timespec="seconds")
-    panels = []
-    for item in parsed["panels"]:
-        panels.append({
-            "id": new_id("pnl_"),
-            "label": {"page": int(item.get("page", 1)), "panel": int(item.get("panel", 1))},
-            "scene_heading": item.get("scene_heading", ""),
-            "location": item.get("location", ""),
-            "characters": [{"name": name, "version": None}
-                           for name in item.get("characters", [])],
-            "action": item.get("action", ""),
-            "camera": item.get("camera", ""),
-            "expressions": dict(item.get("expressions") or {}),
-            "dialogue": [{"speaker": d["speaker"], "text": d["text"],
-                          "kind": d.get("kind", "speech")}
-                         for d in item.get("dialogue", [])],
-            "sfx": list(item.get("sfx", [])),
-            "notes": item.get("notes", ""),
-            "flashback": bool(item.get("flashback", False)),
-            **{key: item[key] for key in ("aspect_ratio", "size") if item.get(key)},
-            "seed": item.get("seed"),
-            "status": "unplaced",
-            "placement": None,
-            "takes": [],
-            "active_take": None,
-        })
-    cast: list[dict[str, Any]] = []
-    known: set[str] = set()
-    for entry in parsed.get("cast", []):
-        if entry["name"].lower() in known:
-            continue
-        known.add(entry["name"].lower())
-        record: dict[str, Any] = {"name": entry["name"],
-                                  "aliases": list(entry.get("aliases", []))}
-        if entry.get("description"):
-            record["notes"] = entry["description"]
-        cast.append(record)
-    for panel in panels:  # characters the cast block did not declare
-        for character in panel["characters"]:
-            if character["name"].lower() not in known:
-                known.add(character["name"].lower())
-                cast.append({"name": character["name"], "aliases": []})
-    locations = dict.fromkeys(
-        name for panel in panels
-        for name in (_location_name(panel["location"]), _location_name(panel["scene_heading"]))
-        if name)
+    panels = [_panel_from_item(item) for item in parsed["panels"]]
+    cast = _merge_cast([], parsed, panels)
+    locations = _script_locations(panels)
     return {
         "format": FORMAT,
         "version": VERSION,
@@ -592,6 +550,196 @@ def project_from_script(parsed: dict[str, Any], *, title: str, script_file: str,
         "props": [],
         "cursor": {"next_panel": panels[0]["id"]},
     }
+
+
+# A panel's script content: what the script says, not production state (takes,
+# placement) nor its numbering, which shifts when panels are added before it.
+_SCRIPT_FIELDS = ("scene_heading", "location", "characters", "action", "camera",
+                  "expressions", "dialogue", "sfx", "notes", "flashback", "aspect_ratio",
+                  "size")
+
+
+def script_fingerprint(panel: dict[str, Any]) -> str:
+    """A short hash of a panel's script content, so a re-parse can tell an unchanged
+    panel from an edited one wherever it now sits."""
+    import hashlib
+
+    content = {
+        "scene_heading": panel.get("scene_heading") or "",
+        "location": panel.get("location") or "",
+        "characters": [c["name"] if isinstance(c, dict) else str(c)
+                       for c in panel.get("characters", [])],
+        "action": panel.get("action") or "",
+        "camera": panel.get("camera") or "",
+        "expressions": dict(panel.get("expressions") or {}),
+        "dialogue": [[d.get("speaker", ""), d.get("text", ""), d.get("kind") or "speech"]
+                     for d in panel.get("dialogue", [])],
+        "sfx": list(panel.get("sfx", [])),
+        "notes": panel.get("notes") or "",
+        "flashback": bool(panel.get("flashback", False)),
+        "aspect_ratio": panel.get("aspect_ratio") or "",
+        "size": panel.get("size") or "",
+    }
+    text = json.dumps(content, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+def _panel_from_item(item: dict[str, Any]) -> dict[str, Any]:
+    """A new, unplaced manifest panel from one parsed script panel."""
+    panel = {
+        "id": new_id("pnl_"),
+        "label": {"page": int(item.get("page", 1)), "panel": int(item.get("panel", 1))},
+        "scene_heading": item.get("scene_heading", ""),
+        "location": item.get("location", ""),
+        "characters": [{"name": name, "version": None}
+                       for name in item.get("characters", [])],
+        "action": item.get("action", ""),
+        "camera": item.get("camera", ""),
+        "expressions": dict(item.get("expressions") or {}),
+        "dialogue": [{"speaker": d["speaker"], "text": d["text"],
+                      "kind": d.get("kind", "speech")}
+                     for d in item.get("dialogue", [])],
+        "sfx": list(item.get("sfx", [])),
+        "notes": item.get("notes", ""),
+        "flashback": bool(item.get("flashback", False)),
+        **{key: item[key] for key in ("aspect_ratio", "size") if item.get(key)},
+        "seed": item.get("seed"),
+        "status": "unplaced",
+        "placement": None,
+        "takes": [],
+        "active_take": None,
+    }
+    panel["source"] = script_fingerprint(panel)
+    return panel
+
+
+def _merge_cast(cast: list[dict[str, Any]], parsed: dict[str, Any],
+                panels: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The cast plus anyone new in the script. Existing entries keep their notes; one
+    without notes takes the script's description."""
+    by_name = {}
+    for entry in cast:
+        for name in (entry["name"], *entry.get("aliases", [])):
+            by_name.setdefault(name.lower(), entry)
+    for entry in parsed.get("cast", []):
+        existing = by_name.get(entry["name"].lower())
+        if existing is not None:
+            if entry.get("description") and not existing.get("notes"):
+                existing["notes"] = entry["description"]
+            continue
+        record: dict[str, Any] = {"name": entry["name"],
+                                  "aliases": list(entry.get("aliases", []))}
+        if entry.get("description"):
+            record["notes"] = entry["description"]
+        cast.append(record)
+        by_name[entry["name"].lower()] = record
+    for panel in panels:  # characters the cast block did not declare
+        for character in panel["characters"]:
+            if character["name"].lower() not in by_name:
+                record = {"name": character["name"], "aliases": []}
+                cast.append(record)
+                by_name[character["name"].lower()] = record
+    return cast
+
+
+def _script_locations(panels: list[dict[str, Any]]) -> list[str]:
+    return list(dict.fromkeys(
+        name for panel in panels
+        for name in (_location_name(panel.get("location", "")),
+                     _location_name(panel.get("scene_heading", "")))
+        if name))
+
+
+def adopt_script_fingerprints(document: dict[str, Any], parsed: dict[str, Any]) -> bool:
+    """Record each panel's script fingerprint from the text it was parsed from, for a
+    project made before fingerprints (or by an older parser, whose panels differ from
+    a fresh parse). Only when the parse lines up with the panels exactly, same count
+    and numbering in order; the caller checks the text is unchanged since parsing.
+    -> True if anything was recorded (the caller saves)."""
+    current = [p for p in document["panels"] if p.get("status") != "orphaned"]
+    items = parsed.get("panels", [])
+    if all(p.get("source") for p in current) or len(items) != len(current):
+        return False
+    labels = [{"page": int(i.get("page", 1)), "panel": int(i.get("panel", 1))}
+              for i in items]
+    if labels != [p.get("label") for p in current]:
+        return False
+    for panel, item in zip(current, items, strict=True):
+        panel["source"] = _panel_from_item(item)["source"]
+    return True
+
+
+def _has_work(panel: dict[str, Any]) -> bool:
+    return bool(panel.get("takes") or panel.get("active_take") or panel.get("placement"))
+
+
+def reparse_script(document: dict[str, Any], parsed: dict[str, Any], *, script_file: str,
+                   script_text: str, script_format: str) -> dict[str, list[str]]:
+    """Bring the project up to an edited script, in place (the caller saves).
+
+    A panel whose script content is unchanged (same fingerprint, wherever it now sits)
+    is kept whole: id, takes, placement, Context edits, only its numbering updated.
+    Every other script panel is new. Old panels that no longer match keep their work
+    as ``orphaned`` (Needs matching, for Match selected); untouched ones are dropped.
+    Never maps an edited panel by its label or position (docs/project-container.md).
+    New cast members and locations are added; existing ones are kept.
+
+    Returns panel ids: {"kept", "added", "orphaned", "removed"}."""
+    import hashlib
+
+    if not parsed.get("panels"):
+        raise ProjectFileError("the script has no panels")
+    current = [p for p in document["panels"] if p.get("status") != "orphaned"]
+    orphans = [p for p in document["panels"] if p.get("status") == "orphaned"]
+    available: dict[str, list[dict[str, Any]]] = {}
+    for panel in current:
+        available.setdefault(panel.get("source") or script_fingerprint(panel),
+                             []).append(panel)
+
+    panels, kept, added = [], [], []
+    for item in parsed["panels"]:
+        fresh = _panel_from_item(item)
+        candidates = available.get(fresh["source"])
+        if candidates:
+            panel = candidates.pop(0)  # identical content: the first, in reading order
+            panel["label"] = fresh["label"]
+            panel["source"] = fresh["source"]
+            panels.append(panel)
+            kept.append(panel["id"])
+        else:
+            panels.append(fresh)
+            added.append(fresh["id"])
+
+    orphaned, removed = [], []
+    for panel in current:
+        if panel["id"] in kept:
+            continue
+        if _has_work(panel):
+            panel["status"] = "orphaned"
+            orphans.append(panel)
+            orphaned.append(panel["id"])
+        else:
+            removed.append(panel["id"])
+
+    document["panels"] = panels + orphans
+    document["cast"] = _merge_cast(document.get("cast", []), parsed, panels)
+    known = {location_key(loc["name"]) for loc in document.get("locations", [])}
+    for name in _script_locations(panels):
+        if location_key(name) not in known:
+            document.setdefault("locations", []).append({"name": name})
+            known.add(location_key(name))
+    now = datetime.now().astimezone().isoformat(timespec="seconds")
+    document["script"] = {
+        **document.get("script", {}), "file": script_file, "format": script_format,
+        "parsed_at": now,
+        "sha256": hashlib.sha256(script_text.encode("utf-8")).hexdigest(),
+        "parser": {"kind": "plug-in" if script_format == "canonical" else "engine"}}
+    ids = {p["id"] for p in panels}
+    cursor = document.setdefault("cursor", {})
+    if cursor.get("next_panel") not in ids:
+        cursor["next_panel"] = next((p["id"] for p in panels if not _has_work(p)),
+                                    panels[0]["id"])
+    return {"kept": kept, "added": added, "orphaned": orphaned, "removed": removed}
 
 
 _DEFAULT_PAGE_LABEL = re.compile(r"^Page\s+(\d+)$", re.IGNORECASE)

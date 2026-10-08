@@ -8,7 +8,6 @@ from pathlib import Path
 
 from gimp.imanganation.panel_ui import build_docks, character_row_id, location_row_id, rgb_png
 
-
 EXAMPLE = json.loads((Path(__file__).resolve().parents[1] /
                       "docs/project-container.example.json").read_text())
 
@@ -271,3 +270,11 @@ def test_the_project_title_offers_close_project():
     tree = build_docks(manifest, close_project_action="close-proc")["project"]
     assert tree.splitlines()[0] == "# Rooftop\t!close-proc:Close project"
     assert build_docks(manifest)["project"].splitlines()[0] == "# Rooftop"
+
+
+def test_reload_script_is_on_the_project_titles_menu():
+    docks = build_docks(copy.deepcopy(EXAMPLE), close_project_action="close",
+                        reload_script_action="reload", load_script_action="load")
+    assert docks["project"].splitlines()[0] == (
+        "# Rooftop\t!reload:Reload script|load:Load script from file…|close:Close project")
+    assert docks["script"].splitlines()[0] == "# Reading order"  # a list: no menus

@@ -153,6 +153,18 @@ copied into immutable `takes/` files and linked through take IDs; XCF parasites 
 page placement metadata are still being migrated. The image procedures remain under
 the top-level *Imanganation* menu:
 
+- **Reload Imanganation Script** (*File* menu, or right-click the project's title in
+  Project for **Reload script** / **Load script from file…**): after editing the
+  project's script (`script/` in the project folder), read it again. A panel whose
+  script text is unchanged keeps everything (takes, placement, Context edits) wherever
+  it now sits, only renumbered; every other panel in the script is new. Edited panels
+  with takes or a place on a page move to **Needs matching**, where **Match selected**
+  joins each to its new panel; edited panels with no work yet are replaced. When work
+  would move or edits be lost, it asks first. New characters and locations are added;
+  existing ones and their notes are kept. *Load script from file…* does the same with
+  another file and copies it into the project as its script. An older project records
+  which script text each panel came from when it is opened, as long as its script file
+  is unchanged since it was parsed.
 - **Close Imanganation Project** (*File* menu, or right-click the project's title in
   Project): offers to save pages with unsaved changes (Save, Close without saving,
   Cancel), closes the pages the workspace opened, and returns the docks to the welcome
