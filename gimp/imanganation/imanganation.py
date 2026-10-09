@@ -477,17 +477,6 @@ def _place(image, panel_file, spec, seq=None, render=None, take_ref=None, frame=
             TAKE_PARASITE, Gimp.PARASITE_PERSISTENT,
             list(json.dumps(take_ref, separators=(",", ":")).encode())))
 
-    # Dialogue/SFX as hidden text layers: reference for hand lettering only.
-    lines = [f"{d.get('speaker', '')}: {d.get('text', '')}" for d in spec.get("dialogue", [])]
-    lines += [f"SFX: {sfx}" for sfx in spec.get("sfx", [])]
-    for i, line in enumerate(lines):
-        text = Gimp.TextLayer.new(image, line, Gimp.context_get_font(), 24.0,
-                                  Gimp.Unit.pixel())
-        text.set_name(line[:60])
-        image.insert_layer(text, group, 0)
-        text.set_offsets(x1 + 16, y1 + 16 + 36 * i)
-        text.set_visible(False)
-
     if template is not None and overlay is not None:
         _clear_layout_region(image, template, overlay.get("region"))
 
@@ -2598,6 +2587,22 @@ PAGE_THUMBNAIL_SIZE = 160  # px, longest side; the page strip shows them at 96
 
 def _write_page_thumbnail(image, destination):
     """Flattened, scaled-down PNG of ``image`` (left untouched) at ``destination``."""
+    # The projection thumbnail needs no image copy: GIMP's gimp_image_duplicate can hit
+    # a critical (item lookup by path) on some layer trees, which aborts the app.
+    width, height = image.get_width(), image.get_height()
+    scale = PAGE_THUMBNAIL_SIZE / max(width, height)
+    try:
+        pixbuf = image.get_thumbnail(max(1, round(width * min(scale, 1))),
+                                     max(1, round(height * min(scale, 1))),
+                                     Gimp.PixbufTransparency.KEEP_ALPHA)
+        if pixbuf is not None:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            temporary = destination.with_name(destination.stem + ".tmp.png")
+            pixbuf.savev(str(temporary), "png", [], [])
+            os.replace(temporary, destination)
+            return
+    except Exception:
+        pass
     copy = image.duplicate()
     try:
         copy.flatten()
@@ -6048,8 +6053,8 @@ class Imanganation(Gimp.PlugIn):
             proc.set_documentation(
                 "Place the next imanganation panel",
                 "Take the next already-rendered panel in project reading order and fit it "
-                "into the selected frame, with its dialogue "
-                "as hidden text layers.",
+                "into the selected frame. Dialogue is lettered "
+                "afterwards with Bubble….",
                 name)
             _add_project_args(proc)
             return proc

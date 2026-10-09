@@ -335,7 +335,7 @@ ComfyUI and the engine running) run headless against GIMP 3.2.6 (flatpak):
 | Panel is fitted to the selected frame, clipped by a mask, and placed in a `Panel p.n` group | ✅ |
 | PanelSpec JSON is attached as a persistent parasite and survives XCF save and reload | ✅ |
 | Next Panel walks `panels.json` in order into hand-drawn frames; cursor advances | ✅ |
-| Dialogue/SFX arrive as **hidden** text layers in the panel group (lettering reference) | ✅ |
+| Panels arrive with no text layers: dialogue and SFX are listed in Context, each with a **Bubble…** button | ✅ |
 | Unrendered panel gives a clear "not rendered yet: expected panels/003*.png" and doesn't advance | ✅ |
 | **Live** (`gimp/status_smoke_test.py`): with a failed job, a running render and a queued one on the engine → report shows GPU/VRAM, `▶` running with elapsed time, queued, `✗` failure with its reason, models all present, project progress; with the engine stopped → "NOT RUNNING" + how to start it, project progress still shown | ✅ |
 | **Live** (`gimp/inpaint_smoke_test.py`): feathered ellipse over a moved/shrunk 1920×2176 take, page layer selected → panel found under the selection, result at the exact geometry, old take hidden, temp mask layer removed; **0 source pixels changed outside the mask** (+40 px) | ✅ |
@@ -403,7 +403,7 @@ GIMP (flatpak)                         host
 | Panel render | layer inside a `Panel p.n` group, clipped by a frame mask |
 | PanelSpec + seed + model/workflow version | persistent **parasite** on the render layer |
 | Revisions | sibling layers in the group (hidden older takes) |
-| Lettering / SFX | done by hand. Script dialogue/SFX sit as hidden text layers in each group, for reference |
+| Lettering / SFX | done in GIMP: Context lists each script line with a **Bubble…** button. Nothing is added to the page when a panel is placed |
 | Character reference | engine registry. "Use layer as reference" exports a layer into it |
 
 ## Candidate procedures (menu *Imanganation*)
