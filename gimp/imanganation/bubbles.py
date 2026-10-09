@@ -18,7 +18,7 @@ import struct
 import zlib
 from dataclasses import dataclass
 
-GEOMETRY_VERSION = 1  # bump when shapes change, so cached previews regenerate
+GEOMETRY_VERSION = 2  # bump when shapes change, so cached previews regenerate
 
 CATEGORIES = [
     ("speech", "Speech"),
@@ -104,6 +104,21 @@ def templates() -> list[Template]:
     for aspect in ("wide", "round"):
         add("sfx", "none", aspect, "none", "none", fill="none",
             label=f"Text only · {aspect}")
+    # SFX lettering benefits from compact, high-energy silhouettes as well as
+    # text-only treatments. Keep the set focused so the picker stays scannable.
+    for aspect in ASPECTS:
+        add("sfx", "burst", aspect, "none", "heavy", detail=18, depth=0.30,
+            label=f"Impact burst · {aspect}")
+        add("sfx", "burst", aspect, "none", "solid", detail=26, depth=0.18,
+            label=f"Fine burst · {aspect}")
+        add("sfx", "electric", aspect, "none", "heavy", detail=32,
+            label=f"Jagged · {aspect}")
+        add("sfx", "wobbly", aspect, "none", "heavy", detail=22,
+            label=f"Rumble · {aspect}")
+        add("sfx", "rounded", aspect, "none", "heavy",
+            label=f"Heavy rounded · {aspect}")
+        add("sfx", "box", aspect, "none", "solid", fill="black",
+            label=f"Reverse block · {aspect}")
     return out
 
 

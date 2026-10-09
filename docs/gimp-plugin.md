@@ -135,8 +135,10 @@ go into a **Speech bubbles** group at the top of the page (created once, reused)
 is a group of an editable vector shape (Paths tool: move the tail) and a text layer
 (Text tool). Select a bubble on the canvas and Context shows its text as a field
 (Enter rewraps and resizes the bubble) and **Fit bubble to text**. The **Bubbles** dock
-(a tab beside Context) is the whole library, about 110 generated templates in
-categories: click one to add it to the open page, inside the selection if there is one.
+(a tab beside Context) is the whole library, about 130 generated templates in
+categories. Sound effect includes impact bursts, jagged and rumble outlines, heavy
+rounded lettering and reverse block styles. Click a template to add it to the open
+page, inside the selection if there is one.
 A page's Context also has a free **Bubble…**. Lettering uses Comic Neue / Bangers when
 installed, else a bold sans; the size follows the page (1/64 of its height).
 
