@@ -124,6 +124,8 @@ PROC_RELOAD_SCRIPT = "plug-in-imanganation-reload-script"
 PROC_RESTART_WORKSPACE = "plug-in-imanganation-restart-workspace"
 PROC_PAGE_LAYOUT = "plug-in-imanganation-page-layout"
 PROC_SCREENTONE = "plug-in-imanganation-screentone"
+PROC_SPEED_LINES = "plug-in-imanganation-speed-lines"
+PROC_IMPACT_BURST = "plug-in-imanganation-impact-burst"
 PROC_AUTOSTART = "extension-imanganation-ui"
 PROC_NEW_PROJECT_MANUAL = "plug-in-imanganation-new-project-manual"
 PROC_NEW_PROJECT = "plug-in-imanganation-new-project"
@@ -3404,6 +3406,7 @@ def screentone(procedure, run_mode, image, drawables, config, data):
     saved = None
     path = None
     layer = None
+    stage = "read selection"
     previous_foreground = Gimp.context_get_foreground()
     image.undo_group_start()
     try:
@@ -3411,16 +3414,197 @@ def screentone(procedure, run_mode, image, drawables, config, data):
         if not selected:
             raise ValueError("Make a selection for the area you want to tone, then try again.")
         saved = Gimp.Selection.save(image)
+        stage = "build halftone path"
         svg = tone_effects.screentone_svg(
             image.get_width(), image.get_height(), (x1, y1, x2 - x1, y2 - y1), *values)
+        stage = "import halftone path"
         ok, paths = image.import_paths_from_string(svg, len(svg.encode("utf-8")), True, False)
         if not ok or not paths:
             raise RuntimeError("GIMP could not create the screentone pattern")
         path = paths[0]
         path.set_name(f"Screentone pattern · {values[1]:.0f}% · {values[2]:.0f}°")
+        stage = "clip pattern to selection"
         image.select_item(Gimp.ChannelOps.REPLACE, path)
         image.select_item(Gimp.ChannelOps.INTERSECT, saved)
+        stage = "create tone layer"
         layer = Gimp.Layer.new(image, f"Screentone · {values[1]:.0f}% · {values[2]:.0f}°",
+                               image.get_width(), image.get_height(),
+                               Gimp.ImageType.RGBA_IMAGE, 100, Gimp.LayerMode.NORMAL)
+        image.insert_layer(layer, None, 0)
+        layer.fill(Gimp.FillType.TRANSPARENT)
+        stage = "fill tone layer"
+        Gimp.context_set_foreground(Gegl.Color.new("black"))
+        layer.edit_fill(Gimp.FillType.FOREGROUND)
+        image.select_item(Gimp.ChannelOps.REPLACE, saved)
+    except Exception as exc:
+        if layer is not None and layer.get_image() is image:
+            image.remove_layer(layer)
+        Gimp.message(f"Could not create screentone during {stage}: {exc}")
+        image.undo_group_end()
+        return procedure.new_return_values(Gimp.PDBStatusType.EXECUTION_ERROR, GLib.Error())
+    finally:
+        if saved is not None:
+            image.select_item(Gimp.ChannelOps.REPLACE, saved)
+            image.remove_channel(saved)
+        Gimp.context_set_foreground(previous_foreground)
+    image.undo_group_end()
+    image.set_selected_layers([layer])
+    Gimp.displays_flush()
+    return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+
+
+def speed_lines(procedure, run_mode, image, drawables, config, data):
+    """Create selection-clipped manga speed lines around a chosen focal point."""
+    if tone_effects is None:
+        Gimp.message("This plug-in install is missing tone and effects support.")
+        return procedure.new_return_values(Gimp.PDBStatusType.EXECUTION_ERROR, GLib.Error())
+    _, selected, x1, y1, x2, y2 = Gimp.Selection.bounds(image)
+    if not selected:
+        Gimp.message("Make a selection for the area you want to fill with speed lines.")
+        return procedure.new_return_values(Gimp.PDBStatusType.EXECUTION_ERROR, GLib.Error())
+    if run_mode == Gimp.RunMode.INTERACTIVE:
+        dialog = Gtk.Dialog(title="Create Speed Lines", flags=0)
+        dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        dialog.add_button("Create", Gtk.ResponseType.OK)
+        dialog.set_default_response(Gtk.ResponseType.OK)
+        box = dialog.get_content_area()
+        box.set_spacing(8)
+        box.set_border_width(12)
+        box.pack_start(Gtk.Label(
+            label="Add radial linework inside the current selection."), False, False, 0)
+
+        def setting(label, value, low, high, step, digits=0):
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+            row.pack_start(Gtk.Label(label=label, xalign=0), True, True, 0)
+            control = Gtk.SpinButton.new_with_range(low, high, step)
+            control.set_digits(digits)
+            control.set_value(value)
+            row.pack_end(control, False, False, 0)
+            box.pack_start(row, False, False, 0)
+            return control
+
+        count = setting("Line count", 96, 8, 720, 1)
+        clear = setting("Clear area (%)", 18, 0, 80, 1)
+        stroke = setting("Line width (px)", 5, 1, 40, 0.5, 1)
+        focal_x = setting("Focal point X (%)", 50, 0, 100, 1)
+        focal_y = setting("Focal point Y (%)", 50, 0, 100, 1)
+        dialog.show_all()
+        response = dialog.run()
+        if response != Gtk.ResponseType.OK:
+            dialog.destroy()
+            return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
+        values = (int(count.get_value()), clear.get_value(), stroke.get_value(),
+                  focal_x.get_value() / 100.0, focal_y.get_value() / 100.0)
+        dialog.destroy()
+    else:
+        values = (96, 18.0, 5.0, 0.5, 0.5)
+
+    saved = None
+    layer = None
+    previous_foreground = Gimp.context_get_foreground()
+    image.undo_group_start()
+    try:
+        saved = Gimp.Selection.save(image)
+        bounds = (x1, y1, x2 - x1, y2 - y1)
+        focal = (x1 + bounds[2] * values[3], y1 + bounds[3] * values[4])
+        svg = tone_effects.speed_lines_svg(
+            image.get_width(), image.get_height(), bounds, focal,
+            values[0], values[1], values[2])
+        ok, paths = image.import_paths_from_string(svg, len(svg.encode("utf-8")), True, False)
+        if not ok or not paths:
+            raise RuntimeError("GIMP could not create the speed-line pattern")
+        path = paths[0]
+        path.set_name(f"Speed lines pattern · {values[0]} rays")
+        image.select_item(Gimp.ChannelOps.REPLACE, path)
+        image.select_item(Gimp.ChannelOps.INTERSECT, saved)
+        layer = Gimp.Layer.new(image, f"Speed lines · {values[0]} rays",
+                               image.get_width(), image.get_height(),
+                               Gimp.ImageType.RGBA_IMAGE, 100, Gimp.LayerMode.NORMAL)
+        image.insert_layer(layer, None, 0)
+        layer.fill(Gimp.FillType.TRANSPARENT)
+        Gimp.context_set_foreground(Gegl.Color.new("black"))
+        layer.edit_fill(Gimp.FillType.FOREGROUND)
+        image.select_item(Gimp.ChannelOps.REPLACE, saved)
+    except Exception as exc:
+        if layer is not None and layer.get_image() is image:
+            image.remove_layer(layer)
+        Gimp.message(str(exc))
+        image.undo_group_end()
+        return procedure.new_return_values(Gimp.PDBStatusType.EXECUTION_ERROR, GLib.Error())
+    finally:
+        if saved is not None:
+            image.select_item(Gimp.ChannelOps.REPLACE, saved)
+            image.remove_channel(saved)
+        Gimp.context_set_foreground(previous_foreground)
+    image.undo_group_end()
+    image.set_selected_layers([layer])
+    Gimp.displays_flush()
+    return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+
+
+def impact_burst(procedure, run_mode, image, drawables, config, data):
+    """Add a selection-clipped radial burst on its own editable layer."""
+    if tone_effects is None:
+        Gimp.message("This plug-in install is missing tone and effects support.")
+        return procedure.new_return_values(Gimp.PDBStatusType.EXECUTION_ERROR, GLib.Error())
+    _, selected, x1, y1, x2, y2 = Gimp.Selection.bounds(image)
+    if not selected:
+        Gimp.message("Make a selection for the area you want to fill with an impact burst.")
+        return procedure.new_return_values(Gimp.PDBStatusType.EXECUTION_ERROR, GLib.Error())
+    if run_mode == Gimp.RunMode.INTERACTIVE:
+        dialog = Gtk.Dialog(title="Create Impact Burst", flags=0)
+        dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        dialog.add_button("Create", Gtk.ResponseType.OK)
+        dialog.set_default_response(Gtk.ResponseType.OK)
+        box = dialog.get_content_area()
+        box.set_spacing(8)
+        box.set_border_width(12)
+        box.pack_start(Gtk.Label(
+            label="Add a jagged radial burst inside the current selection."), False, False, 0)
+
+        def setting(label, value, low, high, step):
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+            row.pack_start(Gtk.Label(label=label, xalign=0), True, True, 0)
+            control = Gtk.SpinButton.new_with_range(low, high, step)
+            control.set_value(value)
+            row.pack_end(control, False, False, 0)
+            box.pack_start(row, False, False, 0)
+            return control
+
+        spikes = setting("Spike count", 16, 6, 120, 1)
+        depth = setting("Burst depth (%)", 45, 10, 90, 1)
+        rotation = setting("Rotation (degrees)", 0, 0, 359, 1)
+        focal_x = setting("Center X (%)", 50, 0, 100, 1)
+        focal_y = setting("Center Y (%)", 50, 0, 100, 1)
+        dialog.show_all()
+        response = dialog.run()
+        if response != Gtk.ResponseType.OK:
+            dialog.destroy()
+            return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
+        values = (int(spikes.get_value()), depth.get_value(), rotation.get_value(),
+                  focal_x.get_value() / 100.0, focal_y.get_value() / 100.0)
+        dialog.destroy()
+    else:
+        values = (16, 45.0, 0.0, 0.5, 0.5)
+
+    saved = None
+    layer = None
+    previous_foreground = Gimp.context_get_foreground()
+    image.undo_group_start()
+    try:
+        saved = Gimp.Selection.save(image)
+        bounds = (x1, y1, x2 - x1, y2 - y1)
+        center = (x1 + bounds[2] * values[3], y1 + bounds[3] * values[4])
+        svg = tone_effects.impact_burst_svg(
+            image.get_width(), image.get_height(), bounds, center,
+            values[0], values[1], values[2])
+        ok, paths = image.import_paths_from_string(svg, len(svg.encode("utf-8")), True, False)
+        if not ok or not paths:
+            raise RuntimeError("GIMP could not create the impact burst")
+        paths[0].set_name(f"Impact burst pattern · {values[0]} spikes")
+        image.select_item(Gimp.ChannelOps.REPLACE, paths[0])
+        image.select_item(Gimp.ChannelOps.INTERSECT, saved)
+        layer = Gimp.Layer.new(image, f"Impact burst · {values[0]} spikes",
                                image.get_width(), image.get_height(),
                                Gimp.ImageType.RGBA_IMAGE, 100, Gimp.LayerMode.NORMAL)
         image.insert_layer(layer, None, 0)
@@ -4984,7 +5168,8 @@ class Imanganation(Gimp.PlugIn):
                 PROC_SET_LOCATION_REF,
                 PROC_PLACE, PROC_STATUS, PROC_PROJECT_DOCKS, PROC_CLOSE_PROJECT,
                 PROC_RELOAD_SCRIPT,
-                PROC_PAGE_LAYOUT, PROC_SCREENTONE, PROC_AUTOSTART,
+                PROC_PAGE_LAYOUT, PROC_SCREENTONE, PROC_SPEED_LINES, PROC_IMPACT_BURST,
+                PROC_AUTOSTART,
                 PROC_NEW_PROJECT_MANUAL, PROC_NEW_PROJECT,
                 PROC_SETUP_MODELS, PROC_RENDER_ENGINE,
                 PROC_RESTART_WORKSPACE, *DOCK_SHOW.values()]
@@ -5151,7 +5336,8 @@ class Imanganation(Gimp.PlugIn):
                PROC_SETREF: set_character_reference, PROC_INPAINT: inpaint_selection,
                PROC_SET_LOCATION_REF: set_location_reference,
                PROC_PLACE: place_panel, PROC_STATUS: engine_status,
-               PROC_PAGE_LAYOUT: page_layout, PROC_SCREENTONE: screentone}[name]
+               PROC_PAGE_LAYOUT: page_layout, PROC_SCREENTONE: screentone,
+               PROC_SPEED_LINES: speed_lines, PROC_IMPACT_BURST: impact_burst}[name]
         proc = Gimp.ImageProcedure.new(self, name, Gimp.PDBProcType.PLUGIN, run, None)
         proc.set_image_types("*")
         proc.set_sensitivity_mask(
@@ -5203,6 +5389,28 @@ class Imanganation(Gimp.PlugIn):
                 "Create a separate black halftone layer clipped to the current selection. "
                 "Choose dot spacing, coverage and screen angle; the pattern is also kept "
                 "as an editable path.", name)
+            return proc
+
+        if name == PROC_SPEED_LINES:
+            proc.add_layer_return_value(
+                "layer", "Speed lines layer", "The generated speed-line layer", False,
+                GObject.ParamFlags.READWRITE)
+            proc.set_menu_label("Create Speed _Lines...")
+            proc.set_documentation(
+                "Create manga speed lines inside the current selection",
+                "Generate editable radial linework around a focal point, clipped to the "
+                "current selection and added on a separate layer.", name)
+            return proc
+
+        if name == PROC_IMPACT_BURST:
+            proc.add_layer_return_value(
+                "layer", "Impact burst layer", "The generated impact burst layer", False,
+                GObject.ParamFlags.READWRITE)
+            proc.set_menu_label("Create Impact _Burst...")
+            proc.set_documentation(
+                "Create a radial manga impact burst inside the current selection",
+                "Generate editable burst wedges around a chosen center, clipped to the "
+                "current selection and added on a separate layer.", name)
             return proc
 
         proc.add_layer_return_value(

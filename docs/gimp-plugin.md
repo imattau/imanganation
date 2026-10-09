@@ -143,6 +143,11 @@ installed, else a bold sans; the size follows the page (1/64 of its height).
 **Screentone.** Select an area and choose **Imanganation → Create Screentone…** to
 fill it with black halftone dots on a separate layer. Adjust dot spacing, coverage,
 and screen angle; the source pattern is also kept as an editable path.
+**Speed lines.** Select an area and choose **Imanganation → Create Speed Lines…** to
+add editable radial linework on a separate layer. Set the focal point within the
+selection, line count, clear center area, and line width.
+**Impact burst.** Choose **Imanganation → Create Impact Burst…** for a jagged radial
+burst, with controls for spike count, depth, rotation, and center point.
 
 On first launch, the Project dock offers **Open project…**; the
 chosen project folder is remembered in GIMP's user settings and its docks are restored on
