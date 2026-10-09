@@ -203,15 +203,15 @@ def test_page_context_explains_when_label_has_no_script_page():
     assert "!proc-layout\tChoose layout…" not in inspector
 
 
-def test_page_context_locks_layout_when_a_panel_is_placed():
+def test_page_context_offers_change_layout_when_a_panel_is_placed():
     manifest = copy.deepcopy(EXAMPLE)
     selected_page = manifest["pages"][0]["id"]
 
     inspector = build_docks(
         manifest, selected_page, generate_layout_action="proc-layout")["inspector"]
 
-    assert "Layout status\tLayout locked · 2 panels are already placed" in inspector
-    assert "!proc-layout\tChoose layout…" not in inspector
+    assert "!proc-layout\tChange layout…" in inspector
+    assert "Layout warning\tChanging the layout unplaces its 2 panel(s)" in inspector
 
 
 def test_characters_heading_and_rows_carry_right_click_menus():

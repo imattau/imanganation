@@ -269,10 +269,6 @@ def page_layout_availability(manifest: dict, page_id: str,
 
     placed = sum(1 for panel in manifest.get("panels", [])
                  if (panel.get("placement") or {}).get("page") == page_id)
-    if placed:
-        suffix = "panel is" if placed == 1 else "panels are"
-        return {"available": False, "placed": placed,
-                "reason": f"Layout locked · {placed} {suffix} already placed"}
 
     page_number, count = page_panel_count(manifest, page.get("label", ""))
     reading_order = (manifest.get("project") or {}).get("reading_order", "rtl")
@@ -299,7 +295,7 @@ def page_layout_availability(manifest: dict, page_id: str,
     # alternate border treatments, so users can compare geometry without scrolling.
     combinations = [(layout, style) for style in FRAME_STYLES for layout in ranked]
     panel_refs = layout_regions_for_panels(manifest, page_id)
-    return {"available": True, "page_number": page_number,
+    return {"available": True, "page_number": page_number, "placed": placed,
             "panel_count": count or 0, "script_matched": script_matched,
             "layouts": ranked, "combinations": combinations,
             "recommendation": recommendation, **panel_refs}

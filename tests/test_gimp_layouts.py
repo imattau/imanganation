@@ -90,10 +90,9 @@ def test_page_layout_availability_reports_mapping_and_panel_locks():
     assert len(available["combinations"]) == 5
 
     manifest["panels"][0]["placement"] = {"page": "pg_test01"}
-    locked = page_layout_availability(manifest, "pg_test01")
-    assert not locked["available"]
-    assert locked["placed"] == 1
-    assert "1 panel is already placed" in locked["reason"]
+    relayout = page_layout_availability(manifest, "pg_test01")
+    assert relayout["available"]  # a placed page can be re-laid out
+    assert relayout["placed"] == 1
 
 
 def test_page_panel_count_matches_label_and_excludes_orphans():

@@ -461,7 +461,13 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
             inspector_rows.append(
                 "Layout note\tCyan borderless guides; overlapping panels layer above frame ink")
             if generate_layout_action:
-                inspector_rows.append(f"!{generate_layout_action}\tChoose layout…")
+                inspector_rows.append(
+                    f"!{generate_layout_action}\t"
+                    + ("Change layout…" if availability.get("placed") else "Choose layout…"))
+            if availability.get("placed"):
+                inspector_rows.append(
+                    f"Layout warning\tChanging the layout unplaces its "
+                    f"{availability['placed']} panel(s); their renders are kept")
         if open_page_action:
             inspector_rows.append(f"!{open_page_action}\tOpen page")
         if new_bubble_action:

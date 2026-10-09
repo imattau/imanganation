@@ -1851,6 +1851,27 @@ def _draw_page_layout(image, layout, frame_style, replace_layers=(), page_id=Non
     return layer
 
 
+def _unplace_page_panels(image, manifest, page_id):
+    """Drop this page's placed panels (canvas groups and placements) ahead of a new
+    layout. Takes stay registered, so they can be placed again into the new frames."""
+    count = 0
+    image.undo_group_start()
+    try:
+        for panel in manifest.get("panels", []):
+            if (panel.get("placement") or {}).get("page") != page_id:
+                continue
+            group = _find_panel_group(
+                image, {"project": manifest["project"]["id"], "panel": panel["id"]})
+            if group is not None:
+                image.remove_layer(group)
+            panel["placement"] = None
+            panel["status"] = "unplaced"
+            count += 1
+    finally:
+        image.undo_group_end()
+    return count
+
+
 def page_layout(procedure, run_mode, image, drawables, config, data):
     """Generate a selectable frame template matching the open project's script page."""
     try:
@@ -1876,6 +1897,19 @@ def page_layout(procedure, run_mode, image, drawables, config, data):
             raise ValueError(availability["reason"])
         combinations = availability["combinations"]
         existing_layers = _generated_layout_layers(image)
+        if availability.get("placed") and run_mode == Gimp.RunMode.INTERACTIVE:
+            ask = Gtk.MessageDialog(
+                message_type=Gtk.MessageType.WARNING, modal=True,
+                text=f"Change the layout of {page.get('label', 'this page')}?",
+                secondary_text=f"Its {availability['placed']} placed panel(s) will be "
+                "unplaced and removed from the page. Their renders are kept, and you can "
+                "place them again into the new frames.")
+            ask.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+                            "Change Layout", Gtk.ResponseType.OK)
+            answer = ask.run()
+            ask.destroy()
+            if answer != Gtk.ResponseType.OK:
+                return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
         selection = _choose_page_layout(
             combinations, image.get_width(), image.get_height(),
             page.get("label", "Page"), availability.get("recommendation"),
@@ -1885,6 +1919,8 @@ def page_layout(procedure, run_mode, image, drawables, config, data):
         if selection is None:
             return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
         layout, frame_style = selection
+        unplaced = _unplace_page_panels(image, manifest, page_id) \
+            if availability.get("placed") and not layout.get("cover") else 0
         layer = _draw_page_layout(
             image, layout, frame_style, existing_layers, page_id,
             availability.get("panel_ids", ()), availability.get("panel_sequences", ()))
@@ -1898,6 +1934,12 @@ def page_layout(procedure, run_mode, image, drawables, config, data):
                          f"{page.get('label', 'page')}. Cyan outlines mark borderless "
                          "panels for selection; overlay panels are placed above the frame "
                          "template. Select inside a frame with Fuzzy Select to render it.")
+        if unplaced:
+            manifest["project"]["modified"] = datetime.now().astimezone().isoformat(
+                timespec="seconds")
+            save_project(root, manifest)
+            Gimp.message(f"{unplaced} panel(s) were unplaced by the new layout. Their "
+                         "renders are kept: place them again into the new frames.")
         _save_project_page(image, root, manifest)
         return _success(procedure, layer)
     except Exception as exc:
