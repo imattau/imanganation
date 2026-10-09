@@ -275,28 +275,32 @@ def page_layout_availability(manifest: dict, page_id: str,
                 "reason": f"Layout locked · {placed} {suffix} already placed"}
 
     page_number, count = page_panel_count(manifest, page.get("label", ""))
-    if page_number is None:
-        return {"available": False,
-                "reason": "Rename this page to Page N to match its script page."}
-    if not count:
-        return {"available": False,
-                "reason": f"No script panels match Page {page_number}."}
     reading_order = (manifest.get("project") or {}).get("reading_order", "rtl")
-    layouts = [for_reading_order(layout, reading_order)
-               for layout in layouts_for_count(count)]
+    script_matched = page_number is not None and count > 0
+    if script_matched:
+        layouts = [for_reading_order(layout, reading_order)
+                   for layout in layouts_for_count(count)]
+    else:
+        # A page without a corresponding script still needs to be usable as a
+        # hand-authored template. Offer every built-in arrangement and let the
+        # artist choose its panel count.
+        layouts = [for_reading_order(layout, reading_order) for layout in LAYOUTS]
     if not layouts:
         return {"available": False,
                 "reason": f"No built-in layout supports {count} panels on Page {page_number}."}
     page_panels = sorted((panel for panel in manifest.get("panels", [])
                           if panel.get("status") != "orphaned"
+                          and page_number is not None
                           and (panel.get("label") or {}).get("page") == page_number),
                          key=lambda panel: (panel.get("label") or {}).get("panel", 0))
-    ranked, recommendation = rank_layouts(layouts, page_panels, page_aspect)
+    ranked, recommendation = (rank_layouts(layouts, page_panels, page_aspect)
+                              if script_matched else (layouts, None))
     # Put one preview of every arrangement up front before repeating layouts with
     # alternate border treatments, so users can compare geometry without scrolling.
     combinations = [(layout, style) for style in FRAME_STYLES for layout in ranked]
     panel_refs = layout_regions_for_panels(manifest, page_id)
-    return {"available": True, "page_number": page_number, "panel_count": count,
+    return {"available": True, "page_number": page_number,
+            "panel_count": count or 0, "script_matched": script_matched,
             "layouts": ranked, "combinations": combinations,
             "recommendation": recommendation, **panel_refs}
 

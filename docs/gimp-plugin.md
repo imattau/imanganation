@@ -197,6 +197,14 @@ page placement metadata are still being migrated. Image procedures are grouped u
   versions/reference availability. Locations (selectable, see above) and Props
   appear under Assets with their project notes. GIMP restores dock placement and visibility through its normal
   session state.
+- **Export Project…** (*Imanganation → Project*): export the saved project pages as a
+  CBZ archive, a multi-page PDF, or an ordered page-image folder. Choose whether to
+  include covers, reverse the project page order, set the reading direction, and export
+  PNG or JPEG (with adjustable JPEG quality); CBZ can include `ComicInfo.xml` metadata.
+  The export is flattened and leaves the editable XCF pages untouched. Cover composition
+  guides are omitted, and generated page
+  frame/template layers are omitted by default; select **Include generated panel frame
+  layers** to export those lines too.
 
 - **Render Panel into Frame…** (the main flow): needs a selection, which is the target
   frame. It sends the next panel's `seq` and the frame's size to the engine, which
@@ -207,8 +215,10 @@ page placement metadata are still being migrated. Image procedures are grouped u
   regenerate.
 - **Generate Page Panel Layout…**: on an open project page, chooses among built-in
   layouts with exactly the number of non-orphaned script panels matching the number in
-  the page label, then lets the artist choose Fine ink, Classic ink, Bold ink, Slanted
-  frames, or Double rule treatment. Layouts include regular grids, cinematic beats,
+  the page label. If no script page or panels match, it offers the full template gallery
+  so the artist can choose an arrangement and panel count. The artist then chooses Fine
+  ink, Classic ink, Bold ink, Slanted frames, or Double rule treatment. Layouts include
+  regular grids, cinematic beats,
   overlapping insets and borderless overlays. Cyan guides mark borderless regions for
   selection; rendered overlay panels sit above and clear the base frame ink, while their
   own frame ink stays in the foreground. Pages named **Cover**, **Front Cover**, or

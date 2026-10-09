@@ -58,6 +58,7 @@ from gi.repository import (  # noqa: E402
 try:
     import bubbles as bubble_templates
     import engine_ui
+    import export_formats
     import lettering
     import tone_effects
     import services as engine_services
@@ -96,6 +97,7 @@ except ImportError:  # Keep older single-file plug-in installs usable for legacy
     ProjectFileError = ValueError
     project_from_script = parse_script_text = script_looks_canonical = None
     lettering = bubble_templates = setup_ui = engine_services = engine_ui = None
+    export_formats = None
     tone_effects = None
     load_project = record_take = save_project = apply_field_edit = None
     delete_character = delete_location = find_location = None
@@ -126,6 +128,7 @@ PROC_PAGE_LAYOUT = "plug-in-imanganation-page-layout"
 PROC_SCREENTONE = "plug-in-imanganation-screentone"
 PROC_SPEED_LINES = "plug-in-imanganation-speed-lines"
 PROC_IMPACT_BURST = "plug-in-imanganation-impact-burst"
+PROC_EXPORT_PROJECT = "plug-in-imanganation-export-project"
 PROC_AUTOSTART = "extension-imanganation-ui"
 PROC_NEW_PROJECT_MANUAL = "plug-in-imanganation-new-project-manual"
 PROC_NEW_PROJECT = "plug-in-imanganation-new-project"
@@ -1654,7 +1657,7 @@ def _choose_page_size(width, height):
 
 
 def _choose_page_layout(combinations, page_width, page_height, page_label,
-                        recommendation=None):
+                        recommendation=None, script_matched=True):
     dialog = Gtk.Dialog(title="Choose page layout", flags=Gtk.DialogFlags.MODAL)
     dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
                        "Apply", Gtk.ResponseType.OK)
@@ -1668,8 +1671,9 @@ def _choose_page_layout(combinations, page_width, page_height, page_label,
     first_layout = combinations[0][0]
     chooser_note = ("cover composition guides · choose a preview, then Apply"
                     if first_layout.get("cover") else
-                    f"{len(first_layout['regions'])} panels · script-matched layouts appear "
-                    "first; choose a preview, then Apply")
+                    (f"{len(first_layout['regions'])} panels · script-matched layouts appear "
+                     "first; choose a preview, then Apply" if script_matched else
+                     "template layouts · choose a panel arrangement and style, then Apply"))
     content.pack_start(Gtk.Label(label=f"{page_label} · {chooser_note}"),
         False, False, 0)
 
@@ -1878,7 +1882,8 @@ def page_layout(procedure, run_mode, image, drawables, config, data):
         existing_layers = _generated_layout_layers(image)
         selection = _choose_page_layout(
             combinations, image.get_width(), image.get_height(),
-            page.get("label", "Page"), availability.get("recommendation")) \
+            page.get("label", "Page"), availability.get("recommendation"),
+            availability.get("script_matched", True)) \
             if run_mode == Gimp.RunMode.INTERACTIVE \
             else combinations[0]
         if selection is None:
@@ -1901,6 +1906,262 @@ def page_layout(procedure, run_mode, image, drawables, config, data):
         return _success(procedure, layer)
     except Exception as exc:
         return _error(procedure, str(exc))
+
+
+def _export_dialog(project_title, reading_order):
+    """Choose a distribution format and the page-image settings."""
+    dialog = Gtk.Dialog(title="Export Imanganation Project", flags=Gtk.DialogFlags.MODAL)
+    dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+                       "Export…", Gtk.ResponseType.OK)
+    dialog.set_default_size(460, 260)
+    grid = Gtk.Grid(column_spacing=12, row_spacing=10, margin=12)
+    format_combo = Gtk.ComboBoxText()
+    for ident, label in (("cbz", "CBZ comic archive"), ("pdf", "PDF volume"),
+                         ("images", "Page image folder")):
+        format_combo.append(ident, label)
+    format_combo.set_active_id("cbz")
+    image_combo = Gtk.ComboBoxText()
+    image_combo.append("png", "PNG · lossless")
+    image_combo.append("jpeg", "JPEG · smaller files")
+    image_combo.set_active_id("png")
+    direction_combo = Gtk.ComboBoxText()
+    direction_combo.append("rtl", "Right to left (manga)")
+    direction_combo.append("ltr", "Left to right")
+    direction_combo.set_active_id(reading_order if reading_order in {"rtl", "ltr"} else "rtl")
+    quality = Gtk.SpinButton.new_with_range(50, 100, 1)
+    quality.set_value(95)
+    quality_label = Gtk.Label(label="JPEG quality")
+    quality_label.set_xalign(0)
+    include_cover = Gtk.CheckButton(label="Include cover pages")
+    include_cover.set_active(True)
+    include_frames = Gtk.CheckButton(label="Include generated panel frame layers")
+    include_frames.set_active(False)
+    include_frames.set_tooltip_text(
+        "Off exports the artwork without selectable panel layout guides or frame ink.")
+    include_metadata = Gtk.CheckButton(label="Include ComicInfo.xml archive metadata")
+    include_metadata.set_active(True)
+    include_metadata.set_tooltip_text("Included only with CBZ exports.")
+    reverse = Gtk.CheckButton(label="Reverse project page order")
+    reverse.set_active(False)
+    grid.attach(Gtk.Label(label="Format"), 0, 0, 1, 1)
+    grid.attach(format_combo, 1, 0, 1, 1)
+    grid.attach(Gtk.Label(label="Page images"), 0, 1, 1, 1)
+    grid.attach(image_combo, 1, 1, 1, 1)
+    grid.attach(quality_label, 0, 2, 1, 1)
+    grid.attach(quality, 1, 2, 1, 1)
+    grid.attach(include_cover, 0, 3, 2, 1)
+    grid.attach(include_frames, 0, 4, 2, 1)
+    grid.attach(include_metadata, 0, 5, 2, 1)
+    grid.attach(reverse, 0, 6, 2, 1)
+    grid.attach(Gtk.Label(label="Reading direction"), 0, 7, 1, 1)
+    grid.attach(direction_combo, 1, 7, 1, 1)
+    dialog.get_content_area().add(grid)
+
+    def image_format_changed(_combo):
+        is_jpeg = image_combo.get_active_id() == "jpeg"
+        quality.set_sensitive(is_jpeg)
+        quality_label.set_sensitive(is_jpeg)
+
+    def export_format_changed(_combo):
+        include_metadata.set_sensitive(format_combo.get_active_id() == "cbz")
+
+    image_combo.connect("changed", image_format_changed)
+    format_combo.connect("changed", export_format_changed)
+    image_format_changed(image_combo)
+    export_format_changed(format_combo)
+    dialog.show_all()
+    response = dialog.run()
+    choices = None
+    if response == Gtk.ResponseType.OK:
+        choices = {"format": format_combo.get_active_id() or "cbz",
+                   "image_format": image_combo.get_active_id() or "png",
+                   "quality": quality.get_value_as_int(),
+                   "include_cover": include_cover.get_active(),
+                   "include_frames": include_frames.get_active(),
+                   "include_metadata": include_metadata.get_active(),
+                   "reverse": reverse.get_active(),
+                   "reading_order": direction_combo.get_active_id() or "rtl"}
+    dialog.destroy()
+    return choices
+
+
+def _export_destination(project_title, export_format):
+    if export_format == "images":
+        action = Gtk.FileChooserAction.SELECT_FOLDER
+        title, accept = "Choose parent folder for page images", "Select"
+    else:
+        action = Gtk.FileChooserAction.SAVE
+        title, accept = "Save Imanganation export", "Save"
+    chooser = Gtk.FileChooserDialog(title=title, action=action)
+    chooser.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+                        accept, Gtk.ResponseType.ACCEPT)
+    chooser.set_do_overwrite_confirmation(True)
+    if export_format != "images":
+        extension = ".cbz" if export_format == "cbz" else ".pdf"
+        stem = re.sub(r"[^A-Za-z0-9._-]+", "-", project_title).strip(".-_") or "manga"
+        chooser.set_current_name(stem + extension)
+    response = chooser.run()
+    selected = chooser.get_filename() if response == Gtk.ResponseType.ACCEPT else None
+    chooser.destroy()
+    return Path(selected) if selected else None
+
+
+def _remove_export_guides(image, include_frames=False):
+    """Remove generated guide layers from a disposable export image copy."""
+    def walk(layers):
+        for layer in list(layers):
+            parasite = layer.get_parasite(LAYOUT_PARASITE)
+            if parasite is not None:
+                try:
+                    metadata = json.loads(bytes(parasite.get_data()))
+                except (AttributeError, TypeError, ValueError, json.JSONDecodeError):
+                    metadata = {}
+                if metadata.get("role") == "selection-template" and metadata.get("cover"):
+                    image.remove_layer(layer)
+                    continue
+            name = layer.get_name()
+            if not include_frames and (name.lower().startswith("template")
+                                       or name.startswith("Imanganation Layout Ink -")):
+                image.remove_layer(layer)
+                continue
+            if layer.is_group():
+                walk(layer.get_children())
+
+    walk(image.get_layers())
+
+
+def _save_project_export_page(image, path, image_format, quality, include_frames=False):
+    copy = image.duplicate()
+    try:
+        _remove_export_guides(copy, include_frames)
+        copy.flatten()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if image_format == "jpeg":
+            procedure = Gimp.get_pdb().lookup_procedure("file-jpeg-export")
+            if procedure is None:
+                raise RuntimeError("GIMP's JPEG exporter is unavailable")
+            config = procedure.create_config()
+            config.set_property("run-mode", Gimp.RunMode.NONINTERACTIVE)
+            config.set_property("image", copy)
+            config.set_property("file", Gio.File.new_for_path(str(path)))
+            config.set_property("quality", quality / 100.0)
+            try:
+                config.set_property("use-original-quality", False)
+            except Exception:
+                pass
+            result = procedure.run(config)
+            if result.index(0) != Gimp.PDBStatusType.SUCCESS:
+                raise RuntimeError(f"GIMP could not export {path.name} as JPEG")
+        else:
+            result = Gimp.file_save(Gimp.RunMode.NONINTERACTIVE, copy,
+                                    Gio.File.new_for_path(str(path)), None)
+            if result is False:
+                raise RuntimeError(f"GIMP could not export {path.name} as PNG")
+    finally:
+        copy.delete()
+
+
+def export_project(procedure, run_mode, image, drawables, config, data):
+    """Export a project volume as CBZ, PDF, or an ordered page-image folder."""
+    if run_mode == Gimp.RunMode.INTERACTIVE and not _dialog(procedure, config, PROC_EXPORT_PROJECT):
+        return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
+    try:
+        if load_project is None or export_formats is None:
+            raise ValueError("This plug-in install is missing project export support")
+        project_file = config.get_property("project-dir")
+        root = Path(project_file.get_path()) if project_file is not None else None
+        root = root or _DOCK_CONTEXT.get("root") or _open_project()
+        if root is None:
+            raise ValueError("Open an Imanganation project first")
+        manifest = load_project(root)
+        pages = list(manifest.get("pages", []))
+        if not pages:
+            raise ValueError("This project has no pages to export")
+        options = _export_dialog(
+            manifest["project"].get("title", "Manga"),
+            manifest["project"].get("reading_order", "rtl"))
+        if options is None:
+            return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
+        destination = _export_destination(
+            manifest["project"].get("title", "Manga"), options["format"])
+        if destination is None:
+            return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
+
+        if not options["include_cover"]:
+            pages = [page for page in pages if not export_formats.is_cover_page(page)]
+        if options["reverse"]:
+            pages.reverse()
+        if not pages:
+            raise ValueError("No pages remain after applying the export options")
+        missing = [page.get("file", "(no page file)") for page in pages
+                   if not page.get("file") or not (root / page["file"]).is_file()]
+        if missing:
+            raise ValueError("Page file is missing: " + ", ".join(missing))
+
+        # Save every open project page first so its current canvas, not a stale XCF,
+        # is what the volume export captures.
+        for open_image in Gimp.get_images():
+            if _project_page_id_for_image(open_image, manifest) is not None:
+                if not _save_project_page(open_image, root, manifest):
+                    raise ValueError("Save the open project page before exporting")
+
+        suffix = ".jpg" if options["image_format"] == "jpeg" else ".png"
+        if options["format"] == "images":
+            stem = re.sub(r"[^A-Za-z0-9._-]+", "-",
+                          manifest["project"].get("title", "manga")).strip(".-_") or "manga"
+            destination = destination / f"{stem}-pages"
+            if destination.exists():
+                raise ValueError(f"Export folder already exists: {destination}")
+            destination.mkdir(parents=True)
+        temporary = root / "tmp" / f"export-{secrets.token_hex(6)}"
+        temporary.mkdir(parents=True, exist_ok=False)
+        page_files = []
+        pdf_pages = []
+        try:
+            for index, page in enumerate(pages, 1):
+                page_id = page.get("id")
+                current = next((opened for opened in Gimp.get_images()
+                                if _project_page_id_for_image(opened, manifest) == page_id), None)
+                loaded = current or Gimp.file_load(
+                    Gimp.RunMode.NONINTERACTIVE,
+                    Gio.File.new_for_path(str(root / page["file"])))
+                close_after = current is None
+                try:
+                    ext = suffix
+                    filename = export_formats.safe_page_stem(page.get("label"), index) + ext
+                    staged = temporary / filename
+                    _save_project_export_page(loaded, staged, options["image_format"],
+                                              options["quality"],
+                                              options["include_frames"])
+                    page_files.append((filename, staged))
+                    resolution = loaded.get_resolution()
+                    ppi = float(resolution[0]) if resolution else 72.0
+                    pdf_pages.append((staged, ppi))
+                finally:
+                    if close_after:
+                        loaded.delete()
+            if options["format"] == "cbz":
+                destination = destination.with_suffix(".cbz")
+                export_formats.write_cbz(
+                    destination, page_files,
+                    manifest["project"].get("title", ""),
+                    manifest["project"].get("chapter", ""),
+                    options["reading_order"], options["include_metadata"])
+            elif options["format"] == "pdf":
+                destination = destination.with_suffix(".pdf")
+                export_formats.write_pdf(destination, pdf_pages,
+                                         manifest["project"].get("title", ""))
+            else:
+                for filename, staged in page_files:
+                    os.replace(staged, destination / filename)
+        finally:
+            import shutil
+            shutil.rmtree(temporary, ignore_errors=True)
+        Gimp.message(f"Exported {len(pages)} pages to {destination}")
+        return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+    except Exception as exc:
+        return _error(procedure, str(exc))
+
 
 
 def _activate_project(root):
@@ -5169,6 +5430,7 @@ class Imanganation(Gimp.PlugIn):
                 PROC_PLACE, PROC_STATUS, PROC_PROJECT_DOCKS, PROC_CLOSE_PROJECT,
                 PROC_RELOAD_SCRIPT,
                 PROC_PAGE_LAYOUT, PROC_SCREENTONE, PROC_SPEED_LINES, PROC_IMPACT_BURST,
+                PROC_EXPORT_PROJECT,
                 PROC_AUTOSTART,
                 PROC_NEW_PROJECT_MANUAL, PROC_NEW_PROJECT,
                 PROC_SETUP_MODELS, PROC_RENDER_ENGINE,
@@ -5342,7 +5604,8 @@ class Imanganation(Gimp.PlugIn):
                PROC_SET_LOCATION_REF: set_location_reference,
                PROC_PLACE: place_panel, PROC_STATUS: engine_status,
                PROC_PAGE_LAYOUT: page_layout, PROC_SCREENTONE: screentone,
-               PROC_SPEED_LINES: speed_lines, PROC_IMPACT_BURST: impact_burst}[name]
+               PROC_SPEED_LINES: speed_lines, PROC_IMPACT_BURST: impact_burst,
+               PROC_EXPORT_PROJECT: export_project}[name]
         proc = Gimp.ImageProcedure.new(self, name, Gimp.PDBProcType.PLUGIN, run, None)
         proc.set_image_types("*")
         proc.set_sensitivity_mask(
@@ -5355,6 +5618,7 @@ class Imanganation(Gimp.PlugIn):
         menu_groups = {
             PROC_STATUS: "Settings",
             PROC_PAGE_LAYOUT: "Page & Cover",
+            PROC_EXPORT_PROJECT: "Project",
             "plug-in-imanganation-cover-designer": "Page & Cover",
             PROC_SCREENTONE: "Manga Tools",
             PROC_SPEED_LINES: "Manga Tools",
@@ -5432,6 +5696,19 @@ class Imanganation(Gimp.PlugIn):
                 "Create a radial manga impact burst inside the current selection",
                 "Generate editable burst wedges around a chosen center, clipped to the "
                 "current selection and added on a separate layer.", name)
+            return proc
+
+        if name == PROC_EXPORT_PROJECT:
+            proc.add_file_argument(
+                "project-dir", "_Project folder", "Imanganation project to export",
+                Gimp.FileChooserAction.SELECT_FOLDER, True, None,
+                GObject.ParamFlags.READWRITE)
+            proc.set_menu_label("Export _Project...")
+            proc.set_documentation(
+                "Export an Imanganation project for comic distribution",
+                "Export the ordered project pages as a CBZ archive, PDF volume, or page "
+                "image folder. Choose reading direction, cover inclusion, image format, "
+                "and page order.", name)
             return proc
 
         proc.add_layer_return_value(

@@ -435,9 +435,13 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
         else:
             script_panel_count = availability["panel_count"]
             option_count = len(availability["combinations"])
-            inspector_rows.append(
-                f"Layout status\t{script_panel_count} script panels · "
-                f"{option_count} preview choices")
+            if availability.get("script_matched", True):
+                inspector_rows.append(
+                    f"Layout status\t{script_panel_count} script panels · "
+                    f"{option_count} preview choices")
+            else:
+                inspector_rows.append(
+                    f"Layout status\tTemplate layouts · {option_count} preview choices")
             inspector_rows.append(
                 "Layout note\tCyan borderless guides; overlapping panels layer above frame ink")
             if generate_layout_action:
