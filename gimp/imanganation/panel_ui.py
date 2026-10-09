@@ -10,9 +10,11 @@ from urllib.parse import quote
 
 try:  # Installed plug-in imports siblings as top-level modules.
     from layouts import page_layout_availability
+    from project_store import _location_name
     from project_store import location_key as _location_key
 except ImportError:  # Package import in tests and external tooling.
     from .layouts import page_layout_availability
+    from .project_store import _location_name
     from .project_store import location_key as _location_key
 
 
@@ -24,6 +26,12 @@ def _label(value: Any) -> str:
 def _field(row_id: str, field: str, title: str, value: Any) -> str:
     """An editable properties row; edits come back as ``<row id>.<field>``."""
     return f"@{row_id}.{field}\t{title}\t{_label(value)}"
+
+
+def _place(panel: dict[str, Any]) -> str:
+    """Where the panel happens, as the render reads it: its own location, else the place
+    its scene heading names ("School rooftop — dusk" -> "School rooftop")."""
+    return _label(panel.get("location")) or _location_name(_label(panel.get("scene_heading")))
 
 
 def _expressions(expressions: dict[str, Any]) -> str:
@@ -303,7 +311,9 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
             f"Script position\t{_position(label, '—')}",
             f"Status\t{_label(panel.get('status')) or 'unplaced'}",
             f"Page\t{placement.get('page') or 'Unassigned'}",
-            f"Location\t{_label(panel.get('location')) or 'Unspecified'}",
+            f"Location\t{_place(panel) or 'Unspecified'}",
+            *([f"Scene heading\t{_label(panel['scene_heading'])}"]
+              if panel.get("scene_heading") else []),
             f"Shot\t{_label(panel.get('camera')) or 'Unspecified'}",
             f"Aspect ratio\t{_label(panel.get('aspect_ratio')) or 'Unspecified'}",
             f"Frame size\t{_label(panel.get('size')) or 'Unspecified'}",
@@ -353,7 +363,7 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
             for c in characters if c.get("version"))
         inspector_rows.extend([
             "# Scene",
-            _field(pid, "location", "Location", panel.get("location")),
+            _field(pid, "location", "Location", _place(panel)),
             _field(pid, "camera", "Shot", panel.get("camera")),
             _field(pid, "aspect_ratio", "Aspect ratio", panel.get("aspect_ratio")),
             _field(pid, "size", "Frame size", panel.get("size")),

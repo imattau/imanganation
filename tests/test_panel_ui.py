@@ -278,3 +278,17 @@ def test_reload_script_is_on_the_project_titles_menu():
     assert docks["project"].splitlines()[0] == (
         "# Rooftop\t!reload:Reload script|load:Load script from file…|close:Close project")
     assert docks["script"].splitlines()[0] == "# Reading order"  # a list: no menus
+
+
+def test_panel_shows_the_place_its_scene_heading_names_when_it_has_no_location():
+    manifest = copy.deepcopy(EXAMPLE)
+    panel = manifest["panels"][0]
+    panel["location"], panel["scene_heading"] = "", "Small bridge — morning"
+
+    docks = build_docks(manifest, panel["id"])
+    inspector, brief = docks["inspector"], docks["panel"]
+
+    assert "Location\tSmall bridge" in brief
+    assert "Scene heading\tSmall bridge — morning" in brief
+    assert "Location\tUnspecified" not in brief
+    assert "@%s.location\tLocation\tSmall bridge" % panel["id"] in inspector
