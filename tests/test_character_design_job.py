@@ -144,3 +144,15 @@ def test_api_parses_a_script_into_plain_dicts(tmp_path):
     assert result["cast"] == [{"name": "Rin", "aliases": [], "description": "red hair"}]
     assert result["panels"][0]["characters"] == ["Rin"]
     assert result["problems"] == []
+
+
+@pytest.mark.parametrize("engine", ["qwen_image_21", "z_anime"])
+def test_design_character_renders_with_the_chosen_engine(tmp_path, engine):
+    reg = CharacterRegistry(tmp_path / "chars")
+    llm = FakeLLM()
+    comfy = FakeComfy(llm)
+    result = design_character(reg, "Rin", "tall delinquent girl", llm=llm, comfy=comfy,
+                              engine=engine)
+    assert "exactly one person and nobody else" in result.prompt
+    assert any(n["class_type"] in ("TextEncodeQwenImage21", "CLIPTextEncode")
+               for n in comfy.graphs[-1].values())

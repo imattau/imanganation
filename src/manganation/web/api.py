@@ -188,6 +188,7 @@ class CharacterRequest(BaseModel):
     # keeps them) and add a new design version as the active reference
     redesign: bool = False
     style: StyleOptions | None = None  # the project's look: the design is drawn in it
+    engine: Literal["sdxl", "qwen_image_21", "z_anime"] | None = None  # the project's render engine
 
     @model_validator(mode="after")
     def _one_form(self):
@@ -225,6 +226,7 @@ class LocationsRequest(BaseModel):
     # The project's locations ({"name", "notes"}): a place's notes are its description
     locations: list[dict] = Field(default_factory=list)
     style: StyleOptions | None = None
+    engine: Literal["sdxl", "qwen_image_21", "z_anime"] | None = None  # the project's render engine
 
 
 class LocationReferenceRequest(BaseModel):
@@ -237,7 +239,7 @@ class LocationReferenceRequest(BaseModel):
 
 class LocationRequest(BaseModel):
     """Design one location from the author's description, like a character: an
-    establishing image with no people (Qwen-Image 2.1), queued with the renders."""
+    establishing image with no people (the project's render engine), queued with the renders."""
 
     project: str = Field(pattern=r"^prj_[a-z0-9]{6,}$")
     name: str = Field(min_length=1, max_length=120)
@@ -246,6 +248,7 @@ class LocationRequest(BaseModel):
     # A location that has an image: draw a new one (the old is kept in ``previous``)
     redesign: bool = False
     style: StyleOptions | None = None
+    engine: Literal["sdxl", "qwen_image_21", "z_anime"] | None = None
 
 
 @dataclass
@@ -535,7 +538,8 @@ def create_app(
                     continue
                 loc = lc.design(identity, key, found["name"], found["details"],
                                 description=notes.get(key) or None,
-                                style=req.style.model_dump() if req.style else None)
+                                style=req.style.model_dump() if req.style else None,
+                                **({"engine": req.engine} if req.engine else {}))
                 designed.append({"key": loc.key, "name": loc.name, "details": loc.details,
                                  "image": str(registry.root / loc.image)})
             return LocationsResult(designed=designed, existing=existing)
@@ -588,7 +592,8 @@ def create_app(
             design = design_location or lc.design
             loc = design(identity, key, name, [], seed=req.seed,
                          description=req.description.strip() or None,
-                         **({"style": req.style.model_dump()} if req.style else {}))
+                         **({"style": req.style.model_dump()} if req.style else {}),
+                         **({"engine": req.engine} if req.engine else {}))
             return _location_record(lc.LocationRegistry.from_path(identity), loc)
 
         return submit_job("location", req.model_dump(), work)
@@ -895,7 +900,8 @@ def create_app(
         return submit_job("character", req.model_dump(), lambda: design(
             reg, req.name, req.description, aliases=req.aliases, seed=req.seed,
             redesign=req.redesign,
-            **({"style": req.style.model_dump()} if req.style else {})))
+            **({"style": req.style.model_dump()} if req.style else {}),
+            **({"engine": req.engine} if req.engine else {})))
 
     @app.get("/jobs/{job_id}")
     def status(job_id: str) -> Job:

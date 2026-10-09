@@ -1223,7 +1223,7 @@ def inpaint_selection(procedure, run_mode, image, drawables, config, data):
             if manifest is not None:
                 body["reading_order"] = manifest["project"].get("reading_order", "rtl")
         if "project" in engine_project:  # the project's look, as its panels have
-            body.update(_style_options(_manifest_for(root)))
+            body.update(engine_ui.style_options(_manifest_for(root)) if engine_ui else {})
         result = _run_job(config.get_property("engine-url").rstrip("/"), "/inpaint", body,
                           f"Inpainting panel {seq:03d}: {prompt[:40]}…")
     except (EngineError, ValueError) as exc:
@@ -3663,8 +3663,8 @@ def _create_project_from_script(script_path, title, parent, page_size, design):
 
 
 def _style_options(manifest):
-    """The project's look for an engine request ({"style": …}), or nothing."""
-    return engine_ui.style_options(manifest) if engine_ui is not None and manifest else {}
+    """The project's render engine and look for a design request, or nothing."""
+    return engine_ui.design_options(manifest) if engine_ui is not None and manifest else {}
 
 
 def _queue_character_design(root, manifest, character, redesign=False, describe=True):

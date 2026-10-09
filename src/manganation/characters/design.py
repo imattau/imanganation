@@ -16,6 +16,7 @@ no GPU) and a thin *generation* wrapper that calls ComfyUI.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from manganation.characters.schema import AppearanceSpec, Character
@@ -113,3 +114,41 @@ def build_design_prompt(
 
 def design_prompt_for(character: Character, *, extra: list[str] | None = None) -> DesignPrompt:
     return build_design_prompt(character.appearance, extra=extra)
+
+
+_COUNT_TAG = re.compile(r"^\d+(girl|boy|other|person)s?$")
+_KINDS = {"1boy": "a boy", "1girl": "a girl"}
+
+# Models with an LLM text encoder (Qwen-Image, Z-Anime) read prose, and Qwen-Image runs
+# at cfg 1 with no negative prompt, so "one figure, nobody else" has to be said in the
+# positive prompt, plainly and more than once.
+PROSE_DESIGN_NEGATIVE = (
+    "multiple characters, 2people, 2boys, 2girls, group, crowd, duplicates, clones, "
+    "multiple views, character sheet, reference sheet, turnaround, expression sheet, "
+    "inset, panel border, border, text, speech bubble, watermark, signature, lowres, "
+    "bad anatomy, bad hands, extra arms, extra hands, pov, shadow, gradient background, "
+    "grey background, colored background, busy background, props, monochrome, sketch"
+)
+
+
+def build_prose_design_prompt(
+    appearance: AppearanceSpec,
+    *,
+    style: str = "clean line art and cel shading",
+) -> DesignPrompt:
+    """The single-figure reference as plain English, for Qwen-Image and Z-Anime."""
+    tags = [t.strip() for t in appearance.prompt_tags() if t and t.strip()]
+    kind = _KINDS.get(tags[0], "a person") if tags else "a person"
+    looks = ", ".join(t for t in tags if not _COUNT_TAG.match(t))
+    positive = (
+        f"A full-colour anime character reference illustration, {style}, showing exactly "
+        f"one person and nobody else: {kind}" + (f", {looks}" if looks else "") + ". "
+        "Pose: standing straight, facing the viewer, looking at the viewer, arms relaxed "
+        "at the sides, framed from the thighs up with the whole head in frame. "
+        "Background: plain flat white, nothing else in the picture. "
+        "One single figure only: no second character, no other people, no group, no "
+        "duplicates, no turnaround, no character sheet, no multiple views, no text, no "
+        "panel borders."
+    )
+    return DesignPrompt(positive=positive, negative=PROSE_DESIGN_NEGATIVE,
+                        tags=[kind, *([looks] if looks else [])])

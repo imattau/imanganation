@@ -176,8 +176,12 @@ def gather(panels, settings=None) -> dict[str, dict]:
 
 def design(identity: Path, key: str, name: str, details: list[str], *, client=None,
            seed: int | None = None, width: int = 1344, height: int = 768,
-           description: str | None = None, style: dict | None = None) -> Location:
-    """Render a location's reference image (Qwen-Image 2.1, no people) and register it.
+           description: str | None = None, style: dict | None = None,
+           engine: str | None = None) -> Location:
+    """Render a location's reference image (no people) and register it, with the
+    project's render engine (``engine``; None = Qwen-Image 2.1, the one that reads a
+    place's image): Qwen-Image 2.1 and
+    Z-Anime from the prose prompt, SDXL from tags.
 
     A place designed before is redesigned: a new image (a new seed unless one is given),
     the old one kept in ``previous``; ``description`` None keeps the last one, and the
@@ -196,21 +200,43 @@ def design(identity: Path, key: str, name: str, details: list[str], *, client=No
         details = before.details
     if seed is None:
         seed = random.randrange(2**31) if before else 7
+    settings = load_settings()
     if client is None:
-        settings = load_settings()
         client = ComfyClient(settings.comfyui.base_url)
-    files = trial_files(load_models(), "qwen_image_21")
+    engine = engine or "qwen_image_21"  # only its renders read a place's image
     look = ""
+    chosen = None
     if style:
         from manganation.render.panel import load_style
 
         chosen = load_style(style)
         if chosen["id"] != "default" or chosen["text"]:  # the default keeps its words
             look = chosen["prose"]
-    prompt = location_prompt(name, details, description, look)
-    graph = graphs.qwen_image21(unet=files["model"], clip=files["text_encoder"],
-                                vae=files["vae"], prompt=prompt, refs=[], width=width,
-                                height=height, seed=seed, prefix="imanganation_location")
+    if engine == "sdxl":
+        from manganation.characters.generator import _checkpoint_id
+
+        tags = [*(chosen["tags"] if chosen else []), "no humans", "scenery", name, *details,
+                "wide shot", "highly detailed"]
+        prompt = ", ".join(dict.fromkeys(t.strip() for t in tags if t and t.strip()))
+        graph = graphs.txt2img(
+            ckpt=_checkpoint_id(settings), prompt=prompt,
+            negative=("1girl, 1boy, people, person, crowd, multiple girls, multiple boys, "
+                      "text, watermark, lowres, worst quality"),
+            width=width, height=height, seed=seed, prefix="imanganation_location",
+            sampling=graphs.Sampling(steps=28, cfg=6.0))
+    else:
+        files = trial_files(load_models(), engine)
+        prompt = location_prompt(name, details, description, look)
+        if engine == "qwen_image_21":
+            graph = graphs.qwen_image21(
+                unet=files["model"], clip=files["text_encoder"], vae=files["vae"],
+                prompt=prompt, refs=[], width=width, height=height, seed=seed,
+                prefix="imanganation_location")
+        else:
+            graph = graphs.z_image(
+                unet=files["model"], clip=files["text_encoder"], vae=files["vae"],
+                prompt=prompt, negative="people, person, characters, text, watermark, lowres",
+                width=width, height=height, seed=seed, prefix="imanganation_location")
     blobs = client.run(graph)
     if not blobs:
         raise RuntimeError("ComfyUI returned no image")

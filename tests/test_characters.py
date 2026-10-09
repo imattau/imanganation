@@ -275,3 +275,13 @@ def test_collect_names_first_appearance_order():
         ]
     )
     assert collect_names(script) == ["Akira", "Yuki"]
+
+
+def test_prose_design_prompt_asks_for_one_figure_in_words():
+    from manganation.characters.design import build_prose_design_prompt
+
+    p = build_prose_design_prompt(AppearanceSpec(gender="1girl", hair_color="black hair"),
+                                  style="soft watercolour")
+    assert "exactly one person and nobody else: a girl, black hair" in p.positive
+    assert "1girl" not in p.positive and "soft watercolour" in p.positive
+    assert "no turnaround" in p.positive and "multiple characters" in p.negative

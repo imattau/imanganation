@@ -61,6 +61,14 @@ def style_options(manifest: dict[str, Any] | None) -> dict[str, Any]:
     return {} if is_default_style(style) else {"style": style}
 
 
+def design_options(manifest: dict[str, Any] | None) -> dict[str, Any]:
+    """What a character or location design sends: the project's look, and its render
+    engine when it chose one, so designs are drawn by the model the panels use."""
+    chosen = ((manifest or {}).get("project") or {}).get("render")
+    engine = {"engine": project_render(manifest)["engine"]} if chosen else {}
+    return {**engine, **style_options(manifest)}
+
+
 def job_options(manifest: dict[str, Any] | None) -> dict[str, Any]:
     """What a render job sends: nothing for a project that never chose (the engine's
     own settings apply), else its engine and face pass, and its look if it has one."""

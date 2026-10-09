@@ -130,6 +130,7 @@ def design_character(
     llm=None,
     comfy=None,
     style: dict | None = None,
+    engine: str | None = None,
 ) -> CharacterDesign:
     """Create (or update) one character from the author's description, derive its
     traits with the LLM, release the LLM's VRAM, then render and lock its design sheet.
@@ -170,17 +171,20 @@ def design_character(
     while character.version(version_id) is not None:
         number += 1
         version_id = f"design-{number:02d}"
+    engine = engine or settings.defaults.renderer.engine
     prompt = None
     if style:
-        from manganation.characters.design import design_prompt_for
+        from manganation.characters.generator import design_engine_prompt
         from manganation.render.panel import load_style
 
         look = load_style(style)
-        prompt = design_prompt_for(character, extra=look["tags"])
+        prompt = design_engine_prompt(
+            character, engine, extra=look["tags"] if engine == "sdxl" else None,
+            style=look["prose"])
         if look["extra_negative"]:  # what the look must not bring (seinen: no monsters)
             prompt.negative = f"{prompt.negative}, {look['extra_negative']}"
     result = generate_design(character, registry, version_id=version_id, seed=seed,
-                             settings=settings, client=comfy, prompt=prompt)
+                             settings=settings, client=comfy, prompt=prompt, engine=engine)
     return CharacterDesign(
         name=character.name, created=created,
         appearance=character.appearance.model_dump(), version_id=result.version_id,
