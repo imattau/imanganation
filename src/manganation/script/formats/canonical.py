@@ -12,6 +12,16 @@ The format (user guide: docs/script-template.md)::
     MIO: 15, girl, teal bob, ...       NAME (aka Alias, Other): description;
       indented lines continue it
 
+    [LOCATIONS]                        optional, before the first page: the places
+    Harbor pier: a stone pier ...      NAME: description, as a [SCENE] names the place
+      indented lines continue it       (the part before the dash); designs the location
+
+    COVER                              optional, before PAGE 1: the cover picture, one
+    [SCENE: Rooftop — golden hour]     panel with the same fields (SHOT, CHARACTERS,
+    [CHARACTERS: Mio, Kaito]           EXPRESSIONS, LOCATION, ACTION, NOTES); no PANEL
+    [ACTION]                           line, no dialogue or SFX (it is lettered in GIMP)
+    Mio and Kaito back to back, the harbor behind them.
+
     PAGE 1
     [SCENE: Harbor pier — dawn]        for the panels after it
     [FLASHBACK START] / [FLASHBACK END]
@@ -42,9 +52,11 @@ plus known characters named in its action, minus anyone the action puts off-pane
 Output (plain dicts, keys as in ``PanelSpec`` / ``CastEntry``)::
 
     {"cast": [{"name", "aliases", "description"}],
+     "locations": [{"name", "description"}],
      "panels": [{"page", "panel", "scene_heading", "location", "characters", "action",
                  "camera", "expressions", "dialogue": [{"speaker", "text", "kind"}],
-                 "sfx", "notes", "flashback", "aspect_ratio" (None = no hint), "size"}],
+                 "sfx", "notes", "flashback", "aspect_ratio" (None = no hint), "size",
+                 "cover" (True for the cover, which is "page": 0, "panel": 1)}],
      "problems": [{"line": n, "message": "..."}]}
 """
 
@@ -54,6 +66,7 @@ import re
 
 _PAGE_RE = re.compile(r"^\s*PAGE\s+(\d+)\s*$", re.IGNORECASE)
 _PANEL_RE = re.compile(r"^\s*PANEL\s+(\d+)\s*$", re.IGNORECASE)
+_COVER_RE = re.compile(r"^\s*COVER\s*$", re.IGNORECASE)
 # [NAME] or [NAME: value]
 _HEADER_RE = re.compile(r"^\s*\[\s*([A-Za-z][A-Za-z ]*?)\s*(?::\s*(.*?))?\s*\]\s*$")
 _DIALOGUE_RE = re.compile(
@@ -66,6 +79,10 @@ _CAST_ENTRY_RE = re.compile(
 _OFF_PANEL_RE = re.compile(
     r"\b(?:off[- ]?(?:panel|screen|frame|camera)|offscreen|out of (?:frame|shot|view))\b"
     r"|\(o\.s\.\)", re.IGNORECASE)
+_LOCATION_ENTRY_RE = re.compile(r"^(?P<name>[^\s:][^:]*?)\s*:\s*(?P<description>.*?)\s*$")
+_CONTINUED_RE = re.compile(r"\s*[-—–:,]?\s*\(?\b(?:cont(?:'d|inued)?|contd)\.?\)?\s*$",
+                           re.IGNORECASE)
+_PLACE_SPLIT_RE = re.compile(r"\s+[—–-]\s+|\s*[,;(]\s*")
 _JOINED_RE = re.compile(r"\s*(?:,|&|\band\b)\s*", re.IGNORECASE)
 KINDS = ("speech", "thought", "whisper", "shout", "narration")
 SECTIONS = {"ACTION": "action", "DIALOGUE": "dialogue", "DIALOG": "dialogue",
@@ -99,7 +116,8 @@ def canonical_name(name: str) -> str:
 
 def looks_canonical(text: str) -> bool:
     """Is this a page-and-panel script (rather than prose for the LLM)?"""
-    return any(_PAGE_RE.match(line) or _PANEL_RE.match(line) for line in text.splitlines())
+    return any(_PAGE_RE.match(line) or _PANEL_RE.match(line) or _COVER_RE.match(line)
+               for line in text.splitlines())
 
 
 def split_cast(text: str) -> tuple[list[dict], str]:
@@ -109,13 +127,15 @@ def split_cast(text: str) -> tuple[list[dict], str]:
     return cast, "\n".join(rest)
 
 
-def _read_cast(lines: list[str]) -> tuple[list[dict], list[dict], list[str]]:
+def _read_block(lines: list[str], header_name: str, entry_re: re.Pattern, expected: str):
+    """A top-of-script ``[HEADER]`` block of ``NAME: description`` entries (indented
+    lines continue the one above) -> (entries, problems, lines with the block blanked)."""
     start = None
     for index, line in enumerate(lines):
-        if _PAGE_RE.match(line) or _PANEL_RE.match(line):
+        if _PAGE_RE.match(line) or _PANEL_RE.match(line) or _COVER_RE.match(line):
             break
         header = _HEADER_RE.match(line)
-        if header and header.group(1).upper() == "CHARACTERS" and header.group(2) is None:
+        if header and header.group(1).upper() == header_name and header.group(2) is None:
             start = index
             break
     if start is None:
@@ -125,34 +145,74 @@ def _read_cast(lines: list[str]) -> tuple[list[dict], list[dict], list[str]]:
     end = len(lines)
     for index in range(start + 1, len(lines)):
         line = lines[index]
-        if _PAGE_RE.match(line) or _PANEL_RE.match(line) or _HEADER_RE.match(line):
+        if (_PAGE_RE.match(line) or _PANEL_RE.match(line) or _COVER_RE.match(line)
+                or _HEADER_RE.match(line)):
             end = index
             break
         if not line.strip():
             continue
-        m = _CAST_ENTRY_RE.match(line) if not line[:1].isspace() else None
+        m = entry_re.match(line) if not line[:1].isspace() else None
         if m:
-            aliases = [canonical_name(a) for a in (m.group("aliases") or "").split(",")
-                       if a.strip()]
-            entries.append({"name": canonical_name(m.group("name")), "aliases": aliases,
-                            "parts": [m.group("description")], "line": index + 1})
+            entries.append({"match": m, "parts": [m.group("description")],
+                            "line": index + 1})
         elif entries and line[:1].isspace():  # only indented lines continue
             entries[-1]["parts"].append(line.strip())
         else:
             problems.append({"line": index + 1, "message":
-                             "Expected a character, NAME: description (indent a line to "
+                             f"Expected {expected}, NAME: description (indent a line to "
                              "continue the description above)"})
+    return entries, problems, lines[:start] + [""] * (end - start) + lines[end:]
+
+
+def _read_cast(lines: list[str]) -> tuple[list[dict], list[dict], list[str]]:
+    entries, problems, rest = _read_block(lines, "CHARACTERS", _CAST_ENTRY_RE,
+                                          "a character")
     cast: list[dict] = []
     seen: set[str] = set()
     for entry in entries:
-        if entry["name"].casefold() in seen:
-            problems.append({"line": entry["line"],
-                             "message": f"{entry['name']} is declared twice"})
+        m = entry["match"]
+        name = canonical_name(m.group("name"))
+        if name.casefold() in seen:
+            problems.append({"line": entry["line"], "message": f"{name} is declared twice"})
             continue
-        seen.add(entry["name"].casefold())
-        cast.append({"name": entry["name"], "aliases": entry["aliases"],
+        seen.add(name.casefold())
+        aliases = [canonical_name(a) for a in (m.group("aliases") or "").split(",")
+                   if a.strip()]
+        cast.append({"name": name, "aliases": aliases,
                      "description": " ".join(p for p in entry["parts"] if p).strip()})
-    return cast, problems, lines[:start] + [""] * (end - start) + lines[end:]
+    return cast, problems, rest
+
+
+def place_key(place: str) -> str:
+    """The place a scene heading or location names, for matching: no time of day, no
+    continuation marker, no article ("The School rooftop — dusk" -> "school rooftop").
+    The same rule as ``location_key`` in the plug-in's project store."""
+    place = _CONTINUED_RE.sub("", place.strip())
+    head = _PLACE_SPLIT_RE.split(place, maxsplit=1)[0]
+    head = re.sub(r"^(?:the|a|an)\s+", "", head.strip(), flags=re.IGNORECASE)
+    return " ".join(head.lower().split())
+
+
+def _read_locations(lines: list[str]) -> tuple[list[dict], list[dict], list[str]]:
+    entries, problems, rest = _read_block(lines, "LOCATIONS", _LOCATION_ENTRY_RE,
+                                          "a location")
+    locations: list[dict] = []
+    seen: set[str] = set()
+    for entry in entries:
+        raw = entry["match"].group("name")
+        key = place_key(raw)
+        if not key:
+            problems.append({"line": entry["line"], "message": "A location needs a name"})
+            continue
+        name = canonical_name(_PLACE_SPLIT_RE.split(_CONTINUED_RE.sub("", raw.strip()),
+                                                    maxsplit=1)[0].strip())
+        if key in seen:
+            problems.append({"line": entry["line"], "message": f"{name} is declared twice"})
+            continue
+        seen.add(key)
+        locations.append({"name": name, "key": key, "line": entry["line"],
+                          "description": " ".join(p for p in entry["parts"] if p).strip()})
+    return locations, problems, rest
 
 
 def _resolver(cast: list[dict]):
@@ -254,10 +314,12 @@ def parse_frame(value: str) -> tuple[str | None, str, list[str]]:
 
 
 def parse(text: str) -> dict:
-    """Parse a script -> ``{"cast", "panels", "problems"}``. Raises ValueError only if
+    """Parse a script -> ``{"cast", "locations", "panels", "problems"}``. Raises ValueError only if
     there is no panel at all."""
     lines = text.splitlines()
     cast, problems, lines = _read_cast(lines)
+    locations, location_problems, lines = _read_locations(lines)
+    problems.extend(location_problems)
     resolve = _resolver(cast)
     declared = {c["name"] for c in cast}
     panels: list[dict] = []
@@ -267,6 +329,14 @@ def parse(text: str) -> dict:
     scene = ""
     flashback = False
     labels: dict[tuple[int, int], int] = {}  # (page, panel) -> line it was first used
+    cover_line = 0
+
+    def new_panel(number, page_number, panel_number, *, cover=False):
+        return {"page": page_number, "panel": panel_number, "scene_heading": scene,
+                "location": "", "characters": [], "characters_given": False,
+                "camera": "", "expressions": {}, "action_lines": [],
+                "dialogue": [], "sfx": [], "notes": [], "flashback": flashback,
+                "aspect_ratio": None, "size": "", "cover": cover, "line": number}
 
     def problem(number, message):
         problems.append({"line": number, "message": message})
@@ -276,14 +346,28 @@ def parse(text: str) -> dict:
         if current is None:
             return
         current["action"] = " ".join(current.pop("action_lines")).strip()
+        if current["cover"] and not current["action"]:
+            problem(current["line"], "The cover needs an [ACTION]: what its picture shows")
         current["notes"] = " ".join(current["notes"]).strip()
         current["camera"] = current["camera"] or _detect_camera(current["action"])
+        current.pop("line")
         panels.append(current)
         current = None
 
     for number, raw in enumerate(lines, start=1):
         line = raw.strip()
         if not line:
+            continue
+        if _COVER_RE.match(line):
+            finish()
+            section = None
+            if cover_line:
+                problem(number, f"COVER is already used on line {cover_line}")
+            elif page is not None:
+                problem(number, "COVER belongs before PAGE 1")
+            cover_line = cover_line or number
+            page = 0
+            current = new_panel(number, 0, 1, cover=True)
             continue
         m = _PAGE_RE.match(line)
         if m:
@@ -294,6 +378,10 @@ def parse(text: str) -> dict:
         if m:
             finish()
             section = None
+            if page == 0:
+                problem(number, "A cover is one picture with no PANEL lines; the story "
+                                "starts at PAGE 1 (assumed PAGE 1)")
+                page = 1
             if page is None:
                 problem(number, "PANEL before any PAGE (assumed PAGE 1)")
                 page = 1
@@ -303,11 +391,7 @@ def parse(text: str) -> dict:
                                 f"{labels[label]} (a new PAGE missing, or a repeated "
                                 f"number?)")
             labels.setdefault(label, number)
-            current = {"page": page, "panel": int(m.group(1)), "scene_heading": scene,
-                       "location": "", "characters": [], "characters_given": False,
-                       "camera": "", "expressions": {}, "action_lines": [],
-                       "dialogue": [], "sfx": [], "notes": [], "flashback": flashback,
-                       "aspect_ratio": None, "size": ""}
+            current = new_panel(number, page, int(m.group(1)))
             continue
         header = _HEADER_RE.match(line)
         if header:
@@ -319,10 +403,17 @@ def parse(text: str) -> dict:
                 else:
                     problem(number, f"[{name}] does not close an open section")
                 continue
+            if name == "SCENE" and value is not None and current and current["cover"]:
+                current["scene_heading"], section = value, None  # the cover's own scene
+                continue
             if name == "SCENE" and value is not None:
                 if current is not None:
                     finish()  # a scene heading ends the panel before it
                 scene, section = value, None
+                continue
+            if (name in ("FLASHBACK START", "FLASHBACK END") and value is None
+                    and current and current["cover"]):
+                problem(number, "A cover is not part of a flashback")
                 continue
             if name in ("FLASHBACK START", "FLASHBACK END") and value is None:
                 if current is not None:
@@ -333,7 +424,16 @@ def parse(text: str) -> dict:
                 problem(number, f"[{header.group(1)}] belongs inside a PANEL")
                 continue
             if name in SECTIONS and value is None:
-                section = SECTIONS[name]
+                if current["cover"] and SECTIONS[name] in ("dialogue", "sfx"):
+                    problem(number, f"A cover has no [{name}]: its title and credits are "
+                                    f"lettered in GIMP")
+                    section = "skipped"
+                else:
+                    section = SECTIONS[name]
+                continue
+            if name == "FRAME" and value is not None and current["cover"]:
+                problem(number, "A cover has no [FRAME]: it fills its page")
+                section = None
                 continue
             if name in FIELDS and value is not None:
                 section = None
@@ -382,6 +482,8 @@ def parse(text: str) -> dict:
             problem(number, "Text outside a section: put it under [ACTION], [DIALOGUE], "
                             "[SFX] or [NOTES]")
             continue
+        if section == "skipped":
+            continue
         if section == "action":
             current["action_lines"].append(line)
         elif section == "sfx":
@@ -410,4 +512,12 @@ def parse(text: str) -> dict:
     add_mentions(cast, panels)
     for panel in panels:
         panel.pop("characters_given", None)
-    return {"cast": cast, "panels": panels, "problems": problems}
+    used = {place_key(name) for panel in panels
+            for name in (panel["scene_heading"], panel["location"])}
+    for location in locations:
+        if location["key"] not in used:
+            problems.append({"line": location["line"], "message":
+                             f"{location['name']} is declared but no [SCENE] or [LOCATION] "
+                             "uses it"})
+        del location["key"], location["line"]
+    return {"cast": cast, "locations": locations, "panels": panels, "problems": problems}

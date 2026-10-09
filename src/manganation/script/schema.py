@@ -43,7 +43,7 @@ class PanelSpec(BaseModel):
     pacing label (and drives reading order); panels are never composited together.
     """
 
-    page: int = Field(ge=1)
+    page: int = Field(ge=0)  # 0 = the cover
     panel: int = Field(ge=1)
     reading_order: ReadingOrder = ReadingOrder.RTL
 
@@ -61,6 +61,7 @@ class PanelSpec(BaseModel):
     sfx: list[str] = Field(default_factory=list)
     notes: str = ""
     flashback: bool = False
+    cover: bool = False  # the cover picture (page 0): a text-free key illustration
 
     # generation
     color_mode: ColorMode = ColorMode.INHERIT
@@ -89,6 +90,14 @@ class CastEntry(BaseModel):
     description: str = ""
 
 
+class LocationEntry(BaseModel):
+    """A place declared in the script's ``LOCATIONS`` block: the author's description,
+    which the location's design is drawn from."""
+
+    name: str = Field(min_length=1)
+    description: str = ""
+
+
 class Script(BaseModel):
     """A full parsed script: ordered panels plus project-level metadata."""
 
@@ -96,6 +105,7 @@ class Script(BaseModel):
     reading_order: ReadingOrder = ReadingOrder.RTL
     default_color_mode: ColorMode = ColorMode.COLOR
     cast: list[CastEntry] = Field(default_factory=list)
+    locations: list[LocationEntry] = Field(default_factory=list)
     panels: list[PanelSpec] = Field(default_factory=list)
 
     def panels_for_page(self, page: int) -> list[PanelSpec]:

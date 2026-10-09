@@ -30,9 +30,15 @@ def _expressions(expressions: dict[str, Any]) -> str:
     return "; ".join(f"{_label(who)}: {_label(what)}" for who, what in expressions.items())
 
 
+def _position(label: dict[str, Any], missing: str = "?") -> str:
+    """'Page 2 · Panel 1' for a script position; the cover is page 0."""
+    if label.get("page") == 0:
+        return "Cover"
+    return f"Page {label.get('page', missing)} · Panel {label.get('panel', missing)}"
+
+
 def _panel_label(panel: dict[str, Any]) -> str:
-    label = panel.get("label", {})
-    number = f"Page {label.get('page', '?')} · Panel {label.get('panel', '?')}"
+    number = _position(panel.get("label", {}))
     action = _label(panel.get("action"))
     if len(action) > 72:
         action = action[:69].rstrip() + "…"
@@ -40,8 +46,7 @@ def _panel_label(panel: dict[str, Any]) -> str:
 
 
 def _script_panel_label(panel: dict[str, Any]) -> str:
-    label = panel.get("label", {})
-    title = f"Page {label.get('page', '?')} · Panel {label.get('panel', '?')}"
+    title = _position(panel.get("label", {}))
     action = _label(panel.get("action"))
     dialogue = panel.get("dialogue", [])
     if dialogue:
@@ -295,7 +300,7 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
         placement = panel.get("placement") or {}
         panel_rows.extend([
             f"ID\t{panel['id']}",
-            f"Script position\tPage {label.get('page', '—')} · Panel {label.get('panel', '—')}",
+            f"Script position\t{_position(label, '—')}",
             f"Status\t{_label(panel.get('status')) or 'unplaced'}",
             f"Page\t{placement.get('page') or 'Unassigned'}",
             f"Location\t{_label(panel.get('location')) or 'Unspecified'}",
@@ -330,7 +335,8 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
         # Context for a panel: the production brief (who, where, shot, action) first,
         # then placement and takes. Generate acts on this panel.
         inspector_rows.extend([
-            f"# Panel {script_label.get('panel', '—')} · Page {script_label.get('page', '—')}",
+            ("# Cover" if script_label.get("page") == 0 else
+             f"# Panel {script_label.get('panel', '—')} · Page {script_label.get('page', '—')}"),
             f"Status\t{_label(panel.get('status')) or 'unplaced'}",
             "# Characters",
         ])

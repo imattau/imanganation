@@ -8,6 +8,23 @@ KAITO (aka Kai): 16, boy, tall and lanky, spiky brown hair, dark tired eyes,
 GRANDPA SATO (aka Grandpa): 70s, man, bald with a white beard, round glasses,
   fisherman's cap and a yellow raincoat. Gruff but kind.
 
+[LOCATIONS]
+Harbor pier: a long weathered stone pier in a small fishing town, wooden bollards,
+  coiled rope, lobster crates, a lighthouse on the far headland. Fog at dawn.
+Grandpa's house: a cramped seaside house, indoors. Low wooden beams, a cluttered
+  workbench, fishing gear on the walls, a faded photograph above the stove.
+
+COVER
+[SCENE: Harbor pier — sunrise]
+[SHOT: low angle]
+[CHARACTERS: Mio, Kaito]
+[EXPRESSIONS: Mio: excited grin; Kaito: wary]
+[ACTION]
+Mio and Kaito stand side by side at the end of the pier, a huge black ship
+rising out of the fog behind them. Gulls wheel in the pink sunrise sky.
+[NOTES]
+Leave the top third of the picture clear for the title.
+
 PAGE 1
 [SCENE: Harbor pier — dawn]
 

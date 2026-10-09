@@ -532,7 +532,7 @@ def project_from_script(parsed: dict[str, Any], *, title: str, script_file: str,
     now = datetime.now().astimezone().isoformat(timespec="seconds")
     panels = [_panel_from_item(item) for item in parsed["panels"]]
     cast = _merge_cast([], parsed, panels)
-    locations = _script_locations(panels)
+    locations = _merge_locations([], parsed, panels)
     return {
         "format": FORMAT,
         "version": VERSION,
@@ -546,7 +546,7 @@ def project_from_script(parsed: dict[str, Any], *, title: str, script_file: str,
         "pages": [],
         "takes": {},
         "cast": cast,
-        "locations": [{"name": name} for name in locations],
+        "locations": locations,
         "props": [],
         "cursor": {"next_panel": panels[0]["id"]},
     }
@@ -555,8 +555,8 @@ def project_from_script(parsed: dict[str, Any], *, title: str, script_file: str,
 # A panel's script content: what the script says, not production state (takes,
 # placement) nor its numbering, which shifts when panels are added before it.
 _SCRIPT_FIELDS = ("scene_heading", "location", "characters", "action", "camera",
-                  "expressions", "dialogue", "sfx", "notes", "flashback", "aspect_ratio",
-                  "size")
+                  "expressions", "dialogue", "sfx", "notes", "flashback", "cover",
+                  "aspect_ratio", "size")
 
 
 def script_fingerprint(panel: dict[str, Any]) -> str:
@@ -577,6 +577,7 @@ def script_fingerprint(panel: dict[str, Any]) -> str:
         "sfx": list(panel.get("sfx", [])),
         "notes": panel.get("notes") or "",
         "flashback": bool(panel.get("flashback", False)),
+        "cover": bool(panel.get("cover", False)),
         "aspect_ratio": panel.get("aspect_ratio") or "",
         "size": panel.get("size") or "",
     }
@@ -602,6 +603,7 @@ def _panel_from_item(item: dict[str, Any]) -> dict[str, Any]:
         "sfx": list(item.get("sfx", [])),
         "notes": item.get("notes", ""),
         "flashback": bool(item.get("flashback", False)),
+        **({"cover": True} if item.get("cover") else {}),
         **{key: item[key] for key in ("aspect_ratio", "size") if item.get(key)},
         "seed": item.get("seed"),
         "status": "unplaced",
@@ -640,6 +642,32 @@ def _merge_cast(cast: list[dict[str, Any]], parsed: dict[str, Any],
                 cast.append(record)
                 by_name[character["name"].lower()] = record
     return cast
+
+
+def _merge_locations(locations: list[dict[str, Any]], parsed: dict[str, Any],
+                     panels: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The locations plus any place new in the script. Declared places (the script's
+    ``[LOCATIONS]`` block) come first and bring their description as notes, which the
+    location's design is drawn from; an existing location keeps its notes, or takes the
+    script's description when it has none. Other places come from scene headings."""
+    by_key = {location_key(loc["name"]): loc for loc in locations}
+    for entry in parsed.get("locations", []):
+        existing = by_key.get(location_key(entry["name"]))
+        if existing is not None:
+            if entry.get("description") and not existing.get("notes"):
+                existing["notes"] = entry["description"]
+            continue
+        record: dict[str, Any] = {"name": entry["name"]}
+        if entry.get("description"):
+            record["notes"] = entry["description"]
+        locations.append(record)
+        by_key[location_key(entry["name"])] = record
+    for name in _script_locations(panels):
+        if location_key(name) not in by_key:
+            record = {"name": name}
+            locations.append(record)
+            by_key[location_key(name)] = record
+    return locations
 
 
 def _script_locations(panels: list[dict[str, Any]]) -> list[str]:
@@ -723,11 +751,7 @@ def reparse_script(document: dict[str, Any], parsed: dict[str, Any], *, script_f
 
     document["panels"] = panels + orphans
     document["cast"] = _merge_cast(document.get("cast", []), parsed, panels)
-    known = {location_key(loc["name"]) for loc in document.get("locations", [])}
-    for name in _script_locations(panels):
-        if location_key(name) not in known:
-            document.setdefault("locations", []).append({"name": name})
-            known.add(location_key(name))
+    document["locations"] = _merge_locations(document.get("locations", []), parsed, panels)
     now = datetime.now().astimezone().isoformat(timespec="seconds")
     document["script"] = {
         **document.get("script", {}), "file": script_file, "format": script_format,

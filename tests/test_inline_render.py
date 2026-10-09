@@ -138,7 +138,7 @@ def test_api_inline_render_job(tmp_path):
      "frame_width": 1, "frame_height": 1},                                   # both forms
     {"project": "prj_abc123", "frame_width": 1, "frame_height": 1},          # half inline
     {"project": "rooftop", "panel": PANEL, "frame_width": 1, "frame_height": 1},  # bad id
-    {"project": "prj_abc123", "panel": {"label": {"page": 0}},               # invalid spec
+    {"project": "prj_abc123", "panel": {"label": {"page": -1}},               # invalid spec
      "frame_width": 1, "frame_height": 1},
 ])
 def test_api_rejects_malformed_render_requests(tmp_path, body):

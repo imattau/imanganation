@@ -6,7 +6,7 @@ under a label that says what it is, so nothing is guessed: an action line with a
 in it is still action, and a line in the wrong place is reported with its line number.
 
 **New Project from Script…** in GIMP reads the script and builds the whole project: the
-script panels, the cast (with your character designs), the locations, and one page
+script panels, the cast (with your character designs), the locations (with your place descriptions), and one page
 document per `PAGE`. The engine is not needed for this. Nothing in the script is ever
 drawn as text; dialogue becomes speech bubbles only when you letter a page.
 
@@ -21,6 +21,20 @@ story.
 NAME: age, gender, hair, eyes, build, outfit, marks. Personality, body language.
   An indented line continues the description above it.
 OTHER NAME (aka Nickname): ...
+
+[LOCATIONS]
+Place: inside or out, era, layout, landmarks, light.
+  An indented line continues the description above it.
+Another place: ...
+
+COVER
+[SCENE: Place — time of day]
+[SHOT: low angle]
+[CHARACTERS: Name, Other Name]
+[ACTION]
+The picture for the front cover.
+[NOTES]
+Leave the top clear for the title.
 
 PAGE 1
 [SCENE: Place — time of day]
@@ -57,6 +71,8 @@ PANEL 1
 | Line | Where | What it does |
 |---|---|---|
 | `[CHARACTERS]` | top, before `PAGE 1` | starts the cast block (optional) |
+| `[LOCATIONS]` | top, before `PAGE 1` | starts the locations block (optional) |
+| `COVER` | own line, before `PAGE 1` | starts the cover (optional, once) |
 | `PAGE n` | own line | starts a page |
 | `[SCENE: Place — time]` | between panels | the scene for the panels after it |
 | `[FLASHBACK START]` / `[FLASHBACK END]` | between panels | panels between them are a flashback |
@@ -104,6 +120,32 @@ KAITO (aka Kai): 16, boy, tall and lanky, spiky brown hair, silver earring.
   joins the cast with no design: write one in their notes in Context, then use
   **Design character**.
 
+## The cover
+
+```
+COVER
+[SCENE: Harbor pier — sunrise]
+[SHOT: low angle]
+[CHARACTERS: Mio, Kaito]
+[EXPRESSIONS: Mio: excited grin; Kaito: wary]
+[ACTION]
+Mio and Kaito stand at the end of the pier, a huge black ship behind them.
+[NOTES]
+Leave the top third clear for the title.
+```
+
+- `COVER` goes after the cast block and before `PAGE 1`, once. It is one picture, so
+  it has no `PANEL` line and takes the same fields as a panel: `[SCENE]`, `[SHOT]`,
+  `[CHARACTERS]`, `[EXPRESSIONS]`, `[LOCATION]`, `[ACTION]` and `[NOTES]`.
+- **The cover is text-free**: no `[DIALOGUE]` or `[SFX]`, and no `[FRAME]` (it fills
+  its page). The title, volume and credits are lettered afterwards in GIMP with
+  **Design Front Cover…**, over the artwork.
+- **New Project from Script…** gives the cover its own page document, labelled
+  **Cover** and placed first. Render it into the page's frame like any panel; the
+  engine draws a finished key illustration with no title, logo or lettering.
+- Describe the cover as you would a splash page: a striking moment that shows the
+  characters and the world. Leave room (say so in `[NOTES]`) where the title will go.
+
 ## Pages and scenes
 
 ```
@@ -125,7 +167,45 @@ PANEL 2
 - `[SCENE: …]` applies to **the panels after it**, until the next scene. The part before
   the dash (`Harbor pier`) becomes a location in the project's assets.
 - `[LOCATION: …]` inside a panel gives that one panel a different place (a cutaway)
-  and joins the locations too.
+  and joins the locations too. It beats the scene for that panel only; the next panel
+  is back in the scene's place unless it has its own `[LOCATION]`.
+- A continuation marker is not part of the place: `Harbor pier — cont.` and
+  `Kitchen (CONT'D)` are read as `Harbor pier` and `Kitchen`.
+- **A flashback** (`[FLASHBACK START]` … `[FLASHBACK END]`) is drawn soft and faded.
+  Write the place and period in its `[SCENE]` (`Harbor pier — fifty years ago`). The
+  cover is never part of a flashback.
+
+## Locations
+
+```
+[LOCATIONS]
+Harbor pier: a long weathered stone pier in a fishing town, wooden bollards,
+  lobster crates, a lighthouse on the far headland. Fog at dawn.
+Grandpa's house: a cramped seaside house, indoors. Low beams, a cluttered
+  workbench, fishing gear on the walls.
+```
+
+- The block goes before `PAGE 1` (and the cover), in the same form as the cast block:
+  `NAME: description`, with indented lines continuing the description above. It is
+  optional; a script with no block still gets a location for every place it names.
+- **The name is the place as a `[SCENE]` writes it**, before the dash: `Harbor pier`
+  covers `Harbor pier — dawn` and `Harbor pier — fifty years ago` (the time of day is
+  ignored, and so is a leading *the* or a trailing `— cont.`). Name a place the same
+  way every time: `Rooftop` and `School rooftop` are two places.
+- **The description is the design.** It becomes the location's notes in GIMP, and
+  **Design location** (or **Design Locations** in Render Engine, for every place that
+  has none yet) draws one establishing image of it, with no people. Describe what a
+  reader would see: inside or out, era, layout, landmarks, materials, light and weather.
+  What changes from panel to panel (a door left open, rain starting) belongs in that
+  panel's `[ACTION]`.
+- Every panel at a designed place is rendered to match its image, so the look holds from
+  panel to panel. This needs the Qwen-Image 2.1 engine; with another engine the place is
+  still named in the prompt but there is no image to follow.
+- A place named by a `[SCENE]` or `[LOCATION]` but not declared still joins the project,
+  with no description: write one in its notes in GIMP. A declared place that no scene
+  uses is reported, which catches typos (`Harbour pier`).
+- A panel's `[LOCATION: …]` is also a place, and can be declared in the block too. The
+  cover's `[SCENE]` or `[LOCATION]` counts like any other.
 
 ## Panels
 
@@ -199,9 +279,22 @@ number, for example:
 - `Unknown kind (sings); use one of speech, thought, whisper, shout, narration`
 - `Kiato speaks but is not in the [CHARACTERS] block`
 - `Unknown header [WEATHER]`
+- `Stairs is declared but no [SCENE] or [LOCATION] uses it`
+- `Roof is declared twice`
+- `A cover has no [DIALOGUE]: its title and credits are lettered in GIMP`
+- `The cover needs an [ACTION]: what its picture shows`
 
 New Project from Script… lists these before building the project, so you can fix the
 script first or go ahead without the reported lines.
+
+## Changing the script later
+
+Edit the script file and use **Reload Imanganation Script**. A panel whose text is
+unchanged keeps its takes, placement and Context edits (it is only renumbered); an
+edited panel with work on it goes to **Needs matching** so you can join it to its new
+text, and new characters and places are added without touching existing ones. The
+cover is matched the same way. Fixing a typo in the middle of a long script therefore
+does not throw away finished panels.
 
 ## Set later in GIMP
 

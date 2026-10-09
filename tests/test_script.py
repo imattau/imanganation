@@ -186,3 +186,87 @@ def test_ensure_project_creates_subdirs(tmp_path, monkeypatch):
     root = project.ensure_project("demo")
     assert (root / "characters").is_dir()
     assert (root / "panels").is_dir()
+
+
+def test_cover_is_page_zero_with_no_text():
+    from manganation.script.formats import canonical
+
+    data = canonical.parse(
+        "COVER\n[SCENE: Pier — dawn]\n[CHARACTERS: Mio]\n[ACTION]\nMio on the pier.\n"
+        "[NOTES]\ntitle goes on top\n\nPAGE 1\nPANEL 1\n[ACTION]\nA gull.\n")
+    assert data["problems"] == []
+    cover, first = data["panels"]
+    assert (cover["page"], cover["panel"], cover["cover"]) == (0, 1, True)
+    assert cover["scene_heading"] == "Pier — dawn" and cover["characters"] == ["Mio"]
+    assert cover["action"] == "Mio on the pier."
+    assert first["cover"] is False and first["scene_heading"] == ""
+    assert canonical.looks_canonical("COVER\n[ACTION]\nx\n")
+
+
+def test_cover_problems_are_reported():
+    from manganation.script.formats import canonical
+
+    messages = [p["message"] for p in canonical.parse(
+        "COVER\n[DIALOGUE]\nMIO: hi\n[SFX]\nBANG\n[FRAME: wide]\nPANEL 1\n[ACTION]\nx\n"
+        "COVER\n")["problems"]]
+    assert any("no [DIALOGUE]" in m for m in messages)
+    assert any("no [SFX]" in m for m in messages)
+    assert any("no [FRAME]" in m for m in messages)
+    assert any("no PANEL lines" in m for m in messages)
+    assert any("already used" in m for m in messages)
+    empty = canonical.parse("COVER\n[SHOT: close-up]\nPAGE 1\nPANEL 1\n[ACTION]\nx\n")
+    assert any("needs an [ACTION]" in p["message"] for p in empty["problems"])
+
+
+def test_cover_prompt_asks_for_no_text():
+    from manganation.render.panel import build_negative, build_prompt
+    from manganation.script.schema import PanelSpec
+
+    spec = PanelSpec(page=0, panel=1, cover=True, action="Mio on the pier.")
+    assert "no text" in build_prompt(spec, {})
+    assert "logo" in build_negative(spec, {})
+    plain = spec.model_copy(update={"cover": False})
+    assert "no text" not in build_prompt(plain, {})
+
+
+def test_locations_block_declares_places_with_descriptions():
+    from manganation.script.formats import canonical
+
+    data = canonical.parse(
+        "[LOCATIONS]\nSchool rooftop: open, chain-link fence,\n  water tower, city beyond.\n"
+        "The Kitchen — morning: small, steamy.\n\n"
+        "PAGE 1\n[SCENE: School rooftop — dusk]\nPANEL 1\n[ACTION]\nx\n"
+        "PANEL 2\n[LOCATION: Kitchen (cont'd)]\n[ACTION]\ny\n")
+    assert data["problems"] == []
+    assert data["locations"] == [
+        {"name": "School rooftop",
+         "description": "open, chain-link fence, water tower, city beyond."},
+        {"name": "The Kitchen", "description": "small, steamy."}]
+
+
+def test_locations_problems_are_reported():
+    from manganation.script.formats import canonical
+
+    data = canonical.parse(
+        "[LOCATIONS]\nRoof: a\nRoof — dusk: again\nStairs: b\nnot a location line\n\n"
+        "PAGE 1\n[SCENE: Roof — dusk]\nPANEL 1\n[ACTION]\nx\n")
+    messages = [p["message"] for p in data["problems"]]
+    assert any("Roof is declared twice" in m for m in messages)
+    assert any("Stairs is declared but no [SCENE] or [LOCATION] uses it" in m
+               for m in messages)
+    assert any("Expected a location" in m for m in messages)
+    # a scene with no declaration is fine: scripts without the block keep working
+    assert canonical.parse("PAGE 1\n[SCENE: Roof]\nPANEL 1\n[ACTION]\nx\n")["locations"] == []
+
+
+def test_declared_locations_become_project_locations_with_notes():
+    from gimp.imanganation.project_store import project_from_script
+    from manganation.script.formats import canonical
+
+    text = ("[LOCATIONS]\nHarbor pier: stone pier, fog.\n\nPAGE 1\n"
+            "[SCENE: Harbor pier — dawn]\nPANEL 1\n[ACTION]\nx\n"
+            "PANEL 2\n[LOCATION: Cellar]\n[ACTION]\ny\n")
+    document = project_from_script(canonical.parse(text), title="T", script_file="s.txt",
+                                   script_text=text, script_format="canonical")
+    assert document["locations"] == [{"name": "Harbor pier", "notes": "stone pier, fog."},
+                                     {"name": "Cellar"}]

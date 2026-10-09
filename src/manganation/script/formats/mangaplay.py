@@ -9,7 +9,8 @@ from __future__ import annotations
 
 from manganation.script.formats import canonical
 from manganation.script.formats.canonical import looks_canonical, split_cast
-from manganation.script.schema import CastEntry, ColorMode, PanelSpec, ReadingOrder, Script
+from manganation.script.schema import (CastEntry, ColorMode, LocationEntry, PanelSpec, ReadingOrder,
+                                       Script)
 
 __all__ = ["add_mentioned_characters", "looks_canonical", "parse_canonical", "split_cast"]
 
@@ -42,5 +43,6 @@ def parse_canonical(
         reading_order=reading_order,
         default_color_mode=default_color_mode,
         cast=[CastEntry(**c) for c in data["cast"]],
+        locations=[LocationEntry(**loc) for loc in data["locations"]],
         panels=[PanelSpec(**p, color_mode=ColorMode.INHERIT) for p in data["panels"]],
     )

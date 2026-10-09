@@ -20,7 +20,17 @@ def test_the_example_script_uses_every_feature_as_documented():
     assert cast["Kaito"]["aliases"] == ["Kai"]
     assert "silver earring" in cast["Kaito"]["description"]  # continuation line
     panels = {(p["page"], p["panel"]): p for p in data["panels"]}
-    assert sorted({page for page, _ in panels}) == [1, 2, 3]
+    assert sorted({page for page, _ in panels}) == [0, 1, 2, 3]
+    cover = panels[0, 1]
+    assert cover["cover"] and not panels[1, 1]["cover"]
+    assert cover["scene_heading"] == "Harbor pier — sunrise"
+    assert cover["characters"] == ["Mio", "Kaito"]
+    assert cover["camera"] == "low angle"
+    assert cover["dialogue"] == [] and cover["sfx"] == []
+    assert "title" in cover["notes"]
+    places = {loc["name"]: loc["description"] for loc in data["locations"]}
+    assert list(places) == ["Harbor pier", "Grandpa's house"]
+    assert "lighthouse" in places["Harbor pier"]  # continuation line
     assert panels[1, 1]["characters"] == []  # [CHARACTERS: ] = nobody
     assert panels[1, 2]["characters"] == ["Mio", "Kaito"]
     assert panels[1, 2]["expressions"] == {"Mio": "excited grin", "Kaito": "half asleep"}
@@ -39,7 +49,10 @@ def test_the_example_script_uses_every_feature_as_documented():
                                    script_text=text, script_format="canonical")
     assert [loc["name"] for loc in document["locations"]] == [
         "Harbor pier", "Grandpa's house"]
-    first = document["panels"][1]
+    assert "lighthouse" in document["locations"][0]["notes"]
+    assert document["panels"][0]["label"] == {"page": 0, "panel": 1}
+    assert document["panels"][0]["cover"] is True
+    first = document["panels"][2]
     assert first["expressions"] == {"Mio": "excited grin", "Kaito": "half asleep"}
 
 
@@ -49,9 +62,12 @@ def test_the_guide_skeleton_parses():
     data = canonical.parse(skeleton)
     assert data["problems"] == []
     assert [c["name"] for c in data["cast"]] == ["Name", "Other Name"]
-    assert [(p["page"], p["panel"]) for p in data["panels"]] == [(1, 1), (1, 2), (2, 1)]
-    assert data["panels"][0]["characters"] == ["Name", "Other Name"]
-    assert data["panels"][0]["sfx"] == ["BANG"]
+    assert [(p["page"], p["panel"]) for p in data["panels"]] == [
+        (0, 1), (1, 1), (1, 2), (2, 1)]
+    assert [loc["name"] for loc in data["locations"]] == ["Place", "Another place"]
+    assert data["panels"][0]["cover"]
+    assert data["panels"][1]["characters"] == ["Name", "Other Name"]
+    assert data["panels"][1]["sfx"] == ["BANG"]
 
 
 def test_the_guide_lists_the_real_problem_messages():
@@ -59,4 +75,7 @@ def test_the_guide_lists_the_real_problem_messages():
     script = ("[CHARACTERS]\nKAITO: boy\n\nPAGE 1\nPANEL 1\nstray\n[DIALOGUE]\nno colon here\n"
               "KAITO (sings): la\nKIATO: hi\n[WEATHER: rain]\n")
     for problem in canonical.parse(script)["problems"]:
+        assert f"`{problem['message']}`" in guide, problem["message"]
+    cover = "COVER\n[DIALOGUE]\nMIO: hi\n\nPAGE 1\nPANEL 1\n[ACTION]\nx\n"
+    for problem in canonical.parse(cover)["problems"]:
         assert f"`{problem['message']}`" in guide, problem["message"]

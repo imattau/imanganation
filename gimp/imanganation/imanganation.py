@@ -63,7 +63,8 @@ try:
     import tone_effects
     import services as engine_services
     import setup_ui
-    from layouts import frame_rings, layout_preview_rgb, page_layout_availability
+    from layouts import (COVER_LAYOUTS, frame_rings, layout_preview_rgb,
+                         page_layout_availability)
     from panel_ui import _panel_label as panel_label
     from panel_ui import (
         build_docks,
@@ -110,6 +111,7 @@ except ImportError:  # Keep older single-file plug-in installs usable for legacy
     rgb_png = None
     build_welcome_docks = None
     frame_rings = layout_preview_rgb = page_layout_availability = None
+    COVER_LAYOUTS = None
 
 PROC_RENDER = "plug-in-imanganation-render-panel"
 PROC_NEXT = "plug-in-imanganation-place-next-panel"
@@ -128,6 +130,7 @@ PROC_PAGE_LAYOUT = "plug-in-imanganation-page-layout"
 PROC_SCREENTONE = "plug-in-imanganation-screentone"
 PROC_SPEED_LINES = "plug-in-imanganation-speed-lines"
 PROC_IMPACT_BURST = "plug-in-imanganation-impact-burst"
+PROC_COVER_DESIGNER = "plug-in-imanganation-cover-designer"
 PROC_EXPORT_PROJECT = "plug-in-imanganation-export-project"
 PROC_AUTOSTART = "extension-imanganation-ui"
 PROC_NEW_PROJECT_MANUAL = "plug-in-imanganation-new-project-manual"
@@ -404,7 +407,8 @@ def _overlay_layer_position(image, template):
 
 def _place(image, panel_file, spec, seq=None, render=None, take_ref=None, frame=None):
     """Load a panel as a layer in its own group, fitted to the selection if any."""
-    label = f"Panel {spec.get('page', '?')}.{spec.get('panel', '?')}"
+    label = ("Cover" if spec.get("page") == 0
+             else f"Panel {spec.get('page', '?')}.{spec.get('panel', '?')}")
     if seq is not None:
         label = f"{seq:03d} {label}"
 
@@ -494,6 +498,13 @@ def _place(image, panel_file, spec, seq=None, render=None, take_ref=None, frame=
     image.undo_group_end()
     Gimp.displays_flush()
     return layer
+
+
+def _script_position(spec):
+    """'script page 2, panel 1' for a script position; the cover is page 0."""
+    if spec.get("page") == 0:
+        return "the cover"
+    return f"script page {spec['page']}, panel {spec['panel']}"
 
 
 def _container_spec(panel):
@@ -606,12 +617,11 @@ def _advance(root, panels, seq, explicit, spec, manifest=None):
         else:
             (root / CURSOR_FILE).write_text(json.dumps({"next": seq + 1}))
     nxt = panels[seq] if seq < len(panels) else None
-    msg = (f"Placed {seq:03d}/{len(panels):03d} (script page {spec['page']}, "
-           f"panel {spec['panel']}).")
+    msg = (f"Placed {seq:03d}/{len(panels):03d} ({_script_position(spec)}).")
     if nxt is None:
         msg += " That was the last panel."
     else:
-        msg += f" Next: script page {nxt['page']}, panel {nxt['panel']}."
+        msg += f" Next: {_script_position(nxt)}."
         if nxt["page"] != spec["page"]:
             msg += " (The script starts a new page there.)"
     Gimp.message(msg)
@@ -841,8 +851,7 @@ def render_panel(procedure, run_mode, image, drawables, config, data):
             if placements:
                 body["placements"] = placements
         result = _run_job(engine, "/jobs", body,
-                          f"Rendering panel {seq:03d} (script page {spec['page']}, "
-                          f"panel {spec['panel']})…")
+                          f"Rendering panel {seq:03d} ({_script_position(spec)})…")
         image_path, _take = _record_take(
             root, manifest, seq, result["path"], "render", result["width"],
             result["height"], engine={k: result.get(k) for k in
@@ -1084,8 +1093,7 @@ def regenerate_panel(procedure, run_mode, image, drawables, config, data):
             body["guide_strength"] = config.get_property("composition-strength")
     try:
         result = _run_job(config.get_property("engine-url").rstrip("/"), "/jobs", body,
-                          f"Regenerating panel {seq:03d} (script page {spec['page']}, "
-                          f"panel {spec['panel']})…")
+                          f"Regenerating panel {seq:03d} ({_script_position(spec)})…")
     except EngineError as exc:
         return _error(procedure, str(exc))
 
@@ -1438,7 +1446,7 @@ def _project_progress(root):
     line = f"Project {root.name}: {done}/{len(panels)} panels rendered"
     if 1 <= nxt <= len(panels):
         spec = panels[nxt - 1]
-        line += f" · next: panel {nxt:03d} (script page {spec['page']}, panel {spec['panel']})"
+        line += f" · next: panel {nxt:03d} ({_script_position(spec)})"
     else:
         line += " · all panels placed"
     return line
@@ -1508,8 +1516,7 @@ def place_next_panel(procedure, run_mode, image, drawables, config, data):
 
     newest = _newest_take(root, seq, manifest)
     if newest is None:
-        return _error(procedure, f"Panel {seq:03d} (script page {spec['page']}, panel "
-                                 f"{spec['panel']}) is not rendered yet: expected "
+        return _error(procedure, f"Panel {seq:03d} ({_script_position(spec)}) is not rendered yet: expected "
                                  f"panels/{seq:03d}*.png. Use Render Panel into Frame.")
 
     if manifest is not None:
@@ -2163,6 +2170,173 @@ def export_project(procedure, run_mode, image, drawables, config, data):
         return _error(procedure, str(exc))
 
 
+def _cover_wrap_text(text, font, size, max_width):
+    """Greedy word wrap using GIMP's font extents for the chosen typeface."""
+    lines = []
+    for paragraph in text.splitlines() or [""]:
+        current = ""
+        for word in paragraph.split():
+            candidate = f"{current} {word}".strip()
+            _, width, *_ = Gimp.text_get_extents_font(candidate, size, font)
+            if current and width > max_width:
+                lines.append(current)
+                current = word
+            else:
+                current = candidate
+        lines.append(current)
+    return "\n".join(lines)
+
+
+def _cover_add_text(image, parent, text, name, region, font, color, page_width,
+                    preferred_size):
+    """Create centered, editable text scaled to fit a normalized cover zone."""
+    if not text.strip() or region is None:
+        return None
+    x, y, w, h = region
+    x, y, w, h = x * page_width, y * image.get_height(), w * page_width, h * image.get_height()
+    inset_w, inset_h = w * 0.92, h * 0.88
+    size = max(14.0, preferred_size)
+    wrapped = text.strip()
+    while size > 13.5:
+        wrapped = _cover_wrap_text(text.strip(), font, size, inset_w)
+        _, text_width, text_height, *_ = Gimp.text_get_extents_font(wrapped, size, font)
+        if text_width <= inset_w and text_height <= inset_h:
+            break
+        size *= 0.9
+    layer = Gimp.TextLayer.new(image, wrapped, font, size, Gimp.Unit.pixel())
+    layer.set_name(name)
+    image.insert_layer(layer, parent, 0)
+    layer.set_justification(Gimp.TextJustification.CENTER)
+    layer.set_color(color)
+    layer.set_offsets(round(x + (w - layer.get_width()) / 2),
+                      round(y + (h - layer.get_height()) / 2))
+    return layer
+
+
+def _cover_designer_dialog():
+    dialog = Gtk.Dialog(title="Design Front Cover", flags=Gtk.DialogFlags.MODAL)
+    dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+                       "Create cover text", Gtk.ResponseType.OK)
+    dialog.set_default_size(480, 440)
+    grid = Gtk.Grid(column_spacing=12, row_spacing=8, margin=12)
+    dialog.get_content_area().add(grid)
+    layout_combo = Gtk.ComboBoxText()
+    for layout in COVER_LAYOUTS:
+        if layout.get("cover") == "front":
+            layout_combo.append_text(layout["name"])
+    layout_combo.set_active(0)
+    title_entry = Gtk.Entry()
+    subtitle_entry = Gtk.Entry()
+    credit_entry = Gtk.Entry()
+    title_entry.set_placeholder_text("Required")
+    subtitle_entry.set_placeholder_text("Optional")
+    credit_entry.set_placeholder_text("Optional")
+    font_combo = Gtk.ComboBoxText()
+    for font_name in ("Bangers", "Comic Neue Bold", "Sans-serif Bold"):
+        if Gimp.Font.get_by_name(font_name) is not None:
+            font_combo.append_text(font_name)
+    if font_combo.get_active() < 0:
+        font_combo.append_text("Current GIMP font")
+    font_combo.set_active(0)
+    color_combo = Gtk.ComboBoxText()
+    color_combo.append_text("White")
+    color_combo.append_text("Black")
+    color_combo.set_active(0)
+    guide_check = Gtk.CheckButton(label="Add safe-area and placement guides")
+    guide_check.set_active(True)
+    rows = (("Template", layout_combo), ("Title", title_entry),
+            ("Subtitle / volume", subtitle_entry), ("Creator credits", credit_entry),
+            ("Display font", font_combo), ("Text color", color_combo))
+    for row, (label, widget) in enumerate(rows):
+        grid.attach(Gtk.Label(label=label, xalign=0), 0, row, 1, 1)
+        grid.attach(widget, 1, row, 1, 1)
+    grid.attach(guide_check, 1, len(rows), 1, 1)
+    hint = Gtk.Label(label="Text is created as editable GIMP layers over your cover art.")
+    hint.set_line_wrap(True)
+    hint.set_xalign(0)
+    grid.attach(hint, 0, len(rows) + 1, 2, 1)
+    dialog.show_all()
+    if dialog.run() != Gtk.ResponseType.OK:
+        dialog.destroy()
+        return None
+    result = {
+        "layout_name": layout_combo.get_active_text(),
+        "title": title_entry.get_text().strip(),
+        "subtitle": subtitle_entry.get_text().strip(),
+        "credits": credit_entry.get_text().strip(),
+        "font_name": font_combo.get_active_text(),
+        "color": color_combo.get_active_text(),
+        "guides": guide_check.get_active(),
+    }
+    dialog.destroy()
+    if not result["title"]:
+        raise ValueError("Enter a cover title")
+    return result
+
+
+def cover_designer(procedure, run_mode, image, drawables, config, data):
+    """Place editable front-cover typography using the built-in composition zones."""
+    if COVER_LAYOUTS is None or frame_rings is None:
+        return _error(procedure, "This plug-in install is missing cover layout support")
+    if run_mode != Gimp.RunMode.INTERACTIVE:
+        return _error(procedure, "The cover designer requires interactive mode")
+    try:
+        values = _cover_designer_dialog()
+        if values is None:
+            return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
+        layout = next((candidate for candidate in COVER_LAYOUTS
+                       if candidate["name"] == values["layout_name"]), None)
+        if layout is None:
+            raise ValueError("Choose a front-cover template")
+        zones = dict(layout["zones"])
+        guide = (_draw_page_layout(image, layout, {"name": "Cover guides"})
+                 if values["guides"] else None)
+        font = (Gimp.Font.get_by_name(values["font_name"])
+                if values["font_name"] != "Current GIMP font" else None)
+        font = font or Gimp.context_get_font()
+        color = Gegl.Color.new("white" if values["color"] == "White" else "black")
+        title_zone = zones.get("title")
+        subtitle_zone = zones.get("issue")
+        if subtitle_zone is None and title_zone is not None:
+            x, y, w, h = title_zone
+            title_zone = (x, y, w, h * 0.72)
+            subtitle_zone = (x, y + h * 0.72, w, h * 0.28)
+
+        group = Gimp.GroupLayer.new(image, "Cover Typography")
+        image.undo_group_start()
+        try:
+            image.insert_layer(group, None, 0)
+            title_height = (title_zone[3] * image.get_height()) if title_zone else 100
+            _cover_add_text(image, group, values["title"], "Cover title", title_zone,
+                            font, color, image.get_width(), min(title_height * 0.38, 240))
+            _cover_add_text(image, group, values["subtitle"], "Subtitle / volume",
+                            subtitle_zone, font, color, image.get_width(),
+                            min((subtitle_zone[3] * image.get_height() * 0.58)
+                                if subtitle_zone else 40, 96))
+            _cover_add_text(image, group, values["credits"], "Creator credits",
+                            zones.get("credits"), font, color, image.get_width(),
+                            min((zones.get("credits", (0, 0, 0, 0))[3]
+                                 * image.get_height() * 0.55), 72))
+            group.attach_parasite(Gimp.Parasite.new(
+                "imanganation-cover-text", Gimp.PARASITE_PERSISTENT,
+                list(json.dumps({"layout": layout["name"], "title": values["title"]},
+                                separators=(",", ":")).encode("utf-8"))))
+        except Exception:
+            if group.get_image() is image:
+                image.remove_layer(group)
+            if guide is not None and guide.get_image() is image:
+                image.remove_layer(guide)
+            raise
+        finally:
+            image.undo_group_end()
+        image.set_selected_layers([group])
+        Gimp.displays_flush()
+        Gimp.message(f"Added editable cover text using {layout['name']}. "
+                     "Move or restyle the text layers in the Cover Typography group.")
+        return _success(procedure, group)
+    except Exception as exc:
+        return _error(procedure, str(exc))
+
 
 def _activate_project(root):
     root = Path(root).resolve()
@@ -2677,7 +2851,8 @@ def _set_panel_frame_from_selection():
         raise ValueError("This panel already has a canvas group; editing an existing frame is not supported yet")
 
     label = panel.get("label", {})
-    group_name = f"Panel {label.get('page', '?')}.{label.get('panel', '?')}"
+    group_name = ("Cover" if label.get("page") == 0
+                  else f"Panel {label.get('page', '?')}.{label.get('panel', '?')}")
     template = _find_template(image)
     group = Gimp.GroupLayer.new(image, group_name)
     image.undo_group_start()
@@ -2814,8 +2989,10 @@ def _default_page_size(root, manifest):
     return 1600, 2400
 
 
-def _create_project_page(root, manifest, width, height, number=None, resolution=None):
-    """A new page document; ``number`` (a script page) fixes its label and file name."""
+def _create_project_page(root, manifest, width, height, number=None, resolution=None,
+                         cover=False):
+    """A new page document; ``number`` (a script page) fixes its label and file name.
+    ``cover`` makes the page labelled Cover (which offers cover layouts)."""
     if width < 1 or height < 1:
         raise ValueError("Page width and height must be positive")
     if width > 20000 or height > 20000:
@@ -2836,6 +3013,8 @@ def _create_project_page(root, manifest, width, height, number=None, resolution=
         relative = f"pages/page-{number:03d}.xcf"
     page_id = new_id("pg_")
     page_label = f"Page {number}"
+    if cover:
+        relative, page_label = "pages/cover.xcf", "Cover"
     destination = Path(root) / relative
     temporary = destination.with_name(f".{destination.stem}.{secrets.token_hex(4)}.tmp.xcf")
     if resolution is None:
@@ -3301,7 +3480,8 @@ def _parse_script(text, title):
     except EngineError as exc:
         raise EngineError("This script is prose, not PAGE / Panel format, so it needs the "
                           f"engine to read it: {exc}") from exc
-    return ({"cast": result["cast"], "panels": result["panels"],
+    return ({"cast": result["cast"], "locations": result.get("locations", []),
+             "panels": result["panels"],
              "problems": result.get("problems", [])}, result["format"])
 
 
@@ -3455,7 +3635,8 @@ def _create_project_from_script(script_path, title, parent, page_size, design):
                                        script_text=text, script_format=script_format)
         save_project(root, manifest)
         for number in dict.fromkeys(p["label"]["page"] for p in manifest["panels"]):
-            _create_project_page(root, manifest, *page_size, number=number)
+            _create_project_page(root, manifest, *page_size, number=number or None,
+                                 cover=number == 0)
     except Exception:
         import shutil
 
@@ -5430,7 +5611,7 @@ class Imanganation(Gimp.PlugIn):
                 PROC_PLACE, PROC_STATUS, PROC_PROJECT_DOCKS, PROC_CLOSE_PROJECT,
                 PROC_RELOAD_SCRIPT,
                 PROC_PAGE_LAYOUT, PROC_SCREENTONE, PROC_SPEED_LINES, PROC_IMPACT_BURST,
-                PROC_EXPORT_PROJECT,
+                PROC_COVER_DESIGNER, PROC_EXPORT_PROJECT,
                 PROC_AUTOSTART,
                 PROC_NEW_PROJECT_MANUAL, PROC_NEW_PROJECT,
                 PROC_SETUP_MODELS, PROC_RENDER_ENGINE,
@@ -5605,6 +5786,7 @@ class Imanganation(Gimp.PlugIn):
                PROC_PLACE: place_panel, PROC_STATUS: engine_status,
                PROC_PAGE_LAYOUT: page_layout, PROC_SCREENTONE: screentone,
                PROC_SPEED_LINES: speed_lines, PROC_IMPACT_BURST: impact_burst,
+               PROC_COVER_DESIGNER: cover_designer,
                PROC_EXPORT_PROJECT: export_project}[name]
         proc = Gimp.ImageProcedure.new(self, name, Gimp.PDBProcType.PLUGIN, run, None)
         proc.set_image_types("*")
@@ -5618,8 +5800,8 @@ class Imanganation(Gimp.PlugIn):
         menu_groups = {
             PROC_STATUS: "Settings",
             PROC_PAGE_LAYOUT: "Page & Cover",
+            PROC_COVER_DESIGNER: "Page & Cover",
             PROC_EXPORT_PROJECT: "Project",
-            "plug-in-imanganation-cover-designer": "Page & Cover",
             PROC_SCREENTONE: "Manga Tools",
             PROC_SPEED_LINES: "Manga Tools",
             PROC_IMPACT_BURST: "Manga Tools",
@@ -5696,6 +5878,18 @@ class Imanganation(Gimp.PlugIn):
                 "Create a radial manga impact burst inside the current selection",
                 "Generate editable burst wedges around a chosen center, clipped to the "
                 "current selection and added on a separate layer.", name)
+            return proc
+
+        if name == PROC_COVER_DESIGNER:
+            proc.add_layer_return_value(
+                "layer", "Cover typography group", "The editable cover text layers", False,
+                GObject.ParamFlags.READWRITE)
+            proc.set_menu_label("Design Front _Cover...")
+            proc.set_documentation(
+                "Add editable front-cover typography",
+                "Choose a cover template and create editable title, subtitle and creator "
+                "credit layers over the current cover artwork, with optional layout guides.",
+                name)
             return proc
 
         if name == PROC_EXPORT_PROJECT:

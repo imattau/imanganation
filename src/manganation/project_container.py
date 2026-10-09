@@ -101,7 +101,7 @@ def integrity_errors(doc: dict, root: Path | None = None) -> list[str]:
 
 
 _SPEC_FIELDS = ("scene_heading", "location", "action", "camera", "expressions", "dialogue",
-                "sfx", "notes", "flashback", "aspect_ratio", "size", "seed")
+                "sfx", "notes", "flashback", "cover", "aspect_ratio", "size", "seed")
 
 
 def panel_to_spec(panel: dict) -> tuple[PanelSpec, dict[str, str]]:

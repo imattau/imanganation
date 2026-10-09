@@ -90,7 +90,7 @@ characters and pages as you work.
 
 **New project from script…** (Context, before a project is open, or *Filters →
 imanganation*) builds a project from a script file: panels, the cast (with the script's
-`[CHARACTERS]` descriptions as their notes), locations from scene headings, and one page
+`[CHARACTERS]` descriptions as their notes), locations (a `[LOCATIONS]` block's descriptions as their notes, plus every place the scenes name), and one page
 document per script page, at the chosen size; then it opens page 1. A script (the
 format in [script-template.md](script-template.md)) is parsed in the plug-in itself
 (the engine's own parser, `script_canonical.py`), so this works with the engine off;
@@ -148,6 +148,11 @@ Lines…** to add editable radial linework on a separate layer. Set the focal po
 the selection, line count, clear center area, and line width.
 **Impact burst.** Choose **Imanganation → Manga Tools → Create Impact Burst…** for a
 jagged radial burst, with controls for spike count, depth, rotation, and center point.
+**Design Front Cover…** (*Imanganation → Page & Cover*) adds editable title,
+subtitle/volume, and creator-credit text over the existing artwork. Choose one of the
+front-cover templates, a display font and text color; optional safe-area guides are added
+as a separate layer. Move and restyle each text layer in the **Cover Typography** group
+with GIMP's normal tools.
 
 On first launch, the Project dock offers **Open project…**; the
 chosen project folder is remembered in GIMP's user settings and its docks are restored on

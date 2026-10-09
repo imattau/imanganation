@@ -168,6 +168,12 @@ SHOT_TAGS = {
 }
 
 
+# A cover is one finished illustration: the title, credits and barcode are lettered
+# in GIMP, so the picture itself must carry no text.
+COVER_TAGS = "cover art, key visual, dynamic composition, detailed illustration, no text"
+COVER_NEGATIVE = "text, title, logo, watermark, signature, speech bubble, frame, border"
+
+
 def shot_tags(camera: str) -> str:
     """Framing tags for a script shot; an unknown shot is passed on as written."""
     low = camera.strip().lower()
@@ -219,6 +225,8 @@ def build_prompt(
               if who not in spec.characters]
     if spec.flashback:
         parts.append("flashback, soft focus")
+    if spec.cover:
+        parts.append(COVER_TAGS)
     return ", ".join(p.strip() for p in parts if p and p.strip())
 
 
@@ -307,6 +315,9 @@ def prose_prompt(spec: PanelSpec, appearances: dict[str, list[str]],
         parts.append(f"What happens: {action_text(spec)}")
     if spec.flashback:
         parts.append("It is a flashback: soft focus, faded colours.")
+    if spec.cover:
+        parts.append("It is the cover illustration: one striking key image with no text, "
+                     "title or lettering.")
     return " ".join(parts)
 
 
@@ -393,6 +404,8 @@ def background_negative(style: dict) -> str:
 
 def build_negative(spec: PanelSpec, style: dict) -> str:
     negative = style.get("negative", "")
+    if spec.cover:
+        negative += ", " + COVER_NEGATIVE
     if len(spec.characters) == 1:
         negative += ", multiple views, 2boys, 2girls, multiple boys, multiple girls, clone"
     elif len(spec.characters) > 1:

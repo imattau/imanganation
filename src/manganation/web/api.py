@@ -260,6 +260,7 @@ class ParsedScript:
     cast: list
     panels: list
     problems: list
+    locations: list = Field(default_factory=list)
 
 
 class Job(BaseModel):
@@ -861,7 +862,7 @@ def create_app(
 
     @app.post("/scripts/parse", status_code=202)
     def submit_parse(req: ScriptParseRequest) -> Job:
-        """-> result ``{"format", "cast", "panels", "problems"}``, the plain-dict shape
+        """-> result ``{"format", "cast", "locations", "panels", "problems"}``, the plain-dict shape
         of ``script/formats/canonical.py`` (what the plug-in builds a project from).
         ``problems`` lists a script's lines that break the format (none for prose)."""
         from manganation.script.formats import canonical
@@ -873,7 +874,8 @@ def create_app(
             data = script.model_dump(mode="json")
             problems = canonical.parse(req.text)["problems"] if canonical_text else []
             return ParsedScript(format="canonical" if canonical_text else "prose",
-                                cast=data["cast"], panels=data["panels"], problems=problems)
+                                cast=data["cast"], locations=data["locations"],
+                                panels=data["panels"], problems=problems)
 
         return submit_job("parse", {"title": req.title, "chars": len(req.text)}, work)
 
