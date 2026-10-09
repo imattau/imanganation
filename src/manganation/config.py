@@ -147,6 +147,17 @@ class ControlNetDefaults(BaseModel):
     high_threshold: float = 0.8
 
 
+class PoseDefaults(BaseModel):
+    """Character poses: skeletons from the pose library steer the render (ControlNet
+    OpenPose). Strength and the step window trade "exactly this pose" against room for
+    the reference and the prompt to decide the details."""
+
+    model: str = "openpose"  # models.yaml -> controlnets role
+    strength: float = 0.8
+    start: float = 0.0
+    end: float = 0.8
+
+
 class StagingDefaults(BaseModel):
     """Panel prose -> Danbooru tags by the local LLM at render time (render/staging.py).
     Off: the action and setting go into the prompt as written."""
@@ -199,6 +210,7 @@ class Defaults(BaseModel):
     dataset: DatasetDefaults = DatasetDefaults()
     inpaint: InpaintDefaults = InpaintDefaults()
     controlnet: ControlNetDefaults = ControlNetDefaults()
+    pose: PoseDefaults = PoseDefaults()
     staging: StagingDefaults = StagingDefaults()
     layered: LayeredDefaults = LayeredDefaults()
     renderer: RendererDefaults = RendererDefaults()

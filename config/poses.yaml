@@ -1,0 +1,169 @@
+# Pose library: figures for the OpenPose ControlNet (src/manganation/pose).
+#
+# A pose is a few angles, so it works from any camera angle and mirrors for free.
+# Each limb is [[upper, lower]] with a segment as [a, b] in degrees:
+#   a  from straight down: 0 hanging, 90 horizontal, 180 straight up
+#   b  around the body: 0 forward, 90 outward, -90 across the body, 180 back
+# yaw 0 faces the camera, 90 faces screen-right, -90 screen-left, 180 away.
+# lean / sway tilt the torso forward / toward the figure's left; head_yaw and
+# head_pitch turn and nod the head. Omitted fields are a relaxed standing figure.
+# `anchor: center` rests the figure on the middle of its box instead of its bottom.
+#
+# Pairs place two figures together and can pin one hand to the other's joint.
+
+poses:
+  stand:
+    description: standing relaxed, arms at the sides
+    tags: [standing]
+  stand_hands_on_hips:
+    description: standing, hands on hips
+    tags: [standing, hands on hips]
+    l_arm: [[35, 60], [70, -80]]
+    r_arm: [[35, 60], [70, -80]]
+    l_leg: [[6, 90], [0, 0]]
+    r_leg: [[6, 90], [0, 0]]
+  stand_arms_crossed:
+    description: standing, arms folded across the chest
+    tags: [standing, crossed arms]
+    l_arm: [[25, -10], [100, -85]]
+    r_arm: [[25, -10], [100, -85]]
+  stand_looking_down:
+    description: standing, head bowed, arms loose
+    tags: [standing, looking down]
+    head_pitch: 28
+    lean: 6
+  stand_surprised:
+    description: standing, recoiling, hands raised
+    tags: [standing, arms up, leaning back]
+    lean: -8
+    head_pitch: -8
+    l_arm: [[70, 40], [140, 20]]
+    r_arm: [[70, 40], [140, 20]]
+  point_forward:
+    description: standing, one arm stretched out pointing
+    tags: [standing, pointing]
+    yaw: 70
+    r_arm: [[88, 15], [88, 10]]
+    l_arm: [[15, 70], [10, 70]]
+  reach_out:
+    description: reaching one hand forward, as if offering it
+    tags: [standing, outstretched hand, reaching]
+    yaw: 60
+    lean: 10
+    r_arm: [[80, 10], [75, 5]]
+    l_arm: [[15, 70], [10, 70]]
+  wave:
+    description: standing, one hand raised and waving
+    tags: [standing, waving, raised hand]
+    r_arm: [[100, 70], [165, 60]]
+    l_arm: [[10, 80], [5, 80]]
+  walk:
+    description: walking, mid-stride, seen from three-quarters
+    tags: [walking]
+    yaw: 40
+    l_arm: [[25, 10], [45, 8]]
+    r_arm: [[25, 170], [20, 170]]
+    l_leg: [[25, 0], [10, 0]]
+    r_leg: [[22, 180], [38, 180]]
+  run:
+    description: running hard, leaning into it
+    tags: [running, leaning forward]
+    yaw: 70
+    lean: 18
+    l_arm: [[60, 5], [105, 5]]
+    r_arm: [[55, 175], [100, 175]]
+    l_leg: [[55, 0], [45, 170]]
+    r_leg: [[25, 180], [70, 180]]
+  lean_forward:
+    description: bent forward, hands on knees, catching breath
+    tags: [leaning forward, hands on own knees]
+    yaw: 70
+    lean: 42
+    head_pitch: 20
+    l_arm: [[38, 180], [15, 180]]
+    r_arm: [[38, 180], [15, 180]]
+    l_leg: [[5, 90], [0, 0]]
+    r_leg: [[5, 90], [0, 0]]
+  slump:
+    description: shoulders slumped, head down, defeated
+    tags: [slouching, head down, shoulders slumped]
+    lean: 14
+    head_pitch: 25
+    l_arm: [[2, 90], [-5, 80]]
+    r_arm: [[2, 90], [-5, 80]]
+  sit_chair:
+    description: sitting upright on a chair, hands on knees
+    tags: [sitting, on chair, hands on own knees]
+    yaw: 50
+    anchor: center
+    l_arm: [[35, 40], [55, 10]]
+    r_arm: [[35, 40], [55, 10]]
+    l_leg: [[88, 12], [2, 10]]
+    r_leg: [[88, 12], [2, 10]]
+  sit_knees_up:
+    description: sitting on the ground, knees drawn up, arms around them
+    tags: [sitting, knees up, arms around knees]
+    yaw: 40
+    anchor: center
+    lean: 8
+    l_arm: [[35, 20], [100, -40]]
+    r_arm: [[35, 20], [100, -40]]
+    l_leg: [[115, 15], [20, 10]]
+    r_leg: [[115, 15], [20, 10]]
+  crouch:
+    description: crouching low on the balls of the feet
+    tags: [squatting]
+    yaw: 35
+    lean: 25
+    l_arm: [[40, 20], [60, 15]]
+    r_arm: [[40, 20], [60, 15]]
+    l_leg: [[110, 25], [10, 10]]
+    r_leg: [[110, 25], [10, 10]]
+  kneel:
+    description: kneeling on both knees, upright
+    tags: [kneeling, seiza]
+    yaw: 55
+    l_arm: [[20, 70], [40, 40]]
+    r_arm: [[20, 70], [40, 40]]
+    l_leg: [[5, 90], [95, 175]]
+    r_leg: [[5, 90], [95, 175]]
+  stride_down:
+    description: stepping down a stair, leaning ahead
+    tags: [walking, leaning forward]
+    yaw: -30
+    lean: 14
+    l_leg: [[40, 10], [10, 5]]
+    r_leg: [[5, 180], [30, 180]]
+    l_arm: [[20, 80], [30, 70]]
+    r_arm: [[100, 40], [100, 40]]
+  held_back:
+    description: standing, one wrist held by someone ahead, leaning away
+    tags: [standing, leaning back]
+    yaw: 20
+    lean: -10
+    l_arm: [[70, 40], [80, 40]]
+    r_arm: [[20, 70], [15, 70]]
+    l_leg: [[12, 0], [0, 0]]
+    r_leg: [[10, 180], [14, 180]]
+
+pairs:
+  drag_by_wrist:
+    description: one drags the other along by the wrist
+    roles:
+      lead:
+        pose: stride_down
+        box: [0.40, 0.30, 0.55, 0.68]
+      follow:
+        pose: held_back
+        box: [0.04, 0.02, 0.50, 0.62]
+    holds:
+      - {figure: lead, hand: r, to: follow.l_wri}
+  stand_over:
+    description: one stands over the other, who sits on the ground
+    roles:
+      above:
+        pose: stand_hands_on_hips
+        box: [0.50, 0.04, 0.46, 0.94]
+      below:
+        pose: sit_knees_up
+        box: [0.04, 0.46, 0.44, 0.50]

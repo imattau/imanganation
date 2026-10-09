@@ -83,3 +83,9 @@ defaults:
     end: 0.7            # later steps are free to redraw faces/expressions
     low_threshold: 0.4
     high_threshold: 0.8
+  # Character poses: skeletons from config/poses.yaml (ControlNet OpenPose).
+  pose:
+    model: openpose
+    strength: 0.8
+    start: 0.0
+    end: 0.8

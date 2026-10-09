@@ -69,6 +69,9 @@ class PanelSpec(BaseModel):
     aspect_ratio: str | None = Field(default=None, pattern=r"^[0-9]+:[0-9]+$")
     size: Literal["", "small", "large", "splash"] = ""
     refs: dict[str, str] = Field(default_factory=dict)  # character -> reference image path
+    # character -> pose reference from config/poses.yaml ("stand_hands_on_hips",
+    # "drag_by_wrist.lead", optional "@mirror"); renders with the OpenPose ControlNet
+    poses: dict[str, str] = Field(default_factory=dict)
     seed: int | None = None
 
     @field_validator("characters")

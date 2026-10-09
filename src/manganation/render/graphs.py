@@ -515,6 +515,36 @@ def with_controlnet(
     return graph
 
 
+def with_pose_controlnet(
+    graph: dict,
+    *,
+    image: str,
+    controlnet: str,
+    strength: float = 0.8,
+    start: float = 0.0,
+    end: float = 0.8,
+) -> dict:
+    """Steer the figures with an OpenPose skeleton ``image`` (uploaded, canvas size):
+    ``LoadImage -> ControlNetApplyAdvanced``. The skeleton is already the ControlNet's
+    input, so there is no preprocessor. Like ``with_controlnet`` it wraps whatever
+    conditioning the sampler uses, so it composes with regional references and prompts
+    (and with a Canny guide, applied after it)."""
+    graph = {k: {**v, "inputs": dict(v["inputs"])} for k, v in graph.items()}
+    graph["pose_image"] = {"class_type": "LoadImage", "inputs": {"image": image}}
+    graph["pose_model"] = {"class_type": "ControlNetLoader",
+                           "inputs": {"control_net_name": controlnet}}
+    sampler = graph["5"]["inputs"]
+    graph["pose_apply"] = {
+        "class_type": "ControlNetApplyAdvanced",
+        "inputs": {"positive": sampler["positive"], "negative": sampler["negative"],
+                   "control_net": ["pose_model", 0], "image": ["pose_image", 0],
+                   "strength": strength, "start_percent": start, "end_percent": end},
+    }
+    sampler["positive"] = ["pose_apply", 0]
+    sampler["negative"] = ["pose_apply", 1]
+    return graph
+
+
 def upscale_refine(
     *,
     ckpt: str,

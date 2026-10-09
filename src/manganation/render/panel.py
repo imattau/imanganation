@@ -617,6 +617,53 @@ def _upload_placement(client, path: Path, width: int, height: int):
     return name, (x0 / width, y0 / height, (x1 - x0) / width, (y1 - y0) / height)
 
 
+def _pose_boxes(spec: PanelSpec, placements: dict[str, Path], regions, width: int,
+                height: int) -> dict[str, tuple[float, float, float, float]]:
+    """Where each character's figure goes: their placement layer's footprint if the
+    artist drew one, else their region of the panel."""
+    from manganation.render.inpaint import normalized_mask
+
+    boxes = {name: (r.x, r.y, r.w, r.h) for name, r in zip(spec.characters, regions)}
+    for name, path in placements.items():
+        x0, y0, x1, y1 = normalized_mask(path).getbbox() or (0, 0, 0, 0)
+        w, h = normalized_mask(path).size
+        if x1 > x0 and y1 > y0:
+            boxes[name] = (x0 / w, y0 / h, (x1 - x0) / w, (y1 - y0) / h)
+    return boxes
+
+
+def _with_poses(graph, client, settings, models, spec: PanelSpec, placements,
+                reading_order, width: int, height: int):
+    """Draw the panel's poses as an OpenPose skeleton, upload it, and add the ControlNet."""
+    import tempfile
+
+    from manganation.config import models_root
+    from manganation.pose.draw import draw_figures
+    from manganation.pose.library import compose
+    from manganation.pose.rig import PoseError
+
+    c = settings.defaults.pose
+    entry = models.get("controlnets", {}).get(c.model)
+    if entry is None:
+        raise RenderError(f"unknown pose ControlNet {c.model!r} in models.yaml")
+    if not (models_root(settings) / entry.get("subdir", "controlnet") / entry["id"]).exists():
+        raise RenderError("poses need the OpenPose ControlNet: run "
+                          "`manganation setup --poses` (or Set Up Models → Poses)")
+    regions = assign_regions(len(spec.characters), order=reading_order, margin=0.05)
+    try:
+        figures = compose(spec.poses, _pose_boxes(spec, placements, regions, width, height),
+                          width, height)
+    except PoseError as exc:
+        raise RenderError(f"pose: {exc}") from exc
+    skeleton = draw_figures(figures, width, height)
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "pose-skeleton.png"
+        skeleton.save(path)
+        name = client.upload_image(str(path))["name"]
+    return graphs.with_pose_controlnet(graph, image=name, controlnet=entry["id"],
+                                       strength=c.strength, start=c.start, end=c.end)
+
+
 def controlnet_file(models: dict, role: str) -> str:
     """The file for a models.yaml ``controlnets`` role."""
     roles = models.get("controlnets", {})
@@ -700,6 +747,14 @@ def _render(
             staging = stage(spec, setting(spec), settings=settings)
         except Exception as exc:  # noqa: BLE001 - any LLM trouble: the prose still works
             warnings.append(f"action and setting used as written, not as tags ({exc})")
+    if staging is not None and spec.poses and engine == "sdxl":
+        # A skeleton pins the pose, so the LLM's guess ("sitting") must not contradict it.
+        from manganation.pose.library import tags_for
+
+        for c in spec.characters:
+            ref = next((r for n, r in spec.poses.items() if n.lower() == c.lower()), None)
+            if ref and tags_for(ref):
+                staging.characters.setdefault(c, {})["pose"] = tags_for(ref)
     if staging is not None:
         # The panel's own faces win; the LLM's fill the rest (and so replace a default
         # grin with the sigh the action asks for).
@@ -827,6 +882,14 @@ def _render(
                 sampling=graphs.Sampling(d.steps, d.cfg, d.sampler, d.scheduler),
                 denoise=settings.defaults.layered.denoise)
 
+    posed = {c: ref for n, ref in spec.poses.items() for c in spec.characters
+             if c.lower() == n.lower()}
+    if posed and engine != "sdxl":
+        warnings.append("poses need the sdxl engine: rendered without them")
+    elif posed:
+        graph = _with_poses(graph, client, settings, models,
+                            spec.model_copy(update={"poses": posed}), placements,
+                            reading_order, width, height)
     if guide is not None:
         graph = _with_guide(graph, client, settings, models, Path(guide), width, height,
                             guide_strength)

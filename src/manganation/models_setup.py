@@ -91,6 +91,14 @@ def needed(settings, models: dict) -> list[ModelFile]:
     return out
 
 
+def poses(settings, models: dict) -> list[ModelFile]:
+    """The OpenPose ControlNet that character poses render with. Optional, so ``setup``
+    only fetches it when asked (``--poses``)."""
+    role = settings.defaults.pose.model
+    return [_entry(f"controlnet ({role})", models.get("controlnets", {}).get(role),
+                   "controlnet", "not in models.yaml")]
+
+
 DEFAULT_TAGGER = "wd_swinv2_v3"
 DEFAULT_DETECTOR = "anime_person"
 FACE_DETECTOR = "anime_face"

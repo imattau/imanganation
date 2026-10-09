@@ -211,6 +211,8 @@ def setup(
     yes: bool = typer.Option(False, "--yes", "-y", help="Download without asking."),
     evaluation: bool = typer.Option(False, "--eval",
                                     help="Also the tagger `manganation eval` judges with."),
+    poses: bool = typer.Option(False, "--poses",
+                               help="Also the OpenPose ControlNet for character poses."),
     trial: str = typer.Option("", "--trial", help="Also a trial model group "
                               "(models.yaml -> trials), e.g. qwen_image_21."),
     engine: list[str] = typer.Option(
@@ -246,6 +248,8 @@ def setup(
     models = ms.needed(settings, load_models())
     if evaluation:
         models += ms.evaluation(load_models())
+    if poses:
+        models += ms.poses(settings, load_models())
     if trial:
         models += ms.trial(load_models(), trial)
     from manganation import engines as engine_catalogue
