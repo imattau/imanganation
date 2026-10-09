@@ -154,18 +154,27 @@ def location_prompt(name: str, details: list[str], description: str = "",
                "Clean line art and cel-shaded colour, detailed background art."))
 
 
-def gather(panels, settings=None) -> dict[str, dict]:
+STAGING_PANELS = 3  # panels per place sent to the staging LLM: more only repeat its tags
+
+
+def gather(panels, settings=None, notes: dict[str, str] | None = None) -> dict[str, dict]:
     """Every location the script's panels use: key -> {"name", "details"}, details
-    being the staging LLM's setting tags over all panels there (cached)."""
+    being the staging LLM's setting tags over the first few panels there (cached). A
+    place with the author's ``notes`` (key -> text) skips the LLM: their words describe it."""
     from manganation.render.panel import setting
     from manganation.render.staging import stage
 
     found: dict[str, dict] = {}
+    asked: dict[str, int] = {}
     for spec in panels:
         place = setting(spec)
         if not place:
             continue
-        entry = found.setdefault(location_key(place), {"name": place, "details": []})
+        key = location_key(place)
+        entry = found.setdefault(key, {"name": place, "details": []})
+        if (notes or {}).get(key) or asked.get(key, 0) >= STAGING_PANELS:
+            continue
+        asked[key] = asked.get(key, 0) + 1
         try:
             tags = stage(spec, place, settings=settings).setting
         except Exception:  # noqa: BLE001 - no LLM: the name alone still works

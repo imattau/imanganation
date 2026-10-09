@@ -531,7 +531,17 @@ def create_app(
             notes = {lc.location_key(entry.get("name", "")): entry.get("notes", "")
                      for entry in req.locations if entry.get("name")}
             designed, existing = [], []
-            for key, found in lc.gather(specs).items():
+            # The LLM and ComfyUI take turns on the GPU: ComfyUI lets go for the staging
+            # pass, which then gives it back
+            try:
+                from manganation.config import load_settings
+                from manganation.render.comfy_client import ComfyClient
+
+                ComfyClient(load_settings().comfyui.base_url).free()
+            except Exception:  # noqa: BLE001 - not running: nothing to free
+                pass
+            gathered = lc.gather(specs, notes=notes)
+            for key, found in gathered.items():
                 if key in registry.locations and not req.force \
                         and registry.reference_path(key) is not None:
                     existing.append(key)

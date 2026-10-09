@@ -135,3 +135,21 @@ def test_an_image_from_gimp_becomes_the_reference_and_the_design_is_kept(tmp_pat
     assert client.post("/locations/reference", json={
         "project": "prj_abc123", "name": "Kitchen",
         "image_path": str(outside)}).status_code == 400
+
+
+def test_gather_asks_the_llm_for_a_few_panels_per_place_and_skips_noted_ones(monkeypatch):
+    from manganation import locations as lc
+    from manganation.render import staging
+    from manganation.render.panel import PanelSpec
+
+    calls = []
+
+    class Staged:
+        setting = ["tag"]
+
+    monkeypatch.setattr(staging, "stage", lambda spec, place, **kw: calls.append(place) or Staged())
+    panels = [PanelSpec(page=1, panel=i + 1, location="School rooftop") for i in range(8)]
+    panels += [PanelSpec(page=2, panel=i + 1, location="Kitchen") for i in range(8)]
+    found = lc.gather(panels, notes={"kitchen": "a small kitchen"})
+    assert calls == ["School rooftop"] * lc.STAGING_PANELS
+    assert set(found) == {"school rooftop", "kitchen"} and found["kitchen"]["details"] == []

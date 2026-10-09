@@ -3667,6 +3667,12 @@ def _style_options(manifest):
     return engine_ui.design_options(manifest) if engine_ui is not None and manifest else {}
 
 
+def _look_options(manifest):
+    """The project's look only: a location's image is read by Qwen renders, so it is
+    drawn by Qwen whatever engine the panels use."""
+    return engine_ui.style_options(manifest) if engine_ui is not None and manifest else {}
+
+
 def _queue_character_design(root, manifest, character, redesign=False, describe=True):
     """Ask the engine to design one character from its notes; the docks refresh when
     the sheet is ready. ``describe`` False keeps their traits (a redesign in a new
@@ -4527,7 +4533,8 @@ def _queue_location_design(root):
     manifest = load_project(root)
     job = _http("POST", f"{ENGINE_URL}/locations/design",
                 {"project": manifest["project"]["id"], "panels": manifest["panels"],
-                 "locations": manifest.get("locations", []), **_style_options(manifest)})
+                 "locations": manifest.get("locations", []),
+                 **_look_options(manifest)})
     if not _LOCATION_JOBS:
         GLib.timeout_add_seconds(3, _exclusive(_poll_location_jobs))
     _LOCATION_JOBS[job["id"]] = root
@@ -4566,7 +4573,7 @@ def _queue_single_location_design(root, manifest, location, redesign=False):
     the image is ready."""
     body = {"project": manifest["project"]["id"], "name": location["name"],
             "description": location.get("notes", ""), "redesign": redesign,
-            **_style_options(manifest)}
+            **_look_options(manifest)}
     job = _http("POST", f"{ENGINE_URL}/locations", body)
     if not _LOCATION_DESIGN_JOBS:
         GLib.timeout_add_seconds(3, _exclusive(_poll_single_location_jobs))
