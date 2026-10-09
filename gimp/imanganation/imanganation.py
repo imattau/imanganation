@@ -5222,6 +5222,7 @@ class Imanganation(Gimp.PlugIn):
                                    GObject.ParamFlags.READWRITE)
             proc.add_menu_path("<Toolbox>/File/[Open]")
             proc.add_menu_path("<Image>/File/[Open]")
+            proc.add_menu_path("<Image>/Imanganation/Project")
             proc.set_documentation(
                 "Create an Imanganation project manually",
                 "Set up a project with guided defaults and starter panels, without a script.",
@@ -5239,6 +5240,7 @@ class Imanganation(Gimp.PlugIn):
             # in the first File section and in the toolbox before an image exists.
             proc.add_menu_path("<Toolbox>/File/[Open]")
             proc.add_menu_path("<Image>/File/[Open]")
+            proc.add_menu_path("<Image>/Imanganation/Project")
             proc.set_documentation(
                 "New Imanganation project from a script",
                 "Build a project (panels, pages, cast, locations) from a script and "
@@ -5252,7 +5254,7 @@ class Imanganation(Gimp.PlugIn):
             proc.add_enum_argument("run-mode", "Run mode", "How to run the procedure",
                                    Gimp.RunMode, Gimp.RunMode.INTERACTIVE,
                                    GObject.ParamFlags.READWRITE)
-            proc.add_menu_path("<Image>/Imanganation")
+            proc.add_menu_path("<Image>/Imanganation/Settings")
             proc.set_documentation(
                 "Download or link Imanganation's AI models",
                 "Show which model files the engine needs, their licences and state; "
@@ -5266,7 +5268,7 @@ class Imanganation(Gimp.PlugIn):
             proc.add_enum_argument("run-mode", "Run mode", "How to run the procedure",
                                    Gimp.RunMode, Gimp.RunMode.INTERACTIVE,
                                    GObject.ParamFlags.READWRITE)
-            proc.add_menu_path("<Image>/Imanganation")
+            proc.add_menu_path("<Image>/Imanganation/Settings")
             proc.set_documentation(
                 "Choose the open project's render engine",
                 "Pick the engine that draws this project's panels (each with its licence), "
@@ -5284,6 +5286,7 @@ class Imanganation(Gimp.PlugIn):
                                    GObject.ParamFlags.READWRITE)
             proc.add_menu_path("<Toolbox>/File/[Open]")
             proc.add_menu_path("<Image>/File/[Open]")
+            proc.add_menu_path("<Image>/Imanganation/Project")
             proc.set_documentation(
                 "Read the open project's script again",
                 "After editing the project's script: unchanged panels keep their takes, "
@@ -5301,6 +5304,7 @@ class Imanganation(Gimp.PlugIn):
                                    GObject.ParamFlags.READWRITE)
             proc.add_menu_path("<Toolbox>/File/[Open]")
             proc.add_menu_path("<Image>/File/[Open]")
+            proc.add_menu_path("<Image>/Imanganation/Project")
             proc.set_documentation(
                 "Close the open Imanganation project",
                 "Offer to save its pages with unsaved changes, close the pages the "
@@ -5321,6 +5325,7 @@ class Imanganation(Gimp.PlugIn):
             # image-window entry as well for switching projects while editing.
             proc.add_menu_path("<Toolbox>/File/[Open]")
             proc.add_menu_path("<Image>/File/[Open]")
+            proc.add_menu_path("<Image>/Imanganation/Project")
             proc.set_documentation(
                 "Open the Imanganation project docks",
                 "Open or switch the project shown in the startup Imanganation workspace.", name)
@@ -5347,7 +5352,23 @@ class Imanganation(Gimp.PlugIn):
         # GIMP 3.3 requires a menu label before a menu path is added. Each
         # procedure below replaces this fallback with its user-facing label.
         proc.set_menu_label("Imanganation")
-        proc.add_menu_path("<Image>/Imanganation")
+        menu_groups = {
+            PROC_STATUS: "Settings",
+            PROC_PAGE_LAYOUT: "Page & Cover",
+            "plug-in-imanganation-cover-designer": "Page & Cover",
+            PROC_SCREENTONE: "Manga Tools",
+            PROC_SPEED_LINES: "Manga Tools",
+            PROC_IMPACT_BURST: "Manga Tools",
+            PROC_SETREF: "Project",
+            PROC_SET_LOCATION_REF: "Project",
+            PROC_RENDER: "Create",
+            PROC_NEXT: "Create",
+            PROC_PLACE: "Create",
+            PROC_REGEN: "Create",
+            PROC_INPAINT: "Create",
+            PROC_REFINE: "Create",
+        }
+        proc.add_menu_path(f"<Image>/Imanganation/{menu_groups[name]}")
         proc.set_attribution("imanganation", "imanganation", "2026")
         if name == PROC_STATUS:
             proc.set_menu_label("Engine _Status...")

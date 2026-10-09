@@ -140,14 +140,14 @@ categories: click one to add it to the open page, inside the selection if there 
 A page's Context also has a free **Bubble…**. Lettering uses Comic Neue / Bangers when
 installed, else a bold sans; the size follows the page (1/64 of its height).
 
-**Screentone.** Select an area and choose **Imanganation → Create Screentone…** to
-fill it with black halftone dots on a separate layer. Adjust dot spacing, coverage,
-and screen angle; the source pattern is also kept as an editable path.
-**Speed lines.** Select an area and choose **Imanganation → Create Speed Lines…** to
-add editable radial linework on a separate layer. Set the focal point within the
-selection, line count, clear center area, and line width.
-**Impact burst.** Choose **Imanganation → Create Impact Burst…** for a jagged radial
-burst, with controls for spike count, depth, rotation, and center point.
+**Screentone.** Select an area and choose **Imanganation → Manga Tools → Create
+Screentone…** to fill it with black halftone dots on a separate layer. Adjust dot
+spacing, coverage, and screen angle; the source pattern is also kept as an editable path.
+**Speed lines.** Select an area and choose **Imanganation → Manga Tools → Create Speed
+Lines…** to add editable radial linework on a separate layer. Set the focal point within
+the selection, line count, clear center area, and line width.
+**Impact burst.** Choose **Imanganation → Manga Tools → Create Impact Burst…** for a
+jagged radial burst, with controls for spike count, depth, rotation, and center point.
 
 On first launch, the Project dock offers **Open project…**; the
 chosen project folder is remembered in GIMP's user settings and its docks are restored on
@@ -164,10 +164,12 @@ a click that arrives while another is still working runs right after it. Row cal
 carry stable IDs.
 For container projects, generated and imported images are
 copied into immutable `takes/` files and linked through take IDs; XCF parasites and
-page placement metadata are still being migrated. The image procedures remain under
-the top-level *Imanganation* menu:
+page placement metadata are still being migrated. Image procedures are grouped under
+*Imanganation → Create*, *Imanganation → Manga Tools*, *Imanganation → Page & Cover*,
+*Imanganation → Project*, and *Imanganation → Settings*:
 
-- **Reload Imanganation Script** (*File* menu, or right-click the project's title in
+- **Reload Imanganation Script** (*File* menu or *Imanganation → Project*; also
+  right-click the project's title in
   Project for **Reload script** / **Load script from file…**): after editing the
   project's script (`script/` in the project folder), read it again. A panel whose
   script text is unchanged keeps everything (takes, placement, Context edits) wherever
@@ -179,7 +181,8 @@ the top-level *Imanganation* menu:
   another file and copies it into the project as its script. An older project records
   which script text each panel came from when it is opened, as long as its script file
   is unchanged since it was parsed.
-- **Close Imanganation Project** (*File* menu, or right-click the project's title in
+- **Close Imanganation Project** (*File* menu or *Imanganation → Project*; also
+  right-click the project's title in
   Project): offers to save pages with unsaved changes (Save, Close without saving,
   Cancel), closes the pages the workspace opened, and returns the docks to the welcome
   workspace. A closed project is not reopened at the next start; Open / Switch
@@ -249,7 +252,7 @@ the top-level *Imanganation* menu:
   cursor). The script's page numbers only show up in a note like "the script starts a
   new page here". They never restrict which image a panel goes into.
 - **Place Panel…**: places any PNG manually.
-- **Render Engine…** (*Imanganation* menu): chooses how the open project's panels are
+- **Render Engine…** (*Imanganation → Settings*): chooses how the open project's panels are
   drawn, saved in `project.json` (`project.render`) and sent with every render and
   regenerate. One choice per engine with what it does, its speed, its licence (a
   non-commercial one is flagged, with a warning when selected) and its install state,
@@ -264,7 +267,7 @@ the top-level *Imanganation* menu:
   **Design Locations** draws an image of each place in the script that has none yet
   (a place's notes are its description) for Qwen-Image to keep consistent. Measured trade-offs: `docs/quality/2026-10-07_combined.md`. Engine:
   `GET /engines`, `POST /engines/{id}/install`, `POST /locations/design`.
-- **Set Up Models…**: the AI models aren't included with the app. This lists the files
+- **Set Up Models…** (*Imanganation → Settings*): the AI models aren't included with the app. This lists the files
   the engine needs (what each is for, size, state, a link to its licence), with
   **Download** for the missing ones, checkpoint first, and **Use Files I Have…** to
   link matching files from a ComfyUI or A1111 folder (found by content, no extra disk
