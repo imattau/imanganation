@@ -59,8 +59,9 @@ def test_panel_inspector_shows_take_lineage_and_lettering_summary():
 
     inspector = build_docks(manifest, panel["id"])["inspector"]
 
-    assert "Frame size\t522 × 498" in inspector
-    assert "Dialogue lines\t1" in inspector
+    assert "frame 522 × 498" in inspector
+    assert "Dialogue lines" not in inspector  # Edit dialogue already lists them
+    assert "\nPlaced\t" in inspector and "Placed page" not in inspector
     assert "tk_000003 · active" in inspector
     assert "from tk_000001" in inspector
 

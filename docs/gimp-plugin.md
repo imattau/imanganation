@@ -248,6 +248,13 @@ page placement metadata are still being migrated. Image procedures are grouped u
   in Project) copies its brief into a new panel at the end of the same script page, so a
   second beat or variation starts from the same cast, place and shot. It is kept by
   Reload script; takes and placement aren't copied.
+- **Context polish.** A panel's **Seed** is a field (blank: a new random seed each
+  render; a number pins the composition), beside the seed each take row records. The
+  Production block shows what you act on (takes, the page and frame size, by name) and
+  not internal ids. Script rows show ● rendered, ◐ has a frame but no render yet, ○ not
+  started. Saving the project keeps the previous `project.json` as `project.json.bak`,
+  the way back from a bad edit. The engine-not-reachable message points at *Restart
+  Workspace*.
 - **Regenerate Panel…**: select a placed panel (its layer or group). It is re-rendered
   from the **current** `panels.json`, so script edits apply, at its frame's size. The
   new take (`003_take02.png`…) goes into the same group, cover-fitted to the frame

@@ -519,3 +519,27 @@ def test_duplicating_a_panel_copies_its_brief_but_none_of_its_work():
     assert source["takes"] == ["tk_1"]  # the original is untouched
     with pytest.raises(ProjectFileError):
         duplicate_panel(document, "pnl_gone00")
+
+
+def test_a_panels_seed_is_editable_and_blank_means_random():
+    from gimp.imanganation.project_store import apply_field_edit
+
+    document = _script_project()
+    panel = document["panels"][0]
+    apply_field_edit(document, f"{panel['id']}.seed", "1234")
+    assert panel["seed"] == 1234
+    apply_field_edit(document, f"{panel['id']}.seed", "")
+    assert panel["seed"] is None
+    for bad in ("-3", "abc", str(2**31)):
+        with pytest.raises(ProjectFileError):
+            apply_field_edit(document, f"{panel['id']}.seed", bad)
+
+
+def test_saving_keeps_the_previous_project_file_as_a_backup(tmp_path):
+    document = _script_project()
+    save_project(tmp_path, document)
+    assert not (tmp_path / "project.json.bak").exists()
+    first = (tmp_path / "project.json").read_text()
+    document["panels"][0]["notes"] = "changed"
+    save_project(tmp_path, document)
+    assert (tmp_path / "project.json.bak").read_text() == first

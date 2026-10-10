@@ -297,8 +297,11 @@ def _http(method, url, body=None, timeout=10):
             detail = exc.reason
         raise EngineError(f"engine refused the request: {detail}") from exc
     except (urllib.error.URLError, OSError) as exc:
+        how = ("Try Windows → Imanganation → Restart Workspace" if IN_FLATPAK else
+               "Try Windows → Imanganation → Restart Workspace, or run: "
+               "uv run manganation serve")
         raise EngineError(f"imanganation engine not reachable at {url} ({exc}). "
-                          "Start it with: uv run manganation serve") from exc
+                          f"{how}") from exc
 
 
 def _ping(url: str) -> str:

@@ -306,7 +306,9 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
     for panel in panels:
         if panel.get("status") == "orphaned":
             continue
-        marker = "●" if panel.get("placement") or panel.get("status") == "placed" else "○"
+        # ● rendered, ◐ has a frame but no render yet, ○ not started
+        marker = ("●" if panel.get("takes") else
+                  "◐" if panel.get("placement") or panel.get("status") == "placed" else "○")
         take_count = len(panel.get("takes", []))
         take_summary = f" · {take_count} take{'s' if take_count != 1 else ''}"
         script_rows.append(
@@ -411,6 +413,7 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
             _field(pid, "camera", "Shot", panel.get("camera")),
             _field(pid, "aspect_ratio", "Aspect ratio", panel.get("aspect_ratio")),
             _field(pid, "size", "Frame size", panel.get("size")),
+            _field(pid, "seed", "Seed (blank: random)", panel.get("seed")),
             "# Action",
             _field(pid, "action", "Action", panel.get("action")),
             _field(pid, "notes", "Notes", panel.get("notes")),
@@ -454,21 +457,19 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
                     button = f"\t!{bubble_line_action}:{key}:{label}"
                 inspector_rows.append(f"{speaker}\t{text}{button}")
         inspector_rows.extend([
-            "# Production",
-            f"ID\t{panel['id']}",
-            f"Takes\t{len(panel.get('takes', []))}",
-            f"Active take\t{panel.get('active_take') or 'None'}",
+            "# Takes",
+            f"Takes\t{len(panel.get('takes', []))}"
+            + (f" · active {panel['active_take']}" if panel.get("active_take") else ""),
         ])
         placement = panel.get("placement") or {}
         if placement:
             frame = placement.get("frame") or []
             frame_text = (" × ".join(str(value) for value in frame[2:4])
                           if len(frame) >= 4 else "Unknown")
-            inspector_rows.extend([
-                f"Placed page\t{placement.get('page', 'Unknown')}",
-                f"Frame size\t{frame_text}",
-            ])
-        inspector_rows.append(f"Dialogue lines\t{len(panel.get('dialogue', []))}")
+            placed_on = page_by_id.get(placement.get("page"), {})
+            inspector_rows.append(
+                f"Placed\t{_label(placed_on.get('label')) or 'a missing page'} · "
+                f"frame {frame_text}")
         take_map = manifest.get("takes", {})
         for take_id in panel.get("takes", []):
             take = take_map.get(take_id, {})

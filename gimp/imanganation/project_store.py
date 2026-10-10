@@ -251,6 +251,8 @@ def save_project(root: str | os.PathLike[str], document: dict[str, Any]) -> Path
             stream.write(payload)
             stream.flush()
             os.fsync(stream.fileno())
+        if target.exists():  # the last good copy, for a bad edit or an interrupted session
+            shutil.copy2(target, folder / "project.json.bak")
         os.replace(temporary, target)
         # Directory fsync makes the rename durable on POSIX; some platforms do not
         # support opening or syncing directory handles, so the atomic replace remains
@@ -458,6 +460,14 @@ def apply_field_edit(document: dict[str, Any], key: str, value: str,
                     lines.append(entry)
                 else:
                     lines[index] = entry
+        elif field == "seed":
+            if not value:  # blank: a new random seed each render
+                panel["seed"] = None
+            else:
+                if not value.isdigit() or int(value) >= 2**31:
+                    raise ProjectFileError("a seed is a whole number below 2147483648; "
+                                           "leave it blank for a random one")
+                panel["seed"] = int(value)
         elif field in PANEL_TEXT_FIELDS:
             if field == "aspect_ratio" and value:
                 value = FRAME_SHAPES.get(value.lower(), value)
