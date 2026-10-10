@@ -444,3 +444,33 @@ def test_a_panel_can_pin_one_of_a_characters_reference_images():
         set_character_version(document, panel["id"], 99, "x")
     with pytest.raises(ProjectFileError):
         set_character_version(document, "pnl_gone00", 0, "x")
+
+
+def test_dialogue_and_sfx_are_added_edited_and_removed_from_context():
+    from gimp.imanganation.project_store import apply_field_edit
+
+    document = _script_project()
+    panel = document["panels"][0]
+    panel["dialogue"], panel["sfx"] = [], []
+    pid = panel["id"]
+    apply_field_edit(document, f"{pid}.dialogue_new", "Yuki: Hi there!")
+    apply_field_edit(document, f"{pid}.dialogue_new", "Akira (thought): Not again.")
+    assert panel["dialogue"] == [
+        {"speaker": "Yuki", "text": "Hi there!", "kind": "speech"},
+        {"speaker": "Akira", "text": "Not again.", "kind": "thought"}]
+    apply_field_edit(document, f"{pid}.dialogue_0", "Yuki (shout): Hi there!!")
+    assert panel["dialogue"][0]["kind"] == "shout" and panel["dialogue"][0]["text"] == "Hi there!!"
+    apply_field_edit(document, f"{pid}.dialogue_1", "")  # blank removes
+    assert len(panel["dialogue"]) == 1
+    apply_field_edit(document, f"{pid}.dialogue_new", "")  # blank new adds nothing
+    assert len(panel["dialogue"]) == 1
+    for bad in ("no speaker here", "Yuki (sings): la"):
+        with pytest.raises(ProjectFileError):
+            apply_field_edit(document, f"{pid}.dialogue_new", bad)
+    apply_field_edit(document, f"{pid}.sfx_new", "BANG")
+    apply_field_edit(document, f"{pid}.sfx_0", "BOOM")
+    assert panel["sfx"] == ["BOOM"]
+    apply_field_edit(document, f"{pid}.sfx_0", "")
+    assert panel["sfx"] == []
+    with pytest.raises(ProjectFileError):
+        apply_field_edit(document, f"{pid}.dialogue_5", "Yuki: x")

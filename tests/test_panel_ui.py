@@ -355,3 +355,16 @@ def test_add_cover_page_sits_on_the_pages_heading_until_there_is_one():
     manifest["pages"].insert(0, {"id": "pg_cover01", "label": "Cover",
                                  "file": "pages/cover.xcf"})
     assert heading() == "# Pages"
+
+
+def test_context_has_editable_dialogue_and_sfx_rows_plus_add_rows():
+    manifest = copy.deepcopy(EXAMPLE)
+    panel = next(p for p in manifest["panels"] if p.get("dialogue"))
+    panel["sfx"] = ["BANG"]
+    pid = panel["id"]
+    inspector = build_docks(manifest, pid)["inspector"]
+    first = panel["dialogue"][0]
+    assert f"@{pid}.dialogue_0\tLine 1\t{first['speaker']}" in inspector
+    assert f"@{pid}.dialogue_new\tAdd dialogue\t" in inspector
+    assert f"@{pid}.sfx_0\tSFX 1\tBANG" in inspector
+    assert f"@{pid}.sfx_new\tAdd SFX\t" in inspector

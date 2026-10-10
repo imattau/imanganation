@@ -357,6 +357,33 @@ def record_take(
 
 
 # Context dock fields: "<row id>.<field>" keys, edited in place in the manifest.
+DIALOGUE_KINDS = ("speech", "thought", "narration", "shout", "whisper")
+_DIALOGUE_LINE = re.compile(
+    r"^\s*(?P<speaker>[^\s:(][^:(]*?)\s*(?:\((?P<kind>[^)]*)\))?\s*:\s*(?P<text>.+?)\s*$")
+_LINE_FIELD = re.compile(r"^(dialogue|sfx)_(\d+|new)$")
+
+
+def format_dialogue(line: dict[str, Any]) -> str:
+    """A dialogue line as the script writes it: SPEAKER: text, SPEAKER (kind): text."""
+    kind = line.get("kind", "speech")
+    return (f"{line.get('speaker', '')}"
+            + (f" ({kind})" if kind and kind != "speech" else "")
+            + f": {line.get('text', '')}")
+
+
+def parse_dialogue(value: str) -> dict[str, str]:
+    match = _DIALOGUE_LINE.match(value)
+    if not match:
+        raise ProjectFileError("write dialogue as 'Speaker: text' or 'Speaker (thought): "
+                               "text'")
+    kind = (match.group("kind") or "speech").strip().lower()
+    if kind not in DIALOGUE_KINDS:
+        raise ProjectFileError(f"unknown kind ({kind}); use one of "
+                               f"{', '.join(DIALOGUE_KINDS)}")
+    return {"speaker": match.group("speaker").strip(), "text": match.group("text"),
+            "kind": kind}
+
+
 PANEL_TEXT_FIELDS = {"location", "camera", "action", "notes", "aspect_ratio", "size"}
 _ASPECT = re.compile(r"^[0-9]+:[0-9]+$")
 # Frame hints ([FRAME: ...] in the script); absent = no hint, never a default shape.
@@ -416,6 +443,21 @@ def apply_field_edit(document: dict[str, Any], key: str, value: str,
                 panel["expressions"] = expressions
             else:
                 panel.pop("expressions", None)
+        elif _LINE_FIELD.match(field):
+            kind, _, which = field.partition("_")
+            lines = panel.setdefault("dialogue" if kind == "dialogue" else "sfx", [])
+            index = len(lines) if which == "new" else int(which)
+            if index >= len(lines) and which != "new":
+                raise ProjectFileError("that line is no longer in the panel")
+            if not value:  # blank removes the line (a blank new line adds nothing)
+                if which != "new":
+                    del lines[index]
+            else:
+                entry = parse_dialogue(value) if kind == "dialogue" else value
+                if which == "new":
+                    lines.append(entry)
+                else:
+                    lines[index] = entry
         elif field in PANEL_TEXT_FIELDS:
             if field == "aspect_ratio" and value:
                 value = FRAME_SHAPES.get(value.lower(), value)

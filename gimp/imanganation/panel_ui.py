@@ -10,11 +10,11 @@ from urllib.parse import quote
 
 try:  # Installed plug-in imports siblings as top-level modules.
     from layouts import page_layout_availability
-    from project_store import _location_name
+    from project_store import _location_name, format_dialogue
     from project_store import location_key as _location_key
 except ImportError:  # Package import in tests and external tooling.
     from .layouts import page_layout_availability
-    from .project_store import _location_name
+    from .project_store import _location_name, format_dialogue
     from .project_store import location_key as _location_key
 
 
@@ -414,6 +414,15 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
         else:
             inspector_rows.append(
                 "Next\tOpen a project page, select a frame, then generate this panel")
+        inspector_rows.append("# Edit dialogue")  # blank a line to remove it
+        inspector_rows.extend(
+            _field(pid, f"dialogue_{i}", f"Line {i + 1}", format_dialogue(d))
+            for i, d in enumerate(panel.get("dialogue", [])))
+        inspector_rows.append(_field(pid, "dialogue_new", "Add dialogue", ""))
+        inspector_rows.extend(
+            _field(pid, f"sfx_{i}", f"SFX {i + 1}", sfx)
+            for i, sfx in enumerate(panel.get("sfx", [])))
+        inspector_rows.append(_field(pid, "sfx_new", "Add SFX", ""))
         lines = [(str(i), _label(d.get("speaker")) or "—", _label(d.get("text")))
                  for i, d in enumerate(panel.get("dialogue", []))]
         lines += [(f"sfx{i}", "SFX", _label(sfx)) for i, sfx in enumerate(panel.get("sfx", []))]
