@@ -1,0 +1,25 @@
+{
+  "path": "out/inp/prj_cd3562f1216d/pnl_622a14042ddb-tk_00bf7f1c0f62-inpaint-7bf34d69fdae.png",
+  "seq": null,
+  "source": "../projects/rooftop.imanga/takes/pnl_622a14042ddb-tk_00bf7f1c0f62.png",
+  "mask": "out/stage_mask.png",
+  "prompt": "a red scarf",
+  "width": 1408,
+  "height": 768,
+  "denoise": 0.85,
+  "grow_mask_by": 8,
+  "seed": 3,
+  "positive": "manga panel, anime illustration, a red scarf",
+  "crop": [
+    277,
+    0,
+    1013,
+    576
+  ],
+  "characters": {},
+  "work_size": [
+    1152,
+    896
+  ],
+  "overlay_path": "out/inp/prj_cd3562f1216d/pnl_622a14042ddb-tk_00bf7f1c0f62-inpaint-7bf34d69fdae-overlay.png"
+}

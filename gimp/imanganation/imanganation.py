@@ -2355,7 +2355,7 @@ def _export_dialog(project_title, reading_order):
     dialog = Gtk.Dialog(title="Export Imanganation Project", flags=Gtk.DialogFlags.MODAL)
     dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
                        "Export…", Gtk.ResponseType.OK)
-    dialog.set_default_size(460, 260)
+    dialog.set_default_size(460, 300)
     grid = Gtk.Grid(column_spacing=12, row_spacing=10, margin=12)
     format_combo = Gtk.ComboBoxText()
     for ident, label in (("cbz", "CBZ comic archive"), ("pdf", "PDF volume"),
@@ -2397,6 +2397,11 @@ def _export_dialog(project_title, reading_order):
     grid.attach(reverse, 0, 6, 2, 1)
     grid.attach(Gtk.Label(label="Reading direction"), 0, 7, 1, 1)
     grid.attach(direction_combo, 1, 7, 1, 1)
+    page_range = Gtk.Entry(text="all", activates_default=True)
+    page_range.set_tooltip_text("Which pages, counted in the Pages strip: all, or "
+                                "something like 1-4, 7")
+    grid.attach(Gtk.Label(label="Pages"), 0, 8, 1, 1)
+    grid.attach(page_range, 1, 8, 1, 1)
     dialog.get_content_area().add(grid)
 
     def image_format_changed(_combo):
@@ -2422,7 +2427,8 @@ def _export_dialog(project_title, reading_order):
                    "include_frames": include_frames.get_active(),
                    "include_metadata": include_metadata.get_active(),
                    "reverse": reverse.get_active(),
-                   "reading_order": direction_combo.get_active_id() or "rtl"}
+                   "reading_order": direction_combo.get_active_id() or "rtl",
+                   "page_range": page_range.get_text()}
     dialog.destroy()
     return choices
 
@@ -2524,11 +2530,14 @@ def export_project(procedure, run_mode, image, drawables, config, data):
             manifest["project"].get("reading_order", "rtl"))
         if options is None:
             return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
+        chosen_pages = export_formats.parse_page_range(  # before asking where to save
+            options.get("page_range"), len(pages))
         destination = _export_destination(
             manifest["project"].get("title", "Manga"), options["format"])
         if destination is None:
             return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
 
+        pages = [pages[i] for i in chosen_pages]
         if not options["include_cover"]:
             pages = [page for page in pages if not export_formats.is_cover_page(page)]
         if options["reverse"]:
@@ -6782,10 +6791,10 @@ class Imanganation(Gimp.PlugIn):
             PROC_RENDER: "Create",
             PROC_NEXT: "Create",
             PROC_PLACE: "Create",
-            PROC_REGEN: "Create",
-            PROC_INPAINT: "Create",
-            PROC_STAGE: "Create",
-            PROC_REFINE: "Create",
+            PROC_REGEN: "Edit Panel",
+            PROC_INPAINT: "Edit Panel",
+            PROC_STAGE: "Edit Panel",
+            PROC_REFINE: "Edit Panel",
         }
         proc.add_menu_path(f"<Image>/Imanganation/{menu_groups[name]}")
         proc.set_attribution("imanganation", "imanganation", "2026")
@@ -7039,7 +7048,7 @@ class Imanganation(Gimp.PlugIn):
             _add_project_args(proc)
             return proc
 
-        proc.set_menu_label("_Place Panel...")
+        proc.set_menu_label("Place Panel _Image...")
         proc.set_documentation(
             "Place an imanganation panel",
             "Load any rendered panel as a layer, fit it to the selection, and tag it "

@@ -454,3 +454,24 @@ def test_every_panel_but_the_cover_can_be_duplicated_from_the_project_tree():
     manifest["panels"][0]["cover"] = True
     tree = build_docks(manifest, duplicate_panel_action="dup")["project"]
     assert tree.count("dup:Duplicate panel") == len(manifest["panels"]) - 1
+
+
+def test_empty_project_lists_say_what_to_do_next():
+    manifest = copy.deepcopy(EXAMPLE)
+    manifest["panels"], manifest["pages"] = [], []
+    docks = build_docks(manifest)
+    assert "No pages yet" in docks["project"]
+    assert "# No panels yet" in docks["script"]
+
+
+def test_export_page_range_is_read_in_project_order():
+    import pytest
+
+    from gimp.imanganation.export_formats import parse_page_range
+
+    assert parse_page_range("", 4) == parse_page_range("ALL", 4) == [0, 1, 2, 3]
+    assert parse_page_range("1-2, 4", 5) == [0, 1, 3]
+    assert parse_page_range("3", 5) == [2]
+    for bad in ("0", "2-1", "6", "a", "1-2-3", "1,,2"):
+        with pytest.raises(ValueError):
+            parse_page_range(bad, 5)

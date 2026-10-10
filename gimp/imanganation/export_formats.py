@@ -16,6 +16,25 @@ def safe_page_stem(label: str, index: int) -> str:
     return f"{index:03d}-{label}"
 
 
+def parse_page_range(text: str, count: int) -> list[int]:
+    """0-based indexes for a page range such as "3-7, 9" (1-based, in project order);
+    blank or "all" is every page. Raises ValueError, worded for the artist."""
+    text = (text or "").strip().lower()
+    if text in ("", "all"):
+        return list(range(count))
+    chosen: set[int] = set()
+    for part in text.split(","):
+        bounds = [b.strip() for b in part.split("-")]
+        if not part.strip() or len(bounds) > 2 or not all(b.isdigit() for b in bounds):
+            raise ValueError(f"Can't read the page range {text!r}: write it like 1-4, 7")
+        first, last = int(bounds[0]), int(bounds[-1])
+        if first < 1 or last < first or last > count:
+            raise ValueError(f"Pages {part.strip()} are outside this project's "
+                             f"{count} page{'s' if count != 1 else ''}")
+        chosen.update(range(first - 1, last))
+    return sorted(chosen)
+
+
 def is_cover_page(page: dict) -> bool:
     label = str(page.get("label", "")).strip().lower()
     return bool(page.get("cover")) or "cover" in label

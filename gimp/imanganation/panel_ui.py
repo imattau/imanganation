@@ -228,6 +228,8 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
                          for p in pages)
     project_rows.append("# Pages" + _menu(
         ("" if has_cover_page else add_cover_page_action, "Add cover page…")))
+    if not pages:
+        project_rows.append("\t# No pages yet: use + in the Pages strip, or Add page")
     for page in pages:
         page_label = _label(page.get("label")) or "Page"
         is_cover = page.get("cover") or page_label.strip().casefold() == "cover"
@@ -303,6 +305,9 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
             row += f"\t{preview}"
         filmstrip_rows.append(row + page_menu)
     script_rows = ["# Reading order"]
+    if not any(p.get("status") != "orphaned" for p in panels):
+        script_rows.append(
+            "# No panels yet: right-click Script panels in Project, Add panel…")
     for panel in panels:
         if panel.get("status") == "orphaned":
             continue

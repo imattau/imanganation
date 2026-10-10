@@ -172,7 +172,7 @@ carry stable IDs.
 For container projects, generated and imported images are
 copied into immutable `takes/` files and linked through take IDs; XCF parasites and
 page placement metadata are still being migrated. Image procedures are grouped under
-*Imanganation → Create*, *Imanganation → Manga Tools*, *Imanganation → Page & Cover*,
+*Imanganation → Create* (render and place), *Imanganation → Edit Panel* (regenerate, inpaint, stages, refine), *Imanganation → Manga Tools*, *Imanganation → Page & Cover*,
 *Imanganation → Project*, and *Imanganation → Settings*:
 
 - **Reload Imanganation Script** (*File* menu or *Imanganation → Project*; also
@@ -208,7 +208,7 @@ page placement metadata are still being migrated. Image procedures are grouped u
   CBZ archive, a multi-page PDF, or an ordered page-image folder. Choose whether to
   include covers, reverse the project page order, set the reading direction, and export
   PNG or JPEG (with adjustable JPEG quality); CBZ can include `ComicInfo.xml` metadata.
-  The export is flattened and leaves the editable XCF pages untouched. Cover composition
+  A **Pages** field limits it to a range such as `1-4, 7`. The export is flattened and leaves the editable XCF pages untouched. Cover composition
   guides are omitted, and generated page
   frame/template layers are omitted by default; select **Include generated panel frame
   layers** to export those lines too.
