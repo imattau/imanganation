@@ -871,18 +871,34 @@ def render_panel(procedure, run_mode, image, drawables, config, data):
 
 def _panel_layer(drawables):
     """The placed render layer for the selection: the layer itself, or the render
-    inside a selected panel group, or the render beside a selected text layer."""
+    inside a selected panel group (however deeply nested), or the render beside a
+    selected text layer. Of several renders, the topmost visible one."""
     def tagged(layer):
         return layer if layer.get_parasite(PARASITE) else None
+
+    def inside(group):
+        renders = []
+
+        def walk(layers):
+            for child in layers:  # top of the stack first
+                if tagged(child):
+                    renders.append(child)
+                elif child.is_group():
+                    walk(child.get_children())
+
+        walk(group.get_children())
+        return next((c for c in renders if c.get_visible()), renders[0] if renders else None)
 
     for item in drawables:
         if isinstance(item, Gimp.LayerMask):
             item = Gimp.Layer.from_mask(item)
         found = tagged(item)
-        group = item if item.is_group() else item.get_parent()
-        if not found and group is not None:
-            visible = [c for c in group.get_children() if tagged(c)]
-            found = next((c for c in visible if c.get_visible()), visible[0] if visible else None)
+        if not found and item.is_group():
+            found = inside(item)
+        parent = item.get_parent()
+        while not found and parent is not None:  # a text layer or bubble beside a render
+            found = inside(parent)
+            parent = parent.get_parent()
         if found:
             return found
     return None
@@ -893,7 +909,8 @@ def _selected_panel(drawables):
     ValueError with a message for the artist."""
     layer = _panel_layer(drawables)
     if layer is None:
-        raise ValueError("Select a placed imanganation panel (its layer or group).")
+        raise ValueError("No placed imanganation panel found. Select a panel's layer or "
+                         "group, or make the selection over a visible panel.")
     meta = json.loads(bytes(layer.get_parasite(PARASITE).get_data()))
     seq = meta.get("seq")
     source = (meta.get("stage_source") if meta.get("stage") else None) \
@@ -1152,23 +1169,46 @@ def _export_inpaint_mask(image, layer, source, path):
         image.undo_group_end()
 
 
-def _panel_at(image, x, y):
-    """The topmost visible placed take covering page point (x, y), if any."""
+def _visible_renders(image):
+    """Every visible placed take, topmost first."""
+    out = []
+
     def walk(layers):
-        for layer in layers:  # top of the stack first
+        for layer in layers:
             if not layer.get_visible():
                 continue
             if layer.is_group():
-                found = walk(layer.get_children())
-                if found:
-                    return found
+                walk(layer.get_children())
             elif layer.get_parasite(PARASITE):
-                _, lx, ly = layer.get_offsets()
-                if lx <= x < lx + layer.get_width() and ly <= y < ly + layer.get_height():
-                    return layer
-        return None
+                out.append(layer)
 
-    return walk(image.get_layers())
+    walk(image.get_layers())
+    return out
+
+
+def _panel_at(image, x, y):
+    """The topmost visible placed take covering page point (x, y), if any."""
+    for layer in _visible_renders(image):
+        _, lx, ly = layer.get_offsets()
+        if lx <= x < lx + layer.get_width() and ly <= y < ly + layer.get_height():
+            return layer
+    return None
+
+
+def _panel_under_selection(image, x1, y1, x2, y2):
+    """The placed take under a selection: the one at its centre, else the one it
+    overlaps most (a selection spanning a gutter or a bubble has its centre off the art)."""
+    centre = _panel_at(image, (x1 + x2) // 2, (y1 + y2) // 2)
+    if centre is not None:
+        return centre
+    best, best_area = None, 0
+    for layer in _visible_renders(image):
+        _, lx, ly = layer.get_offsets()
+        w = min(x2, lx + layer.get_width()) - max(x1, lx)
+        h = min(y2, ly + layer.get_height()) - max(y1, ly)
+        if w > 0 and h > 0 and w * h > best_area:
+            best, best_area = layer, w * h
+    return best
 
 
 def _name_list(text):
@@ -1183,7 +1223,7 @@ def inpaint_selection(procedure, run_mode, image, drawables, config, data, *, st
     # After placing, the template is the selected layer (for Fuzzy Select), so an
     # artist who just draws a selection means "the panel under it".
     if _panel_layer(drawables) is None:
-        under = _panel_at(image, (x1 + x2) // 2, (y1 + y2) // 2)
+        under = _panel_under_selection(image, x1, y1, x2, y2)
         drawables = [under] if under is not None else drawables
     try:
         layer, meta, seq, source = _selected_panel(drawables)
