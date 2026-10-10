@@ -177,8 +177,8 @@ def test_the_patch_is_a_real_diff_of_the_pinned_file(tmp_path):
 
 
 def test_ci_builds_the_pinned_fork_commit():
-    pin = json.loads((ROOT / "packaging/flatpak/fork.json").read_text())
-    assert pin["repo"] == "https://github.com/imattau/imanganation-gimp.git"
-    assert len(pin["commit"]) == 40 and int(pin["commit"], 16) >= 0
+    url, commit = mm.pinned_fork()
+    assert url == "https://github.com/imattau/imanganation-gimp.git"
+    assert len(commit) == 40 and int(commit, 16) >= 0
     script = (ROOT / "packaging/flatpak/make_manifest.py").read_text()
     assert "--fork-pinned" in script

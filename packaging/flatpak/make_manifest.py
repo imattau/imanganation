@@ -11,7 +11,7 @@ fork's GIMP version needs, and changes only what makes it ours:
 - **babl / GEGL:** pinned to the releases the fork is tested with (upstream builds
   their moving git master).
 - **GIMP:** the fork at a commit: the local checkout's HEAD (default), a pushed one
-  (``--fork-git``), or the one ``fork.json`` pins (``--fork-pinned``: CI and releases). flatpak-builder caches git sources by commit; a ``dir`` source it
+  (``--fork-git``), or the one the ``imanganation-gimp`` submodule pins (``--fork-pinned``: CI and releases). flatpak-builder caches git sources by commit; a ``dir`` source it
   can't checksum, so GIMP would rebuild every time. ``--fork-worktree`` builds the
   checkout as it is, uncommitted changes included, for testing them.
 - **The Imanganation plug-in**, installed with GIMP (``lib/gimp/3.0/plug-ins``), and
@@ -231,6 +231,18 @@ def make(upstream: dict, *, fork: Path | None, fork_git: str | None, fork_commit
     return manifest
 
 
+def pinned_fork() -> tuple[str, str]:
+    """The fork's URL (.gitmodules) and the commit the superproject's HEAD pins."""
+    def git(*args: str) -> str:
+        return subprocess.run(["git", "-C", str(REPO), *args], check=True,
+                              capture_output=True, text=True).stdout.strip()
+    url = git("config", "-f", ".gitmodules", "submodule.imanganation-gimp.url")
+    entry = git("ls-tree", "HEAD", "imanganation-gimp").split()
+    if len(entry) < 3 or entry[0] != "160000":
+        sys.exit("imanganation-gimp is not a submodule at HEAD; commit it first")
+    return url, entry[2]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--fork", type=Path, default=REPO / "imanganation-gimp",
@@ -238,7 +250,7 @@ def main() -> None:
     parser.add_argument("--fork-git", help="build the fork from this git URL instead")
     parser.add_argument("--fork-commit", help="the commit to build (with --fork-git)")
     parser.add_argument("--fork-pinned", action="store_true",
-                        help="build the fork commit fork.json pins, from GitHub (CI, releases)")
+                        help="build the commit the imanganation-gimp submodule pins, from GitHub (CI, releases)")
     parser.add_argument("--fork-worktree", action="store_true",
                         help="build the local fork as it is, uncommitted changes included "
                         "(rebuilds GIMP every time)")
@@ -246,8 +258,7 @@ def main() -> None:
     parser.add_argument("--out", type=Path, default=HERE / ".build" / f"{APP_ID}.json")
     args = parser.parse_args()
     if args.fork_pinned:
-        pin = json.loads((HERE / "fork.json").read_text())
-        args.fork_git, args.fork_commit = pin["repo"], pin["commit"]
+        args.fork_git, args.fork_commit = pinned_fork()
     if bool(args.fork_git) != bool(args.fork_commit):
         parser.error("--fork-git and --fork-commit go together")
     upstream_file = (args.fork / "build/linux/flatpak/org.gimp.GIMP-nightly.json")

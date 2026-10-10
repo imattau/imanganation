@@ -4,7 +4,7 @@
 # - a tag like v0.1.0: build and attach the bundle to a GitHub Release.
 # - Actions tab -> "Run workflow": build on demand.
 #
-# GIMP is the fork commit packaging/flatpak/fork.json pins (bump it when the fork
+# GIMP is the commit the imanganation-gimp submodule pins (bump it when the fork
 # changes). The same build.sh as locally: Ubuntu's flatpak-builder 1.4, GNOME 51 SDK
 # from Flathub. The first build compiles GIMP and ~20 libraries (an hour or more); the
 # builder's state is cached, so later builds rebuild what changed.
@@ -50,19 +50,10 @@ jobs:
           flatpak-builder --version
 
       - uses: actions/checkout@v4
+        with:
+          submodules: true
 
       - uses: astral-sh/setup-uv@v6
-
-      - name: Read the fork pin
-        id: fork
-        run: echo "commit=$(python3 -c 'import json; print(json.load(open("packaging/flatpak/fork.json"))["commit"])')" >> "$GITHUB_OUTPUT"
-
-      - name: Check out the GIMP fork (for its upstream manifest)
-        uses: actions/checkout@v4
-        with:
-          repository: imattau/imanganation-gimp
-          ref: ${{ steps.fork.outputs.commit }}
-          path: imanganation-gimp
 
       - name: Restore the builder's state
         uses: actions/cache/restore@v4

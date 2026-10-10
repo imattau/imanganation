@@ -79,8 +79,9 @@ bundle attached:
 git tag v0.1.0 && git push origin v0.1.0
 ```
 
-CI builds the fork commit `fork.json` pins (`build.sh --fork-pinned`), not the fork's
-latest: bump the pin when the fork changes. The builder's state is cached between runs
+CI builds the commit the `imanganation-gimp` submodule pins (`build.sh --fork-pinned`),
+not the fork's latest: after pushing the fork, `git add imanganation-gimp` and commit
+to bump the pin. The builder's state is cached between runs
 (main and tags only); the first build compiles everything and takes an hour or more.
 
 `make_manifest.py` writes the manifest (`.build/<app id>.json`) from the fork's own
