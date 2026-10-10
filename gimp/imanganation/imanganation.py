@@ -220,6 +220,8 @@ DOCK_DESIGN_VARIANT = "plug-in-imanganation-dock-design-variant"
 DOCK_CHARACTER_VERSION = "plug-in-imanganation-dock-character-version"
 # Context: a take's "Make active" (item "<panel id>:<take id>")
 DOCK_ACTIVATE_TAKE = "plug-in-imanganation-dock-activate-take"
+# Context (a page, or a panel on one): render every panel waiting on that page
+DOCK_GENERATE_PAGE = "plug-in-imanganation-dock-generate-page"
 DOCK_GENERATE_LAYOUT = "plug-in-imanganation-dock-generate-page-layout"
 # Speech bubbles: a script line's Bubble… (item "<panel id>:<line>"), a page's free
 # Bubble…, a Bubbles dock tile (item: template id), Fit bubble to text
@@ -3527,7 +3529,13 @@ def _generate_selected_panel():
         raise ValueError("Select a panel (in Project or Script, or on the canvas) to "
                          "generate it")
     _DOCK_CONTEXT["selected_id"] = selected
-    panel = manifest["panels"][ids.index(selected)]
+    _generate_panel(root, manifest, selected)
+
+
+def _generate_panel(root, manifest, panel_id):
+    """Render one panel; -> whether it finished (False: the artist cancelled)."""
+    ids = [panel["id"] for panel in manifest["panels"]]
+    panel = manifest["panels"][ids.index(panel_id)]
     page_id = (panel.get("placement") or {}).get("page")
     image = (_show_project_page(root, manifest, page_id) if page_id
              else _project_image(manifest))
@@ -3542,13 +3550,57 @@ def _generate_selected_panel():
     drawables = image.get_selected_drawables() or image.get_layers()[:1]
     config.set_core_object_array("drawables", drawables)
     config.set_property("project-dir", Gio.File.new_for_path(str(root)))
-    config.set_property("panel-number", ids.index(selected) + 1)
+    config.set_property("panel-number", ids.index(panel_id) + 1)
     result = procedure.run(config)
     status = result.index(0)
     error = Gimp.get_pdb().get_last_error()  # read before other PDB calls replace it
     _refresh_project_docks()
-    if status not in (Gimp.PDBStatusType.SUCCESS, Gimp.PDBStatusType.CANCEL):
+    if status == Gimp.PDBStatusType.CANCEL:
+        return False
+    if status != Gimp.PDBStatusType.SUCCESS:
         raise RuntimeError(error or "Generate failed")
+    return True
+
+
+def _page_waiting_panels(manifest, page_id):
+    """Script panels with a frame on this page and no render yet, in reading order."""
+    return [p for p in manifest["panels"]
+            if p.get("status") != "orphaned" and not p.get("takes")
+            and (p.get("placement") or {}).get("page") == page_id]
+
+
+def _generate_page_panels():
+    """Context (a page, or a panel on one) > Generate all: render every panel with a
+    frame on the page and no render yet, one after another. Stops at the first
+    cancel or failure, saying how far it got; finished panels stay."""
+    root = _DOCK_CONTEXT.get("root")
+    if root is None:
+        raise ValueError("Open a project first")
+    manifest = load_project(root)
+    selected = _DOCK_CONTEXT.get("selected_id")
+    panel = next((p for p in manifest["panels"] if p["id"] == selected), None)
+    page_id = (panel.get("placement") or {}).get("page") if panel else selected
+    if not any(page["id"] == page_id for page in manifest["pages"]):
+        raise ValueError("Select a page, or a panel placed on a page")
+    waiting = [p["id"] for p in _page_waiting_panels(manifest, page_id)]
+    if not waiting:
+        raise ValueError("Every panel with a frame on this page already has a render")
+    seconds = 20 * len(waiting)
+    if not _confirm(f"Generate {len(waiting)} panel{'s' if len(waiting) != 1 else ''}?",
+                    "Renders each panel that has a frame on this page and no render "
+                    f"yet, one after another (about {seconds // 60 or 1} min in all). "
+                    "Cancel any render to stop; finished panels are kept.", "Generate"):
+        return
+    done = 0
+    try:
+        for panel_id in waiting:
+            if not _generate_panel(root, load_project(root), panel_id):
+                break
+            done += 1
+    finally:
+        Gimp.message(f"Generated {done} of {len(waiting)} panels"
+                     + ("." if done == len(waiting) else
+                        "; the rest still have no render."))
 
 
 def _dock_action(procedure, config, data):
@@ -3612,6 +3664,8 @@ def _dock_action(procedure, config, data):
             _set_panel_frame_from_selection()
         elif data == "generate":
             _generate_selected_panel()
+        elif data == "generate-page":
+            _generate_page_panels()
         elif data == "new-project":
             options = _choose_new_project()
             if options is None:
@@ -5876,6 +5930,7 @@ def _dock_actions(root, manifest):
             "add_cover_action": DOCK_ADD_COVER,
             "character_version_action": DOCK_CHARACTER_VERSION,
             "take_action": DOCK_ACTIVATE_TAKE,
+            "generate_page_action": DOCK_GENERATE_PAGE,
             "design_variant_menu": DOCK_DESIGN_VARIANT,
             "add_cover_page_action": DOCK_ADD_COVER_PAGE,
             "reorder_pages_action": DOCK_REORDER_PAGES,
@@ -6220,6 +6275,7 @@ def _add_dock_callbacks(plugin):
         (DOCK_NEW_BUBBLE, _dock_bubble, "new", False),
         (DOCK_FIT_BUBBLE, _dock_bubble, "fit", False),
         (DOCK_GENERATE_LAYOUT, _dock_action, "generate-layout", False),
+        (DOCK_GENERATE_PAGE, _dock_action, "generate-page", False),
         # Page strip: clicking a page opens it; the button adds one (as in Project)
         (DOCK_ACTIONS[DOCK_FILMSTRIP], _dock_action, "project-action", False),
         (DOCK_ITEMS[DOCK_PROJECT], _dock_item_action, DOCK_PROJECT, True),

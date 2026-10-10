@@ -390,3 +390,21 @@ def test_take_rows_keep_the_seed_and_the_engines_render_warnings():
     inspector = build_docks(manifest, panel["id"])["inspector"]
     assert "seed 4242" in inspector
     assert f"⚠ {panel['active_take']}\tAkira has no reference image" in inspector
+
+
+def test_a_page_offers_to_generate_its_panels_that_have_no_render():
+    manifest = copy.deepcopy(EXAMPLE)
+    page = manifest["pages"][0]
+    waiting = manifest["panels"][0]
+    waiting["takes"], waiting["active_take"] = [], None
+    waiting["placement"] = {"page": page["id"], "frame": [0, 0, 100, 100]}
+    for other in manifest["panels"][1:]:
+        other["placement"] = None
+    inspector = build_docks(manifest, page["id"], generate_page_action="gen")["inspector"]
+    assert "!gen\tGenerate all 1 waiting panel" in inspector
+    panel_context = build_docks(manifest, waiting["id"], open_page_action="open",
+                                generate_page_action="gen")["inspector"]
+    assert "!gen\tGenerate all 1 waiting panel on this page" in panel_context
+    waiting["takes"] = ["tk_x"]
+    assert "Generate all" not in build_docks(
+        manifest, page["id"], generate_page_action="gen")["inspector"]

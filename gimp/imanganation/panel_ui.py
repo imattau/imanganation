@@ -124,7 +124,8 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
                 character_version_action: str = "",
                 design_variant_menu: str = "",
                 add_cover_page_action: str = "",
-                take_action: str = "") -> dict[str, str]:
+                take_action: str = "",
+                generate_page_action: str = "") -> dict[str, str]:
     """Build generic host content and stable selections from a project manifest.
 
     The Context (inspector) rows are editable fields; ``open_page_action``, a dock
@@ -158,7 +159,10 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
     puts "Design another reference…" on each character's right-click menu.
     ``add_cover_page_action`` puts "Add cover page…" on the Pages heading until the
     project has a Cover page. ``take_action`` gives each take that isn't the active one a
-    "Make active" button in Context (item ``<panel id>:<take id>``)."""
+    "Make active" button in Context (item ``<panel id>:<take id>``).
+    ``generate_page_action`` (a no-item dock procedure) adds "Generate all N waiting
+    panels" to a page's Context, and to a placed panel's, while panels with a frame on
+    that page have no render yet."""
     panels = manifest.get("panels", [])
     pages = manifest.get("pages", [])
     page_by_id = {page["id"]: page for page in pages}
@@ -409,6 +413,14 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
         ])
         if open_page_action and (panel.get("placement") or {}).get("page") in page_by_id:
             inspector_rows.append(f"!{open_page_action}\tOpen page")
+            others = [p for p in panels
+                      if not p.get("takes") and p.get("status") != "orphaned"
+                      and (p.get("placement") or {}).get("page")
+                      == (panel.get("placement") or {}).get("page")]
+            if generate_page_action and others:
+                inspector_rows.append(
+                    f"!{generate_page_action}\tGenerate all {len(others)} waiting "
+                    f"panel{'s' if len(others) != 1 else ''} on this page")
         placement = panel.get("placement") or {}
         if placement and placement.get("page") in page_by_id:
             page_label = _label(page_by_id[placement["page"]].get("label")) or "its page"
@@ -520,6 +532,12 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
                 inspector_rows.append(
                     f"Layout warning\tChanging the layout unplaces its "
                     f"{availability['placed']} panel(s); their renders are kept")
+        waiting = [p for p in panels_on_page
+                   if not p.get("takes") and p.get("status") != "orphaned"]
+        if generate_page_action and waiting:
+            inspector_rows.append(
+                f"!{generate_page_action}\tGenerate all {len(waiting)} waiting "
+                f"panel{'s' if len(waiting) != 1 else ''}")
         if open_page_action:
             inspector_rows.append(f"!{open_page_action}\tOpen page")
         if new_bubble_action:

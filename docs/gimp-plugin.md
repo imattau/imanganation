@@ -232,6 +232,15 @@ page placement metadata are still being migrated. Image procedures are grouped u
   **Back Cover** offer colored safe-area, title, art, credits, blurb, issue-mark, or
   barcode guides instead. Cover guides do not create panels and should be hidden before
   export. All generated layers are editable and existing page artwork is preserved.
+- **Cancel, queue and takes.** While any engine job runs, a small window shows the
+  queue position or elapsed time and a **Cancel** button (`POST /jobs/{id}/cancel`: a
+  queued job is dropped, a running one is interrupted in ComfyUI). Cancelling isn't an
+  error. In Context, every take but the active one has **Make active**, which shows
+  that take on the open page and hides the other whole-picture takes. Each take row
+  keeps its seed and any warning the engine gave at render time. A page's Context (and
+  a placed panel's) offers **Generate all N waiting panels**: it renders, one after
+  another, each panel with a frame on the page and no render yet, and stops at the first
+  cancel or failure.
 - **Regenerate Panel…**: select a placed panel (its layer or group). It is re-rendered
   from the **current** `panels.json`, so script edits apply, at its frame's size. The
   new take (`003_take02.png`…) goes into the same group, cover-fitted to the frame
