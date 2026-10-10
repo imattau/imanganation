@@ -4096,7 +4096,47 @@ def _storyboard_review(root, page_id):
     beats_column.pack_start(beats_heading, False, False, 0)
     beat_list = Gtk.ListBox()
     beat_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
-    beat_list.set_reorderable(True)
+    drag_target = Gtk.TargetEntry.new("application/x-imanganation-panel",
+                                      Gtk.TargetFlags.SAME_APP, 0)
+    drag_targets = [drag_target]
+    Gtk.Widget.drag_dest_set(beat_list, Gtk.DestDefaults.ALL, drag_targets,
+                             Gdk.DragAction.MOVE)
+
+    def drag_data_get(source_row, _context, selection, _info, _time):
+        selection.set(selection.get_target(), 8, source_row.get_name().encode("utf-8"))
+
+    def drag_data_received(_list, context, _x, y, selection, _info, timestamp):
+        raw = selection.get_data()
+        try:
+            dragged_id = raw.decode("utf-8") if raw else ""
+            source_row = next((r for r in beat_list.get_children()
+                               if r.get_name() == dragged_id), None)
+            target_row = beat_list.get_row_at_y(y)
+            if source_row is None or target_row is None or source_row == target_row:
+                Gtk.drag_finish(context, False, False, timestamp)
+                return
+            target_index = target_row.get_index()
+            allocation = target_row.get_allocation()
+            if y > allocation.y + allocation.height // 2:
+                target_index += 1
+            source_index = source_row.get_index()
+            beat_list.remove(source_row)
+            if source_index < target_index:
+                target_index -= 1
+            beat_list.insert(source_row, target_index)
+            source_row.show_all()
+            beat_list.select_row(source_row)
+            for index, row in enumerate(beat_list.get_children(), 1):
+                heading = getattr(row, "_story_heading", None)
+                if heading is not None:
+                    detail = heading.get_text().split(" · ", 1)
+                    heading.set_text(f"Panel {index} · " + detail[1]
+                                     if len(detail) > 1 else f"Panel {index}")
+            Gtk.drag_finish(context, True, False, timestamp)
+        except Exception:
+            Gtk.drag_finish(context, False, False, timestamp)
+
+    beat_list.connect("drag-data-received", drag_data_received)
     beat_scroll = Gtk.ScrolledWindow()
     beat_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
     beat_scroll.set_min_content_width(520)
@@ -4131,6 +4171,9 @@ def _storyboard_review(root, page_id):
         number = (panel.get("label") or {}).get("panel", "—")
         row = Gtk.ListBoxRow()
         row.set_name(panel["id"])
+        Gtk.Widget.drag_source_set(row, Gdk.ModifierType.BUTTON1_MASK, drag_targets,
+                                   Gdk.DragAction.MOVE)
+        row.connect("drag-data-get", drag_data_get)
         card = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         card.set_border_width(7)
         handle = Gtk.Label(label="⠿")
@@ -4140,6 +4183,7 @@ def _storyboard_review(root, page_id):
         heading = Gtk.Label(label=f"Panel {number} · {art_state} · {frame_state}")
         heading.set_xalign(0)
         heading.set_line_wrap(True)
+        row._story_heading = heading
         body.pack_start(heading, False, False, 0)
         action = (panel.get("action") or "").strip() or "No action described."
         add_text(body, action, bold=True)
