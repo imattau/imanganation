@@ -94,3 +94,34 @@ def test_required_models_flags_missing_files(tmp_path):
     got = {m["role"]: m["present"] for m in required_models(settings, models, tmp_path)}
     assert got == {"checkpoint": True, "ip-adapter (noob_mark1)": True,
                    "clip vision": False, "upscaler (realesrgan)": False}
+
+
+def test_cancel_drops_queued_job_and_interrupts_running_one(tmp_path, monkeypatch):
+    project = _project(tmp_path)
+    gate = threading.Event()
+    interrupted = []
+
+    def render(path, seq, fw, fh, seed=None):
+        gate.wait(5)
+        if interrupted:
+            raise RuntimeError("execution interrupted")
+        return RenderResult(path="x.png", width=1, height=1, seed=1, prompt="p")
+
+    import httpx
+
+    monkeypatch.setattr(httpx, "post", lambda url, **kw: interrupted.append(url))
+    client = TestClient(create_app(render=render, root=tmp_path, comfy_stats=lambda u: {},
+                                   models_check=lambda: []))
+    body = {"project_dir": str(project), "seq": 1, "frame_width": 100, "frame_height": 100}
+    first = client.post("/jobs", json=body).json()
+    second = client.post("/jobs", json=body).json()
+    _wait_for(lambda: client.get(f"/jobs/{first['id']}").json()["status"] == "running")
+    assert client.get(f"/jobs/{second['id']}").json()["queue_position"] == 0
+
+    assert client.post(f"/jobs/{second['id']}/cancel").json()["status"] == "cancelled"
+    assert client.post(f"/jobs/{first['id']}/cancel").json()["cancel_requested"] is True
+    assert interrupted and interrupted[0].endswith("/interrupt")
+    gate.set()
+    _wait_for(lambda: client.get(f"/jobs/{first['id']}").json()["status"] == "cancelled")
+    assert client.get(f"/jobs/{second['id']}").json()["status"] == "cancelled"
+    assert client.post("/jobs/nope/cancel").status_code == 404

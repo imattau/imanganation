@@ -298,7 +298,12 @@ def _ping(url: str) -> str:
         return f"unreachable ({exc})"
 
 
+CANCELLED = "Cancelled"
+
+
 def _error(procedure, msg):
+    if msg == CANCELLED:  # the artist's own choice: not an error dialog
+        return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
     return procedure.new_return_values(
         Gimp.PDBStatusType.EXECUTION_ERROR,
         GLib.Error.new_literal(GLib.quark_from_string("imanganation"), msg, 0))
@@ -775,20 +780,102 @@ def _render_warnings(result):
         Gimp.message(f"Warning: {warning}")
 
 
+class _JobWindow:
+    """A small non-modal window for a running engine job: what it is doing, how long
+    it has waited, and a Cancel button. Best effort: with no display it does nothing,
+    and the GIMP progress bar still pulses."""
+
+    def __init__(self, label):
+        self.cancelled = False
+        self.window = None
+        try:
+            if not Gtk.init_check()[0]:
+                return
+            window = Gtk.Window(title="Imanganation", resizable=False,
+                                window_position=Gtk.WindowPosition.CENTER)
+            window.set_keep_above(True)
+            window.set_deletable(False)
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, border_width=14)
+            self.title = Gtk.Label(label=label, xalign=0)
+            self.detail = Gtk.Label(label="Sending to the engine…", xalign=0)
+            self.bar = Gtk.ProgressBar()
+            self.button = Gtk.Button(label="Cancel")
+            self.button.connect("clicked", self._cancel)
+            for widget in (self.title, self.bar, self.detail, self.button):
+                box.pack_start(widget, False, False, 0)
+            window.add(box)
+            window.set_size_request(340, -1)
+            window.show_all()
+            self.window = window
+            self._pump()
+        except Exception:
+            self.window = None
+
+    def _cancel(self, _button):
+        self.cancelled = True
+        self.button.set_sensitive(False)
+        self.detail.set_text("Cancelling…")
+
+    def _pump(self):
+        context = GLib.MainContext.default()
+        while context.iteration(False):
+            pass
+
+    def update(self, text):
+        if self.window is not None:
+            if not self.cancelled:
+                self.detail.set_text(text)
+            self.bar.pulse()
+            self._pump()
+
+    def close(self):
+        if self.window is not None:
+            self.window.destroy()
+            self.window = None
+            self._pump()
+
+
+def _job_detail(job, started):
+    waited = int(time.monotonic() - started)
+    if job["status"] == "queued":
+        ahead = job.get("queue_position")
+        where = (f"Queued behind {ahead} job{'s' if ahead != 1 else ''}"
+                 if ahead else "Next in the queue")
+        return f"{where} · {waited}s"
+    return f"Rendering · {waited}s"
+
+
 def _run_job(engine, path, body, label):
-    """POST a job to the engine and poll it with a progress bar; -> result dict."""
+    """POST a job to the engine and poll it with a progress bar and a Cancel window;
+    -> result dict. Cancelling stops the engine's job (queued: dropped; running:
+    ComfyUI is interrupted) and raises EngineError(CANCELLED)."""
     job = _http("POST", f"{engine}{path}", body)
     Gimp.progress_init(label)
-    deadline = time.monotonic() + RENDER_TIMEOUT
+    window = _JobWindow(label)
+    started = time.monotonic()
+    deadline = started + RENDER_TIMEOUT
+    asked = False
     try:
         while job["status"] in ("queued", "running"):
             if time.monotonic() > deadline:
                 raise EngineError(f"timed out after {RENDER_TIMEOUT}s (job {job['id']})")
             time.sleep(0.5)
             Gimp.progress_pulse()
+            text = _job_detail(job, started)
+            Gimp.progress_set_text(text)
+            window.update(text)
+            if window.cancelled and not asked:
+                asked = True
+                try:
+                    _http("POST", f"{engine}/jobs/{job['id']}/cancel", {})
+                except EngineError:
+                    pass  # the next poll shows what happened
             job = _http("GET", f"{engine}/jobs/{job['id']}")
     finally:
+        window.close()
         Gimp.progress_end()
+    if job["status"] == "cancelled":
+        raise EngineError(CANCELLED)
     if job["status"] != "done":
         raise EngineError(f"{job.get('kind', 'render')} failed: {job.get('error')}")
     return job["result"]

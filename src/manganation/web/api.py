@@ -282,11 +282,14 @@ class ParsedScript:
 
 class Job(BaseModel):
     id: str
-    status: Literal["queued", "running", "done", "error"] = "queued"
+    status: Literal["queued", "running", "done", "error", "cancelled"] = "queued"
     kind: JobKind = "render"
     request: dict
     result: dict | None = None
     error: str | None = None
+    cancel_requested: bool = False
+    queue_position: int | None = Field(
+        default=None, description="Jobs ahead of this one while it is queued (0 = next)")
     created: float = Field(default_factory=time.time)
     started: float | None = None
     finished: float | None = None
@@ -362,6 +365,9 @@ def create_app(
     def run(job_id: str, work) -> None:
         with lock:
             job = jobs[job_id]
+            if job.status == "cancelled":  # cancelled while still queued
+                job.finished = time.time()
+                return
             job.status, job.started = "running", time.time()
         try:
             result = work()
@@ -370,7 +376,10 @@ def create_app(
                 job.status = "done"
         except Exception as exc:  # surface any failure to the polling client
             with lock:
-                job.error, job.status = str(exc), "error"
+                if job.cancel_requested:  # the interrupt surfaces as a failure
+                    job.error, job.status = "cancelled", "cancelled"
+                else:
+                    job.error, job.status = str(exc), "error"
         finally:
             with lock:
                 job.finished = time.time()
@@ -946,6 +955,40 @@ def create_app(
             job = jobs.get(job_id)
             if job is None:
                 raise HTTPException(404, "unknown job")
+            out = job.model_copy()
+            if out.status == "queued":
+                out.queue_position = sum(
+                    1 for j in jobs.values()
+                    if j.status == "queued" and j.created < out.created)
+            return out
+
+    @app.post("/jobs/{job_id}/cancel")
+    def cancel(job_id: str) -> Job:
+        """Drop a queued job, or interrupt the running one (ComfyUI is told to stop
+        the prompt it is executing; the worker is free for the next job as soon as
+        it unwinds). Finished jobs are returned unchanged."""
+        with lock:
+            job = jobs.get(job_id)
+            if job is None:
+                raise HTTPException(404, "unknown job")
+            if job.status == "queued":
+                job.status, job.cancel_requested = "cancelled", True
+                job.error = "cancelled"
+            elif job.status == "running":
+                job.cancel_requested = True
+            else:
+                return job.model_copy()
+            interrupt = job.status == "running"
+        if interrupt:
+            from manganation.config import load_settings
+
+            try:
+                import httpx
+
+                httpx.post(f"{load_settings().comfyui.base_url}/interrupt", timeout=5.0)
+            except Exception:  # ComfyUI gone: the job fails by itself
+                pass
+        with lock:
             return job.model_copy()
 
     return app
