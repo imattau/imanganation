@@ -3423,7 +3423,7 @@ def _match_selected_panel():
     # annotations and production references remain attached to the original identity.
     merged = dict(orphan)
     merged.update(candidate)
-    for key in ("location", "camera", "characters", "expressions", "aspect_ratio",
+    for key in ("location", "camera", "characters", "props", "expressions", "aspect_ratio",
                 "size", "seed", "notes"):
         if orphan.get(key):
             merged[key] = orphan[key]
