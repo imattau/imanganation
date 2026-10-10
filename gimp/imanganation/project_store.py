@@ -712,13 +712,19 @@ def reparse_script(document: dict[str, Any], parsed: dict[str, Any], *, script_f
     Never maps an edited panel by its label or position (docs/project-container.md).
     New cast members and locations are added; existing ones are kept.
 
+    Panels added by hand (``manual``) are not part of the script and are carried
+    through, after the last panel of their page.
+
     Returns panel ids: {"kept", "added", "orphaned", "removed"}."""
     import hashlib
 
     if not parsed.get("panels"):
         raise ProjectFileError("the script has no panels")
-    current = [p for p in document["panels"] if p.get("status") != "orphaned"]
-    orphans = [p for p in document["panels"] if p.get("status") == "orphaned"]
+    manual = [p for p in document["panels"] if p.get("manual")]
+    current = [p for p in document["panels"]
+               if p.get("status") != "orphaned" and not p.get("manual")]
+    orphans = [p for p in document["panels"]
+               if p.get("status") == "orphaned" and not p.get("manual")]
     available: dict[str, list[dict[str, Any]]] = {}
     for panel in current:
         available.setdefault(panel.get("source") or script_fingerprint(panel),
@@ -749,6 +755,8 @@ def reparse_script(document: dict[str, Any], parsed: dict[str, Any], *, script_f
         else:
             removed.append(panel["id"])
 
+    for panel in manual:  # hand-added panels are not in the script: they stay put
+        panels.insert(_page_end(panels, panel["label"]["page"]), panel)
     document["panels"] = panels + orphans
     document["cast"] = _merge_cast(document.get("cast", []), parsed, panels)
     document["locations"] = _merge_locations(document.get("locations", []), parsed, panels)
@@ -864,3 +872,89 @@ def delete_page(document: dict[str, Any], page_id: str) -> tuple[str, list[str]]
     document["pages"].remove(page)
     _renumber_pages(document, first)
     return page.get("file", ""), unplaced
+
+
+def _page_end(panels: list[dict[str, Any]], page_number: int) -> int:
+    """Where a new panel of script page ``page_number`` goes in ``panels`` (reading
+    order, no orphans): after that page's last panel, else before the first later page,
+    else at the end."""
+    index = None
+    for i, panel in enumerate(panels):
+        number = panel.get("label", {}).get("page", 0)
+        if number == page_number:
+            index = i + 1
+        elif number > page_number and index is None:
+            return i
+    return len(panels) if index is None else index
+
+
+def script_page_number(document: dict[str, Any], page_id: str) -> int:
+    """The script page number a project page stands for: its "Page N" label, else the
+    page its placed panels are labelled with, else its position counting from the
+    first numbered page."""
+    pages = document["pages"]
+    page = next((p for p in pages if p["id"] == page_id), None)
+    if page is None:
+        raise ProjectFileError("that page is no longer in the project")
+    if match := _DEFAULT_PAGE_LABEL.match(page.get("label", "")):
+        return int(match.group(1))
+    numbers = [p["label"]["page"] for p in document["panels"]
+               if (p.get("placement") or {}).get("page") == page_id
+               and p["label"]["page"] > 0]
+    if numbers:
+        return max(set(numbers), key=numbers.count)
+    return (_first_page_number(document) or 1) + pages.index(page)
+
+
+def add_panel(document: dict[str, Any], page_number: int, *, action: str,
+              location: str = "", characters: list[str] | None = None,
+              camera: str = "") -> dict[str, Any]:
+    """Add a hand-written panel at the end of script page ``page_number`` (the caller
+    saves). It is numbered after that page's last panel, unplaced, and marked
+    ``manual`` so Reload script keeps it. New names join the cast."""
+    action = " ".join(action.split())
+    if not action:
+        raise ProjectFileError("a panel needs an action")
+    if page_number < 1:
+        raise ProjectFileError("a panel needs a page number of 1 or more")
+    live = [p for p in document["panels"] if p.get("status") != "orphaned"]
+    same_page = [p["label"]["panel"] for p in live if p["label"]["page"] == page_number]
+    panel = _panel_from_item({
+        "page": page_number, "panel": max(same_page, default=0) + 1,
+        "location": " ".join(location.split()), "action": action,
+        "camera": " ".join(camera.split()),
+        "characters": _names(", ".join(characters or []))})
+    panel["manual"] = True
+    live.insert(_page_end(live, page_number), panel)
+    document["panels"] = live + [p for p in document["panels"]
+                                 if p.get("status") == "orphaned"]
+    known = {c["name"].casefold() for c in document["cast"]}
+    for entry in panel["characters"]:
+        if entry["name"].casefold() not in known:
+            document["cast"].append({"name": entry["name"], "aliases": [], "notes": ""})
+            known.add(entry["name"].casefold())
+    if panel["location"] and find_location(document, panel["location"]) is None:
+        document.setdefault("locations", []).append({"name": panel["location"]})
+    cursor = document.setdefault("cursor", {})
+    if not cursor.get("next_panel"):
+        cursor["next_panel"] = panel["id"]
+    return panel
+
+
+def delete_panel(document: dict[str, Any], panel_id: str) -> dict[str, Any]:
+    """Remove a hand-added panel that has no work on it (the caller saves)."""
+    panel = next((p for p in document["panels"] if p["id"] == panel_id), None)
+    if panel is None:
+        raise ProjectFileError("that panel is no longer in the project")
+    if not panel.get("manual"):
+        raise ProjectFileError("only panels added by hand can be deleted; "
+                               "script panels come from the script")
+    if _has_work(panel):
+        raise ProjectFileError("this panel has takes or a placement; "
+                               "remove that work first")
+    document["panels"].remove(panel)
+    cursor = document.get("cursor", {})
+    if cursor.get("next_panel") == panel_id:
+        cursor["next_panel"] = next((p["id"] for p in document["panels"]
+                                     if p.get("status") != "orphaned"), None)
+    return panel

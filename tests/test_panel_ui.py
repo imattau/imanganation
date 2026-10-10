@@ -292,3 +292,18 @@ def test_panel_shows_the_place_its_scene_heading_names_when_it_has_no_location()
     assert "Scene heading\tSmall bridge — morning" in brief
     assert "Location\tUnspecified" not in brief
     assert "@%s.location\tLocation\tSmall bridge" % panel["id"] in inspector
+
+
+def test_add_panel_menus_sit_on_the_heading_pages_and_panels():
+    manifest = copy.deepcopy(EXAMPLE)
+    manifest["panels"][0]["manual"] = True
+    project = build_docks(manifest, add_panel_action="add",
+                          delete_panel_action="rm")["project"].splitlines()
+    assert "# Script panels\t!add:Add panel…" in project
+    assert any(l.startswith("pg_a1b2c3\t") and "add:Add panel to this page…" in l
+               for l in project)
+    first = next(l for l in project if l.startswith(manifest["panels"][0]["id"] + "\t"))
+    assert first.endswith("\t!add:Add panel to this page…|rm:Delete panel…")
+    other = next(l for l in project if l.startswith(manifest["panels"][1]["id"] + "\t"))
+    assert "Delete panel" not in other
+    assert "# Script panels" in build_docks(manifest)["project"].splitlines()

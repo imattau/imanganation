@@ -370,3 +370,39 @@ def test_an_older_project_adopts_fingerprints_from_its_unchanged_script():
         del panel["source"]
     one_more = _SCRIPT + "PANEL 4\n[ACTION]\nThe bell rings.\n"
     assert not adopt_script_fingerprints(shifted, canonical.parse(one_more))  # no guessing
+
+
+def test_a_hand_added_panel_goes_at_the_end_of_its_page_and_survives_reload(tmp_path):
+    from gimp.imanganation.project_store import add_panel, delete_panel
+
+    document = _script_project()
+    last = document["panels"][-1]
+    page = last["label"]["page"]
+    panel = add_panel(document, page, action="  A cat   watches. ", location="The roof",
+                      characters=["Yuki, Mochi"], camera="low angle")
+    assert panel["manual"] and panel["status"] == "unplaced"
+    assert panel["label"] == {"page": page, "panel": last["label"]["panel"] + 1}
+    assert panel["action"] == "A cat watches."
+    assert document["panels"][-1] is panel
+    assert any(c["name"] == "Mochi" for c in document["cast"])
+    assert any(loc["name"] == "The roof" for loc in document["locations"])
+
+    summary = _reparse(document, _SCRIPT)
+    assert panel["id"] not in summary["removed"] + summary["orphaned"]
+    assert document["panels"][-1] is panel and panel["status"] == "unplaced"
+    assert [p["id"] for p in document["panels"]].count(panel["id"]) == 1
+
+    delete_panel(document, panel["id"])
+    assert panel not in document["panels"]
+    with pytest.raises(ProjectFileError):
+        delete_panel(document, document["panels"][0]["id"])  # script panels stay
+
+
+def test_an_added_panel_needs_an_action_and_a_page(tmp_path):
+    from gimp.imanganation.project_store import add_panel
+
+    document = _script_project()
+    with pytest.raises(ProjectFileError):
+        add_panel(document, 1, action="  ")
+    with pytest.raises(ProjectFileError):
+        add_panel(document, 0, action="x")

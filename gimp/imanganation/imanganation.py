@@ -75,11 +75,13 @@ try:
     )
     from project_store import (
         ProjectFileError,
+        add_panel,
         adopt_script_fingerprints,
         apply_field_edit,
         delete_character,
         delete_location,
         delete_page,
+        delete_panel,
         find_location,
         load_project,
         location_key,
@@ -91,6 +93,7 @@ try:
         reorder_pages,
         reparse_script,
         save_project,
+        script_page_number,
     )
     from script_canonical import looks_canonical as script_looks_canonical
     from script_canonical import parse as parse_script_text
@@ -203,6 +206,9 @@ DOCK_DELETE_LOCATION = "plug-in-imanganation-dock-delete-location"
 # Page strip / Project tree: right-click Delete page… and drag to reorder
 DOCK_DELETE_PAGE = "plug-in-imanganation-dock-delete-page"
 DOCK_REORDER_PAGES = "plug-in-imanganation-dock-reorder-pages"
+# Project tree: right-click Add panel… (heading, page or panel row) / Delete panel…
+DOCK_ADD_PANEL = "plug-in-imanganation-dock-add-panel"
+DOCK_DELETE_PANEL = "plug-in-imanganation-dock-delete-panel"
 DOCK_GENERATE_LAYOUT = "plug-in-imanganation-dock-generate-page-layout"
 # Speech bubbles: a script line's Bubble… (item "<panel id>:<line>"), a page's free
 # Bubble…, a Bubbles dock tile (item: template id), Fit bubble to text
@@ -4597,6 +4603,104 @@ def _dock_page_menu(procedure, config, data):
     return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
 
 
+def _choose_new_panel(page_number, locations, cast):
+    """Add Panel dialog -> (action, location, characters, camera) or None."""
+    dialog = Gtk.Dialog(title=f"Add Panel to Page {page_number}", flags=Gtk.DialogFlags.MODAL)
+    dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+                       "Add", Gtk.ResponseType.OK)
+    dialog.set_default_response(Gtk.ResponseType.OK)
+    grid = Gtk.Grid(column_spacing=12, row_spacing=8, margin=12)
+    action = Gtk.TextView(wrap_mode=Gtk.WrapMode.WORD_CHAR, accepts_tab=False,
+                          left_margin=4, right_margin=4, top_margin=4, bottom_margin=4)
+    scrolled = Gtk.ScrolledWindow(hexpand=True, vexpand=True)
+    scrolled.set_size_request(380, 100)
+    scrolled.set_shadow_type(Gtk.ShadowType.IN)
+    scrolled.add(action)
+    location = Gtk.ComboBoxText.new_with_entry()
+    for place in locations:
+        location.append_text(place)
+    characters = Gtk.Entry(hexpand=True, activates_default=True,
+                           placeholder_text=", ".join(cast[:3]) or "Names, comma separated")
+    camera = Gtk.Entry(hexpand=True, activates_default=True,
+                       placeholder_text="e.g. close-up, low angle")
+    rows = (("Action", scrolled), ("Location", location), ("Characters", characters),
+            ("Camera", camera))
+    for row, (label, widget) in enumerate(rows):
+        grid.attach(Gtk.Label(label=label, xalign=0.0, valign=Gtk.Align.START), 0, row, 1, 1)
+        grid.attach(widget, 1, row, 1, 1)
+    dialog.get_content_area().add(grid)
+    dialog.show_all()
+    try:
+        while dialog.run() == Gtk.ResponseType.OK:
+            buffer = action.get_buffer()
+            text = " ".join(buffer.get_text(buffer.get_start_iter(),
+                                            buffer.get_end_iter(), False).split())
+            if text:
+                return (text, location.get_active_text() or "", characters.get_text(),
+                        camera.get_text())
+            Gimp.message("Describe what happens in the panel.")
+        return None
+    finally:
+        dialog.destroy()
+
+
+def _add_panel_target_page(manifest, item):
+    """The script page number "Add panel…" applies to: the right-clicked page or panel,
+    else the selected one, else the active image's page, else the last page."""
+    pages = {page["id"] for page in manifest["pages"]}
+    panels = {panel["id"]: panel for panel in manifest["panels"]}
+    for key in (item, _DOCK_CONTEXT.get("selected_id")):
+        if key in pages:
+            return script_page_number(manifest, key)
+        panel = panels.get(key)
+        if panel is not None and panel["label"]["page"] > 0:
+            return panel["label"]["page"]
+    image = Gimp.context_get_image()
+    page_id = _project_page_id_for_image(image, manifest) if image is not None else None
+    if page_id is None and manifest["pages"]:
+        page_id = manifest["pages"][-1]["id"]
+    if page_id is not None:
+        return script_page_number(manifest, page_id)
+    numbers = [p["label"]["page"] for p in manifest["panels"] if p["label"]["page"] > 0]
+    return max(numbers, default=1)
+
+
+def _dock_panel_menu(procedure, config, data):
+    """Project tree right-click: Add panel… (Script panels heading, a page or a panel:
+    it goes at the end of that page) or Delete panel… (a panel added by hand)."""
+    try:
+        root = _DOCK_CONTEXT["root"]
+        item = config.get_property("item") or ""
+        manifest = load_project(root)
+        if data == "delete":
+            panel = next((p for p in manifest["panels"] if p["id"] == item), None)
+            if panel is None:
+                raise ValueError("That panel is no longer in the project")
+            if not _confirm("Delete this panel?", panel.get("action") or "(no action)",
+                            "Delete"):
+                return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
+            delete_panel(manifest, item)
+            save_project(root, manifest)
+            if _DOCK_CONTEXT.get("selected_id") == item:
+                _DOCK_CONTEXT["selected_id"] = None
+        else:
+            number = _add_panel_target_page(manifest, item)
+            chosen = _choose_new_panel(
+                number, [loc["name"] for loc in manifest.get("locations", [])],
+                [c["name"] for c in manifest.get("cast", [])])
+            if chosen is None:
+                return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
+            action, place, names, camera = chosen
+            panel = add_panel(manifest, number, action=action, location=place,
+                              characters=[names], camera=camera)
+            save_project(root, manifest)
+            _DOCK_CONTEXT["selected_id"] = panel["id"]
+        _refresh_project_docks()
+    except Exception as exc:
+        return _error(procedure, str(exc))
+    return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+
+
 def _setup_models_run(procedure, config, data):
     """Imanganation > Set Up Models: the workspace shows the dialog (it keeps polling
     the engine's download progress while you work)."""
@@ -5397,6 +5501,8 @@ def _dock_actions(root, manifest):
             "design_character_menu": DOCK_DESIGN_CHARACTER_ITEM,
             "delete_character_menu": DOCK_DELETE_CHARACTER,
             "delete_page_action": DOCK_DELETE_PAGE,
+            "add_panel_action": DOCK_ADD_PANEL,
+            "delete_panel_action": DOCK_DELETE_PANEL,
             "reorder_pages_action": DOCK_REORDER_PAGES,
             "bubble_line_action": DOCK_BUBBLE_LINE, "bubbled": frozenset(bubbled),
             "new_bubble_action": DOCK_NEW_BUBBLE,
@@ -5725,6 +5831,8 @@ def _add_dock_callbacks(plugin):
         (DOCK_DESIGN_LOCATION_ITEM, _dock_location_menu, "design", True),
         (DOCK_DELETE_LOCATION, _dock_location_menu, "delete", True),
         (DOCK_DELETE_PAGE, _dock_page_menu, "delete", True),
+        (DOCK_ADD_PANEL, _dock_panel_menu, "add", True),
+        (DOCK_DELETE_PANEL, _dock_panel_menu, "delete", True),
         (DOCK_REORDER_PAGES, _dock_page_menu, "reorder", True),
         (DOCK_BUBBLE_LINE, _dock_bubble, "line", True),
         (DOCK_BUBBLE_ITEM, _dock_bubble, "template", True),

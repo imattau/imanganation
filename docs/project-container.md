@@ -105,6 +105,7 @@ production state.
 |---|---|
 | `id` | `pnl_…` |
 | `label` | `{"page": 2, "panel": 1}` from the script; display only. The script's `COVER` is page 0 |
+| `manual` | `true` for a panel added by hand (Project → *Add panel…*): it has no script text, is numbered after its page's last panel, and Reload script carries it through untouched |
 | `cover` | `true` for the cover picture (absent = false): a text-free key illustration, rendered into the page labelled **Cover** |
 | `scene_heading`, `location`, `action`, `camera`, `notes`, `flashback` | as in `PanelSpec` |
 | `characters` | `[{"name": "Yuki", "version": "summer"}]`. `version` is optional (the engine's active reference otherwise). This is how story continuity reaches the engine. |
