@@ -82,6 +82,7 @@ try:
         ProjectFileError,
         add_cover,
         add_panel,
+        edit_panel_story,
         adopt_script_fingerprints,
         apply_field_edit,
         delete_character,
@@ -104,18 +105,21 @@ try:
         project_from_script,
         record_take,
         reorder_pages,
+        reorder_page_panels,
         reparse_script,
         save_project,
         script_page_number,
+        script_fingerprint,
         retarget_character_version,
         set_active_take,
         set_character_version,
     )
     from script_canonical import looks_canonical as script_looks_canonical
     from script_canonical import parse as parse_script_text
+    from script_canonical import serialize as serialize_script_text
 except ImportError:  # Keep older single-file plug-in installs usable for legacy projects.
     ProjectFileError = ValueError
-    project_from_script = parse_script_text = script_looks_canonical = None
+    project_from_script = parse_script_text = serialize_script_text = script_looks_canonical = None
     lettering = bubble_templates = setup_ui = engine_services = engine_ui = None
     export_formats = None
     tone_effects = None
@@ -3806,8 +3810,216 @@ def _generate_page_panels():
                         "; the rest still have no render."))
 
 
+def _story_text(buffer):
+    start, end = buffer.get_bounds()
+    return buffer.get_text(start, end, True)
+
+
+def _save_story_revision(root, manifest, reason="Storyboard edit"):
+    """Write an immutable canonical working-script revision and update the manifest."""
+    text = serialize_script_text(manifest)
+    parsed = parse_script_text(text)
+    if parsed.get("problems"):
+        raise ProjectFileError("The edited story cannot be saved: " +
+                               "; ".join(p["message"] for p in parsed["problems"][:3]))
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    script = manifest.setdefault("script", {})
+    previous = script.get("file")
+    if script.get("sha256") == digest and previous:
+        return
+    now = datetime.now().astimezone().isoformat(timespec="seconds")
+    if previous:
+        _archive_active_story(root, manifest, reason)
+    relative = f"script/history/story-{digest[:16]}.md"
+    destination = Path(root) / relative
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if not destination.exists():
+        temp = destination.with_suffix(".md.tmp")
+        temp.write_text(text, encoding="utf-8")
+        temp.replace(destination)
+    for panel in manifest["panels"]:
+        if panel.get("status") != "orphaned":
+            panel.pop("manual", None)
+            panel["source"] = script_fingerprint(panel)
+    script.update({"file": relative, "format": "canonical", "sha256": digest,
+                   "parsed_at": now, "parser": {"kind": "plug-in"}})
+
+
+def _edit_story_beat(root, page_number, panel=None, after_panel_id=None):
+    """Edit or add a canonical story beat; return its stable panel id on save."""
+    manifest = load_project(root)
+    seed = panel or next((p for p in manifest["panels"]
+                          if p.get("id") == after_panel_id), {})
+    dialog = Gtk.Dialog(title="Edit story beat" if panel else "Add story beat",
+                        flags=Gtk.DialogFlags.MODAL)
+    dialog.add_button(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL)
+    dialog.add_button("Save beat" if panel else "Add beat", Gtk.ResponseType.OK)
+    dialog.set_default_size(520, 650)
+    area = dialog.get_content_area()
+    area.set_margin_top(10); area.set_margin_bottom(10)
+    area.set_margin_start(12); area.set_margin_end(12)
+    scroller = Gtk.ScrolledWindow()
+    scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+    area.pack_start(scroller, True, True, 0)
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=7)
+    scroller.add(box)
+    fields = {}
+    def entry(label, value=""):
+        box.pack_start(Gtk.Label(label=label, xalign=0), False, False, 0)
+        widget = Gtk.Entry(); widget.set_text(value or "")
+        box.pack_start(widget, False, False, 0); fields[label] = widget
+    def entry_choices(label, value, choices):
+        box.pack_start(Gtk.Label(label=label, xalign=0), False, False, 0)
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=5)
+        widget = Gtk.Entry(); widget.set_text(value or "")
+        combo = Gtk.ComboBoxText()
+        for choice in choices: combo.append_text(choice)
+        combo.set_active(-1)
+        def append_choice(active_combo):
+            chosen = active_combo.get_active_text()
+            if chosen:
+                present = widget.get_text().strip()
+                widget.set_text((present + ", " if present else "") + chosen)
+                active_combo.set_active(-1)
+        combo.connect("changed", append_choice)
+        row.pack_start(widget, True, True, 0)
+        row.pack_start(combo, False, False, 0)
+        box.pack_start(row, False, False, 0); fields[label] = widget
+    def entry_suggestions(label, value, choices):
+        box.pack_start(Gtk.Label(label=label, xalign=0), False, False, 0)
+        combo = Gtk.ComboBoxText.new_with_entry()
+        for choice in choices: combo.append_text(choice)
+        child = combo.get_child(); child.set_text(value or "")
+        box.pack_start(combo, False, False, 0); fields[label] = child
+    def text_area(label, value="", height=3):
+        box.pack_start(Gtk.Label(label=label, xalign=0), False, False, 0)
+        widget = Gtk.TextView(wrap_mode=Gtk.WrapMode.WORD_CHAR)
+        widget.get_buffer().set_text(value or "")
+        scroller = Gtk.ScrolledWindow(); scroller.set_min_content_height(height * 24)
+        scroller.add(widget); box.pack_start(scroller, False, False, 0)
+        fields[label] = widget.get_buffer()
+    characters = ", ".join(c.get("name", "") for c in seed.get("characters", [])) if panel else ""
+    entry("Scene heading", seed.get("scene_heading", ""))
+    entry_suggestions("Location", seed.get("location", ""),
+                      [l.get("name", "") for l in manifest.get("locations", [])])
+    entry_choices("Characters (comma separated)", characters,
+                  [c.get("name", "") for c in manifest.get("cast", [])])
+    entry_choices("Props (comma separated)", ", ".join(seed.get("props", [])) if panel else "",
+                  [p.get("name", "") for p in manifest.get("props", [])])
+    entry("Shot", seed.get("camera", "") if panel else "")
+    text_area("Action", seed.get("action", "") if panel else "", 4)
+    dialogue = "\n".join(f"{d.get('speaker','')}"
+                          + (f" ({d.get('kind')})" if d.get("kind") != "speech" else "")
+                          + f": {d.get('text','')}"
+                          for d in (seed.get("dialogue", []) if panel else []))
+    text_area("Dialogue (one SPEAKER: line per row)", dialogue)
+    text_area("Sound effects (one per row)", "\n".join(seed.get("sfx", [])) if panel else "")
+    text_area("Notes", seed.get("notes", "") if panel else "")
+    expressions = "; ".join(f"{name}: {value}" for name, value in
+                             (seed.get("expressions", {}) if panel else {}).items())
+    entry("Expressions (Name: expression; …)", expressions)
+    entry("Frame shape (e.g. 2:1)", seed.get("aspect_ratio", "") if panel else "")
+    entry("Frame size (small, large, splash)", seed.get("size", "") if panel else "")
+    flashback = Gtk.CheckButton(label="This beat is in a flashback")
+    flashback.set_active(bool(seed.get("flashback")))
+    box.pack_start(flashback, False, False, 0)
+    dialog.show_all()
+    try:
+        if dialog.run() != Gtk.ResponseType.OK: return None
+        data = {key: value.get_text() if isinstance(value, Gtk.Entry)
+                else _story_text(value) for key, value in fields.items()}
+    finally:
+        dialog.destroy()
+    names = [n.strip() for n in data["Characters (comma separated)"].split(",") if n.strip()]
+    props = [n.strip() for n in data["Props (comma separated)"].split(",") if n.strip()]
+    dialog_lines = []
+    for line in data["Dialogue (one SPEAKER: line per row)"].splitlines():
+        speaker, sep, words = line.partition(":")
+        if sep and speaker.strip() and words.strip():
+            name, marker, kind = speaker.strip().partition(" (")
+            dialog_lines.append({"speaker": name.strip(), "kind":
+                                 kind.rstrip(")").strip() if marker else "speech",
+                                 "text": words.strip()})
+    story = {"scene_heading": data["Scene heading"], "location": data["Location"],
+             "characters": names, "props": props, "camera": data["Shot"],
+             "action": data["Action"].strip(), "dialogue": dialog_lines,
+             "sfx": [v.strip() for v in data["Sound effects (one per row)"].splitlines()
+                     if v.strip()], "notes": data["Notes"],
+             "expressions": {name.strip(): value.strip()
+                             for bit in data["Expressions (Name: expression; …)"].split(";")
+                             if (name := bit.partition(":")[0].strip())
+                             and (value := bit.partition(":")[2].strip())},
+             "aspect_ratio": data["Frame shape (e.g. 2:1)"],
+             "size": data["Frame size (small, large, splash)"],
+             "flashback": flashback.get_active()}
+    updated = load_project(root)
+    if panel:
+        result = edit_panel_story(updated, panel["id"], **story)
+    else:
+        result = add_panel(updated, page_number, **story, after_panel_id=after_panel_id)
+    _save_story_revision(root, updated, "Edit beat" if panel else "Add beat")
+    save_project(root, updated)
+    _refresh_project_docks()
+    return result["id"]
+
+
+def _archive_active_story(root, manifest, reason):
+    script = manifest.setdefault("script", {})
+    current = Path(root) / script.get("file", "")
+    if not current.is_file(): return
+    text = current.read_text(encoding="utf-8")
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    relative = f"script/history/story-{digest[:16]}.md"
+    destination = Path(root) / relative
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if not destination.exists(): destination.write_text(text, encoding="utf-8")
+    history = script.setdefault("history", [])
+    if not any(item.get("file") == relative for item in history):
+        history.append({"file": relative, "sha256": digest,
+                        "format": script.get("format", "canonical"),
+                        "created": datetime.now().astimezone().isoformat(timespec="seconds"),
+                        "reason": reason})
+
+
+def _reload_story_revision(root, revision, *, original=False):
+    manifest = load_project(root)
+    script = manifest.get("script") or {}
+    relative = script.get("original_file") if original else revision.get("file")
+    if not relative:
+        Gimp.message("This project has no imported original script to reload.")
+        return False
+    path = Path(root) / relative
+    if not path.is_file():
+        Gimp.message(f"Script revision is missing: {relative}")
+        return False
+    text = path.read_text(encoding="utf-8")
+    if original and not _confirm("Reload imported original?",
+        "This replaces the current story beats with the imported script. The current "
+        "working script remains in history. Panels with artwork or page placements "
+        "that no longer match will be kept under Needs matching.", "Reload original"):
+        return False
+    parsed, fmt = _parse_script(text, manifest["project"].get("title", "Project"))
+    if parsed.get("problems") and not _confirm_script_problems(parsed["problems"]):
+        return False
+    updated = copy.deepcopy(manifest)
+    target_format = (script.get("original_format", fmt) if original
+                     else revision.get("format", fmt))
+    _archive_active_story(root, updated, "Before reload original" if original
+                          else "Before history restore")
+    summary = reparse_script(updated, parsed, script_file=relative, script_text=text,
+                             script_format=target_format)
+    updated["script"].update({"file": relative, "format": target_format,
+                              "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+                              "parsed_at": datetime.now().astimezone().isoformat(timespec="seconds")})
+    save_project(root, updated)
+    _refresh_project_docks()
+    Gimp.message(f"Story reloaded: {len(summary['kept'])} unchanged, "
+                 f"{len(summary['added'])} new, {len(summary['orphaned'])} needing matches.")
+    return True
+
+
 def _storyboard_review(root, page_id):
-    """Review the current page image beside its script beats, without editing it."""
+    """Review and edit the current page's story beats."""
     manifest = load_project(root)
     page = next((item for item in manifest["pages"] if item["id"] == page_id), None)
     if page is None:
@@ -3822,6 +4034,11 @@ def _storyboard_review(root, page_id):
     dialog.add_button(Gtk.STOCK_CLOSE, Gtk.ResponseType.CANCEL)
     dialog.add_button("Open page", Gtk.ResponseType.OK)
     dialog.add_button("Open selected panel", 1)
+    dialog.add_button("Add beat…", 2)
+    dialog.add_button("Edit beat…", 3)
+    dialog.add_button("Script history…", 4)
+    if (manifest.get("script") or {}).get("original_file"):
+        dialog.add_button("Reload original…", 5)
     dialog.set_default_size(980, 680)
     content = dialog.get_content_area()
     content.set_spacing(10)
@@ -3879,6 +4096,7 @@ def _storyboard_review(root, page_id):
     beats_column.pack_start(beats_heading, False, False, 0)
     beat_list = Gtk.ListBox()
     beat_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
+    beat_list.set_reorderable(True)
     beat_scroll = Gtk.ScrolledWindow()
     beat_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
     beat_scroll.set_min_content_width(520)
@@ -3913,24 +4131,29 @@ def _storyboard_review(root, page_id):
         number = (panel.get("label") or {}).get("panel", "—")
         row = Gtk.ListBoxRow()
         row.set_name(panel["id"])
-        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
-        card.set_border_width(9)
+        card = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        card.set_border_width(7)
+        handle = Gtk.Label(label="⠿")
+        handle.set_tooltip_text("Drag to reorder this beat")
+        card.pack_start(handle, False, False, 0)
+        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
         heading = Gtk.Label(label=f"Panel {number} · {art_state} · {frame_state}")
         heading.set_xalign(0)
         heading.set_line_wrap(True)
-        card.pack_start(heading, False, False, 0)
+        body.pack_start(heading, False, False, 0)
         action = (panel.get("action") or "").strip() or "No action described."
-        add_text(card, action, bold=True)
+        add_text(body, action, bold=True)
         dialogue = panel.get("dialogue") or []
         for line in dialogue:
             speaker = line.get("speaker") or "Unassigned"
             kind = line.get("kind") or "speech"
             kind_text = f" ({kind})" if kind != "speech" else ""
-            add_text(card, f"{speaker}{kind_text}: {line.get('text', '')}")
+            add_text(body, f"{speaker}{kind_text}: {line.get('text', '')}")
         for sound in panel.get("sfx") or []:
-            add_text(card, f"SFX · {sound}")
+            add_text(body, f"SFX · {sound}")
         if not dialogue and not panel.get("sfx"):
-            add_text(card, "No dialogue or sound effects.", dim=True)
+            add_text(body, "No dialogue or sound effects.", dim=True)
+        card.pack_start(body, True, True, 0)
         row.add(card)
         beat_list.add(row)
 
@@ -3946,7 +4169,60 @@ def _storyboard_review(root, page_id):
     response = dialog.run()
     selected = beat_list.get_selected_row() if response == 1 else None
     selected_panel_id = selected.get_name() if selected is not None else None
+    reordered_ids = [beat_list.get_row_at_index(i).get_name()
+                     for i in range(beat_list.get_children().__len__())
+                     if beat_list.get_row_at_index(i) is not None]
     dialog.destroy()
+
+    if reordered_ids and reordered_ids != [p["id"] for p in panels]:
+        changed = load_project(root)
+        reorder_page_panels(changed, page_number, reordered_ids)
+        _save_story_revision(root, changed, "Reorder story beats")
+        save_project(root, changed)
+        manifest = changed
+        _refresh_project_docks()
+
+    if response == 2:
+        new_id = _edit_story_beat(root, page_number,
+                                  after_panel_id=selected_panel_id)
+        if new_id: _storyboard_review(root, page_id)
+        return
+    if response == 3 and selected_panel_id:
+        current = next((p for p in manifest["panels"] if p["id"] == selected_panel_id), None)
+        if current and _edit_story_beat(root, page_number, current):
+            _storyboard_review(root, page_id)
+        return
+    if response == 4:
+        current_script = manifest.get("script") or {}
+        revisions = list(reversed(current_script.get("history", [])))
+        if revisions:
+            chooser = Gtk.Dialog(title="Script history", flags=Gtk.DialogFlags.MODAL)
+            chooser.add_button(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL)
+            chooser.add_button("Restore selected…", Gtk.ResponseType.OK)
+            combo = Gtk.ComboBoxText()
+            for item in revisions:
+                combo.append_text(f"{item.get('created','')} · {item.get('reason','Edit')} · {item.get('file','')}")
+            combo.set_active(0)
+            chooser.get_content_area().pack_start(combo, True, True, 8)
+            chooser.show_all()
+            chosen = chooser.run() == Gtk.ResponseType.OK
+            index = combo.get_active()
+            chooser.destroy()
+            if chosen and 0 <= index < len(revisions):
+                item = revisions[index]
+                if _confirm("Restore this script revision?",
+                            "The current working script will be saved in history first. "
+                            "Panels with art or placements that no longer match will be "
+                            "kept under Needs matching.", "Restore"):
+                    _reload_story_revision(root, item)
+                    _storyboard_review(root, page_id)
+        else:
+            Gimp.message("No earlier script revisions are available yet.")
+        return
+    if response == 5:
+        _reload_story_revision(root, None, original=True)
+        _storyboard_review(root, page_id)
+        return
 
     if response in (Gtk.ResponseType.OK, 1):
         image = _show_project_page(root, manifest, page_id)
@@ -4582,9 +4858,11 @@ def _reload_script(root, choose=False):
     if parsed.get("problems") and not _confirm_script_problems(
             parsed["problems"], "Reload anyway", "reload without them"):
         return False
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
     relative = (script["file"] if source == current
-                else f"script/script{source.suffix or '.md'}")
+                else f"script/originals/{digest[:16]}{source.suffix or '.md'}")
     updated = copy.deepcopy(manifest)
+    _archive_active_story(root, updated, "Before reload script")
     summary = reparse_script(updated, parsed, script_file=relative, script_text=text,
                              script_format=script_format)
     counts = {key: len(ids) for key, ids in summary.items()}
@@ -4604,7 +4882,9 @@ def _reload_script(root, choose=False):
     if source != current:
         destination = Path(root) / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(text, encoding="utf-8")
+        if not destination.exists(): destination.write_text(text, encoding="utf-8")
+        updated.setdefault("script", {}).update({"original_file": relative,
+            "original_format": script_format, "original_sha256": digest})
     save_project(root, updated)
     if _DOCK_CONTEXT.get("selected_id") in set(summary["orphaned"] + summary["removed"]):
         _DOCK_CONTEXT["selected_id"] = None
@@ -4632,6 +4912,13 @@ def _create_project_from_script(script_path, title, parent, page_size, design, n
         manifest = project_from_script(parsed, title=title,
                                        script_file=f"script/script{suffix}",
                                        script_text=text, script_format=script_format)
+        original_digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        original_relative = f"script/originals/{original_digest[:16]}{suffix}"
+        original_path = root / original_relative
+        original_path.parent.mkdir(parents=True, exist_ok=True)
+        original_path.write_text(text, encoding="utf-8")
+        manifest["script"].update({"original_file": original_relative,
+            "original_format": script_format, "original_sha256": original_digest})
         if nsfw and engine_ui is not None:
             engine_ui.set_project_nsfw(manifest, True)
         save_project(root, manifest)
@@ -7009,8 +7296,10 @@ def _dock_bubble(procedure, config, data):
                 0, 0, image.get_width(), image.get_height()]
             center = _next_bubble_center(image, panel_id, frame,
                                          manifest["project"].get("reading_order", "rtl"))
+            # A flipped library variant is an explicit top-tail choice; keep its
+            # orientation instead of auto-aiming it toward a speaker below.
             tip = (_bubble_tail_tip(image, speaker, center, frame)
-                   if template.tail != "none" else None)
+                   if template.tail != "none" and not template.flipped else None)
             lettering.insert_bubble(image, template, text, center=center, tail_tip=tip,
                                     size=size, vertical=vertical,
                                     source={"panel": panel_id, "line": line},

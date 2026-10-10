@@ -716,7 +716,10 @@ def project_from_script(parsed: dict[str, Any], *, title: str, script_file: str,
         "version": VERSION,
         "project": {"id": new_id("prj_"), "title": title, "reading_order": reading_order,
                     "default_color_mode": "color", "created": now, "modified": now},
-        "script": {"file": script_file, "format": script_format, "parsed_at": now,
+        "script": {"file": script_file, "original_file": script_file,
+                   "original_format": script_format, "original_sha256":
+                       hashlib.sha256(script_text.encode("utf-8")).hexdigest(),
+                   "history": [], "format": script_format, "parsed_at": now,
                    "sha256": hashlib.sha256(script_text.encode("utf-8")).hexdigest(),
                    "parser": {"kind": "plug-in" if script_format == "canonical"
                               else "engine"}},
@@ -732,7 +735,7 @@ def project_from_script(parsed: dict[str, Any], *, title: str, script_file: str,
 
 # A panel's script content: what the script says, not production state (takes,
 # placement) nor its numbering, which shifts when panels are added before it.
-_SCRIPT_FIELDS = ("scene_heading", "location", "characters", "action", "camera",
+_SCRIPT_FIELDS = ("scene_heading", "location", "characters", "props", "action", "camera",
                   "expressions", "dialogue", "sfx", "notes", "flashback", "cover",
                   "aspect_ratio", "size")
 
@@ -747,6 +750,7 @@ def script_fingerprint(panel: dict[str, Any]) -> str:
         "location": panel.get("location") or "",
         "characters": [c["name"] if isinstance(c, dict) else str(c)
                        for c in panel.get("characters", [])],
+        "props": list(panel.get("props", [])),
         "action": panel.get("action") or "",
         "camera": panel.get("camera") or "",
         "expressions": dict(panel.get("expressions") or {}),
@@ -1140,7 +1144,12 @@ def script_page_number(document: dict[str, Any], page_id: str) -> int:
 
 def add_panel(document: dict[str, Any], page_number: int, *, action: str,
               location: str = "", characters: list[str] | None = None,
-              camera: str = "") -> dict[str, Any]:
+              camera: str = "", after_panel_id: str | None = None,
+              scene_heading: str = "", props: list[str] | None = None,
+              dialogue: list[dict[str, str]] | None = None,
+              sfx: list[str] | None = None, notes: str = "",
+              expressions: dict[str, str] | None = None, flashback: bool = False,
+              aspect_ratio: str = "", size: str = "") -> dict[str, Any]:
     """Add a hand-written panel at the end of script page ``page_number`` (the caller
     saves). It is numbered after that page's last panel, unplaced, and marked
     ``manual`` so Reload script keeps it. New names join the cast."""
@@ -1157,7 +1166,89 @@ def add_panel(document: dict[str, Any], page_number: int, *, action: str,
         "location": " ".join(location.split()), "action": action,
         "camera": " ".join(camera.split()),
         "characters": _names(", ".join(characters or []))})
-    return _insert_manual(document, live, panel)
+    panel.update({"scene_heading": scene_heading.strip(), "props": list(props or []),
+                  "dialogue": deepcopy(dialogue or []), "sfx": list(sfx or []),
+                  "notes": notes.strip(), "expressions": dict(expressions or {}),
+                  "flashback": bool(flashback), "aspect_ratio": aspect_ratio,
+                  "size": size})
+    added = _insert_manual(document, live, panel)
+    for dialogue_line in added.get("dialogue", []):
+        speaker = str(dialogue_line.get("speaker", "")).strip()
+        if speaker and not any(c.get("name", "").casefold() == speaker.casefold()
+                               for c in document.get("cast", [])):
+            document.setdefault("cast", []).append({"name": speaker, "aliases": [], "notes": ""})
+    for name in added.get("props", []):
+        if name and find_prop(document, name) is None:
+            document.setdefault("props", []).append({"name": name})
+    scene_place = _location_name(added.get("scene_heading", ""))
+    if scene_place and find_location(document, scene_place) is None:
+        document.setdefault("locations", []).append({"name": scene_place})
+    if after_panel_id:
+        reorder_page_panels(document, page_number,
+                            [p["id"] for p in document["panels"]
+                             if p.get("status") != "orphaned"
+                             and p["label"]["page"] == page_number],
+                            after_panel_id=after_panel_id, inserted_id=added["id"])
+    return added
+
+
+def edit_panel_story(document: dict[str, Any], panel_id: str, **fields) -> dict[str, Any]:
+    panel = next((p for p in document["panels"] if p["id"] == panel_id), None)
+    if panel is None or panel.get("status") == "orphaned":
+        raise ProjectFileError("that story beat is no longer available")
+    for key in ("scene_heading", "location", "action", "camera", "notes",
+                "aspect_ratio", "size"):
+        if key in fields: panel[key] = str(fields[key]).strip()
+    if "characters" in fields:
+        previous = {c.get("name", ""): c.get("version")
+                    for c in panel.get("characters", []) if isinstance(c, dict)}
+        panel["characters"] = [{"name": str(name), "version": previous.get(str(name))}
+                               for name in fields["characters"]]
+    for key in ("props", "dialogue", "sfx", "expressions"):
+        if key in fields: panel[key] = deepcopy(fields[key])
+    if "flashback" in fields: panel["flashback"] = bool(fields["flashback"])
+    known = {c["name"].casefold() for c in document.get("cast", [])}
+    for character in panel.get("characters", []):
+        name = character.get("name", "") if isinstance(character, dict) else str(character)
+        if name and name.casefold() not in known:
+            document.setdefault("cast", []).append({"name": name, "aliases": [], "notes": ""})
+            known.add(name.casefold())
+    for name in panel.get("props", []):
+        if name and find_prop(document, name) is None:
+            document.setdefault("props", []).append({"name": name})
+    if panel.get("location") and find_location(document, panel["location"]) is None:
+        document.setdefault("locations", []).append({"name": panel["location"]})
+    scene_place = _location_name(panel.get("scene_heading", ""))
+    if scene_place and find_location(document, scene_place) is None:
+        document.setdefault("locations", []).append({"name": scene_place})
+    for line in panel.get("dialogue", []):
+        speaker = str(line.get("speaker", "")).strip()
+        if speaker and not any(c.get("name", "").casefold() == speaker.casefold()
+                               for c in document.get("cast", [])):
+            document.setdefault("cast", []).append({"name": speaker, "aliases": [], "notes": ""})
+    panel.pop("manual", None)
+    panel["source"] = script_fingerprint(panel)
+    return panel
+
+
+def reorder_page_panels(document: dict[str, Any], page_number: int, ordered_ids: list[str],
+                        *, after_panel_id: str | None = None,
+                        inserted_id: str | None = None) -> None:
+    """Reorder active beats on one script page, preserving stable panel identities."""
+    page_panels = [p for p in document["panels"] if p.get("status") != "orphaned"
+                   and p["label"]["page"] == page_number]
+    expected = [p["id"] for p in page_panels]
+    if after_panel_id and inserted_id:
+        ordered_ids = [i for i in ordered_ids if i != inserted_id]
+        pos = ordered_ids.index(after_panel_id) + 1 if after_panel_id in ordered_ids else len(ordered_ids)
+        ordered_ids.insert(pos, inserted_id)
+    if len(ordered_ids) != len(expected) or set(ordered_ids) != set(expected):
+        raise ProjectFileError("the reordered beats do not match this page")
+    by_id = {p["id"]: p for p in page_panels}
+    ordered = [by_id[i] for i in ordered_ids]
+    for index, panel in enumerate(ordered, 1): panel["label"]["panel"] = index
+    it = iter(ordered)
+    document["panels"] = [next(it) if p in page_panels else p for p in document["panels"]]
 
 
 def add_cover(document: dict[str, Any], *, action: str, location: str = "",

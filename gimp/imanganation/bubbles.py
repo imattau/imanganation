@@ -18,7 +18,7 @@ import struct
 import zlib
 from dataclasses import dataclass
 
-GEOMETRY_VERSION = 2  # bump when shapes change, so cached previews regenerate
+GEOMETRY_VERSION = 4  # bump when shapes change, so cached previews regenerate
 
 CATEGORIES = [
     ("speech", "Speech"),
@@ -52,6 +52,8 @@ class Template:
     fill: str = "white"   # white, black (white text), none
     detail: int = 0       # scallops / spikes / waves, per shape
     depth: float = 0.0    # spike depth for bursts
+    tail_side: str = "left"  # default tail position: left or right
+    flipped: bool = False  # mirror vertically, putting a bottom tail at the top
 
     @property
     def text_color(self) -> tuple[float, float, float]:
@@ -65,17 +67,29 @@ def templates() -> list[Template]:
     def add(category, shape, aspect_name, tail="pointed", outline="solid", fill="white",
             detail=0, depth=0.0, label=""):
         aspect = ASPECTS[aspect_name]
-        bits = [shape, aspect_name, tail, outline, fill]
-        if detail:
-            bits.append(str(detail))
-        tid = f"{category}-" + "-".join(bits)
-        name = label or f"{shape.title()} · {aspect_name}"
-        if tail != "none":
-            name += f" · {tail} tail"
-        if outline not in ("solid", "none"):
-            name += f" · {outline}"
-        out.append(Template(tid, category, name, shape, aspect, tail, outline, fill,
-                            detail, depth))
+        directional = tail in ("pointed", "curved", "dots")
+        for side in (("left", "right") if directional else ("left",)):
+            for flipped in ((False, True) if directional else (False,)):
+                bits = [shape, aspect_name, tail, outline, fill]
+                if detail:
+                    bits.append(str(detail))
+                # Existing left/default IDs stay stable for saved bubbles and dock items.
+                if side == "right":
+                    bits.append("right")
+                if flipped:
+                    bits.append("flip")
+                tid = f"{category}-" + "-".join(bits)
+                name = label or f"{shape.title()} · {aspect_name}"
+                if tail != "none":
+                    name += f" · {tail} tail"
+                if side == "right":
+                    name += " · right side"
+                if flipped:
+                    name += " · top tail"
+                if outline not in ("solid", "none"):
+                    name += f" · {outline}"
+                out.append(Template(tid, category, name, shape, aspect, tail, outline, fill,
+                                    detail, depth, side, flipped))
 
     for aspect in ASPECTS:
         for shape in ("oval", "rounded"):
@@ -173,12 +187,18 @@ def _body(t: Template, width: float, height: float) -> list[tuple[float, float]]
         elif t.shape == "wobbly":
             r *= 0.965 + 0.035 * math.sin(t.detail * theta)
         points.append((cx + r * math.cos(theta), cy - r * math.sin(theta)))
+    if t.flipped:
+        # Keep the original winding after reflecting, so tail splicing still walks
+        # the long arc between the two points at the tail base.
+        points = [(x, height - y) for x, y in reversed(points)]
     return points
 
 
-def default_tail_tip(width: float, height: float) -> tuple[float, float]:
-    """Below the bubble, a little left of centre."""
-    return (width * 0.32, height * 1.38)
+def default_tail_tip(width: float, height: float, side: str = "left",
+                     flipped: bool = False) -> tuple[float, float]:
+    """Outside the bubble, offset toward the selected side and vertical end."""
+    y = -height * 0.38 if flipped else height * 1.38
+    return (width * (0.68 if side == "right" else 0.32), y)
 
 
 def outline(t: Template, width: float, height: float,
@@ -191,7 +211,7 @@ def outline(t: Template, width: float, height: float,
     body = _body(t, width, height)
     if t.tail == "none":
         return [body]
-    tip = tail_tip or default_tail_tip(width, height)
+    tip = tail_tip or default_tail_tip(width, height, t.tail_side, t.flipped)
     cx, cy = width / 2.0, height / 2.0
     angle = math.atan2(cy - tip[1], tip[0] - cx) % (2 * math.pi)
     reach = math.hypot(tip[0] - cx, tip[1] - cy)
@@ -287,8 +307,11 @@ def preview_png(t: Template, size: int = 72, supersample: int = 2) -> bytes:
     bw, bh = (n * 0.78, n * 0.78 / aspect) if aspect >= 1 else (n * 0.78 * aspect, n * 0.78)
     if t.tail != "none":
         bw, bh = bw * 0.86, bh * 0.86
-    ox, oy = (n - bw) / 2, (n - bh) / 2 - (n * 0.08 if t.tail != "none" else 0)
-    tip = (bw * 0.3, bh + n * 0.14)
+    ox = (n - bw) / 2
+    tail_margin = n * 0.08 if t.tail != "none" else 0
+    oy = (n - bh) / 2 + (tail_margin if t.flipped else -tail_margin)
+    tip = (bw * (0.7 if t.tail_side == "right" else 0.3),
+           -n * 0.14 if t.flipped else bh + n * 0.14)
     polygons = [[(x + ox, y + oy) for x, y in poly]
                 for poly in outline(t, bw, bh, tip if t.tail != "none" else None)]
     bg = (226, 226, 226)

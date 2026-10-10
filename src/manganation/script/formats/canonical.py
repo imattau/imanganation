@@ -87,7 +87,7 @@ _JOINED_RE = re.compile(r"\s*(?:,|&|\band\b)\s*", re.IGNORECASE)
 KINDS = ("speech", "thought", "whisper", "shout", "narration")
 SECTIONS = {"ACTION": "action", "DIALOGUE": "dialogue", "DIALOG": "dialogue",
             "SFX": "sfx", "NOTES": "notes", "NOTE": "notes"}
-FIELDS = {"SHOT", "CHARACTERS", "EXPRESSIONS", "LOCATION", "FRAME"}
+FIELDS = {"SHOT", "CHARACTERS", "EXPRESSIONS", "LOCATION", "FRAME", "PROPS"}
 # [FRAME: ...] words. A shape is stored as the panel's aspect ratio (width:height), so a
 # word and a written ratio mean the same thing to layout ranking and rendering.
 FRAME_SHAPES = {"wide": "2:1", "tall": "1:2", "square": "1:1"}
@@ -335,8 +335,9 @@ def parse(text: str) -> dict:
         return {"page": page_number, "panel": panel_number, "scene_heading": scene,
                 "location": "", "characters": [], "characters_given": False,
                 "camera": "", "expressions": {}, "action_lines": [],
-                "dialogue": [], "sfx": [], "notes": [], "flashback": flashback,
+                "dialogue": [], "sfx": [], "notes": [], "props": [], "flashback": flashback,
                 "aspect_ratio": None, "size": "", "cover": cover, "line": number}
+
 
     def problem(number, message):
         problems.append({"line": number, "message": message})
@@ -446,6 +447,9 @@ def parse(text: str) -> dict:
                     current["aspect_ratio"], current["size"] = aspect, size
                     for message in messages:
                         problem(number, message)
+                elif name == "PROPS":
+                    current["props"] = [part.strip() for part in value.split(",")
+                                        if part.strip()]
                 elif name == "CHARACTERS":
                     current["characters_given"] = True
                     names = []
@@ -521,3 +525,72 @@ def parse(text: str) -> dict:
                              "uses it"})
         del location["key"], location["line"]
     return {"cast": cast, "locations": locations, "panels": panels, "problems": problems}
+
+
+def serialize(document: dict) -> str:
+    """Serialize project story data to deterministic canonical script text."""
+    panels = [p for p in document.get("panels", []) if p.get("status") != "orphaned"]
+    out: list[str] = []
+    cast = document.get("cast", [])
+    if cast:
+        out.append("[CHARACTERS]")
+        for c in cast:
+            name = c.get("name", "").strip()
+            aliases = c.get("aliases") or []
+            alias_text = f" (aka {', '.join(aliases)})" if aliases else ""
+            out.append(f"{name}{alias_text}: {c.get('notes', '')}".rstrip())
+        out.append("")
+    places = []
+    for p in panels:
+        place = p.get("location", "")
+        if not place and p.get("scene_heading"):
+            place = re.split(r"\s+[—–-]\s+", p["scene_heading"], maxsplit=1)[0]
+        if place and place not in places:
+            places.append(place)
+    if places:
+        out.append("[LOCATIONS]")
+        for place in places:
+            match = next((l for l in document.get("locations", [])
+                          if l.get("name", "").casefold() == place.casefold()), {})
+            out.append(f"{place}: {match.get('notes', '')}".rstrip())
+        out.append("")
+    current_page, flashback = None, False
+    for p in panels:
+        label = p.get("label") or {}
+        page = int(label.get("page", 1))
+        cover = p.get("cover") or page == 0
+        if cover:
+            out.append("COVER")
+        elif current_page != page:
+            current_page = page
+            out.append(f"PAGE {page}")
+        if bool(p.get("flashback")) != flashback:
+            out.append("[FLASHBACK START]" if p.get("flashback") else "[FLASHBACK END]")
+            flashback = bool(p.get("flashback"))
+        out.append(f"[SCENE: {p.get('scene_heading', '')}]")
+        if not cover:
+            out.append(f"PANEL {int(label.get('panel', 1))}")
+        if p.get("camera"): out.append(f"[SHOT: {p['camera']}]")
+        names = [c.get("name", "") if isinstance(c, dict) else str(c)
+                 for c in p.get("characters", [])]
+        out.append(f"[CHARACTERS: {', '.join(names)}]")
+        if p.get("expressions"):
+            out.append("[EXPRESSIONS: " + "; ".join(
+                f"{n}: {v}" for n, v in p["expressions"].items()) + "]")
+        if p.get("location"): out.append(f"[LOCATION: {p['location']}]")
+        if p.get("props"): out.append("[PROPS: " + ", ".join(p["props"]) + "]")
+        if p.get("aspect_ratio") or p.get("size"):
+            out.append("[FRAME: " + ", ".join(
+                v for v in (p.get("aspect_ratio"), p.get("size")) if v) + "]")
+        out.extend(("[ACTION]", p.get("action", "").strip()))
+        if p.get("dialogue") and not cover:
+            out.append("[DIALOGUE]")
+            for d in p["dialogue"]:
+                kind = d.get("kind", "speech")
+                out.append(f"{d.get('speaker', '')}"
+                           + (f" ({kind})" if kind != "speech" else "")
+                           + f": {d.get('text', '')}")
+        if p.get("sfx") and not cover: out.extend(("[SFX]", *p["sfx"]))
+        if p.get("notes"): out.extend(("[NOTES]", p["notes"].strip()))
+        out.append("")
+    return "\n".join(out).rstrip() + "\n"

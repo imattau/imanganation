@@ -128,7 +128,9 @@ def _shape_layer(image, template, box, tail_tip, parent, position=0):
     ``parent`` (GIMP styles only attached layers)."""
     Gimp, _ = _gimp()
     x, y, w, h = box
-    tip = (tail_tip[0] - x, tail_tip[1] - y) if tail_tip else None
+    # A stale or caller-supplied tip must never turn a tail-less style into a tailed one.
+    tip = ((tail_tip[0] - x, tail_tip[1] - y)
+           if tail_tip and template.tail != "none" else None)
     polygons = B.outline(template, w, h, tip)
     if not polygons:
         return None
@@ -204,6 +206,8 @@ def insert_bubble(image, template, text, *, center=None, box=None, tail_tip=None
     script line it letters ({"panel": id, "line": index}).
     """
     Gimp, _ = _gimp()
+    if template.tail == "none":
+        tail_tip = None
     font = font_for(template, font_name)
     size = size or default_size(image)
     if center is None and box is None:
@@ -270,13 +274,15 @@ def fit_bubble(image, group):
             image.remove_layer(shape)
             if path is not None and path.is_valid():
                 image.remove_path(path)
-        tail = tuple(record["tail"]) if record.get("tail") else None
+        tail = (tuple(record["tail"])
+                if record.get("tail") and template.tail != "none" else None)
         _shape_layer(image, template, box, tail, group, position)
         text.set_text(wrapped)
         tx, ty, tw, th = B.text_box(template, box[2], box[3])
         text.set_offsets(int(box[0] + tx + (tw - text.get_width()) / 2),
                          int(box[1] + ty + (th - text.get_height()) / 2))
         record["box"] = [round(v, 1) for v in box]
+        record["tail"] = [round(v, 1) for v in tail] if tail else None
         _attach(group, BUBBLE_PARASITE, record)
         image.set_selected_layers([group])
     finally:
