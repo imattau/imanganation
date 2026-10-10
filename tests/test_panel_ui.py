@@ -368,3 +368,25 @@ def test_context_has_editable_dialogue_and_sfx_rows_plus_add_rows():
     assert f"@{pid}.dialogue_new\tAdd dialogue\t" in inspector
     assert f"@{pid}.sfx_0\tSFX 1\tBANG" in inspector
     assert f"@{pid}.sfx_new\tAdd SFX\t" in inspector
+
+
+def test_context_offers_make_active_on_every_take_but_the_active_one():
+    manifest = copy.deepcopy(EXAMPLE)
+    panel = manifest["panels"][0]
+    assert len(panel["takes"]) > 1
+    inspector = build_docks(manifest, panel["id"], take_action="proc-take")["inspector"]
+    active = panel["active_take"]
+    for take_id in panel["takes"]:
+        button = f"!proc-take:{panel['id']}:{take_id}:Make active"
+        assert (button in inspector) == (take_id != active)
+    assert "Make active" not in build_docks(manifest, panel["id"])["inspector"]
+
+
+def test_take_rows_keep_the_seed_and_the_engines_render_warnings():
+    manifest = copy.deepcopy(EXAMPLE)
+    panel = manifest["panels"][0]
+    take = manifest["takes"][panel["active_take"]]
+    take["engine"] = {"seed": 4242, "warnings": ["Akira has no reference image"]}
+    inspector = build_docks(manifest, panel["id"])["inspector"]
+    assert "seed 4242" in inspector
+    assert f"⚠ {panel['active_take']}\tAkira has no reference image" in inspector

@@ -95,6 +95,7 @@ try:
         reparse_script,
         save_project,
         script_page_number,
+        set_active_take,
         set_character_version,
     )
     from script_canonical import looks_canonical as script_looks_canonical
@@ -217,6 +218,8 @@ DOCK_ADD_COVER_PAGE = "plug-in-imanganation-dock-add-cover-page"
 DOCK_DESIGN_VARIANT = "plug-in-imanganation-dock-design-variant"
 # Context: a panel character's "Reference…" (item "<panel id>:<index>")
 DOCK_CHARACTER_VERSION = "plug-in-imanganation-dock-character-version"
+# Context: a take's "Make active" (item "<panel id>:<take id>")
+DOCK_ACTIVATE_TAKE = "plug-in-imanganation-dock-activate-take"
 DOCK_GENERATE_LAYOUT = "plug-in-imanganation-dock-generate-page-layout"
 # Speech bubbles: a script line's Bubble… (item "<panel id>:<line>"), a page's free
 # Bubble…, a Bubbles dock tile (item: template id), Fit bubble to text
@@ -1083,7 +1086,8 @@ def render_panel(procedure, run_mode, image, drawables, config, data):
         image_path, _take = _record_take(
             root, manifest, seq, result["path"], "render", result["width"],
             result["height"], engine={k: result.get(k) for k in
-                                      ("seed", "width", "height", "prompt")})
+                                      ("seed", "width", "height", "prompt", "warnings")
+                                      if result.get(k) is not None})
         image.select_item(Gimp.ChannelOps.REPLACE, frame)
         layer = _place(image, Gio.File.new_for_path(str(image_path)), spec, seq,
                        render={k: result.get(k) for k in ("seed", "width", "height",
@@ -1355,7 +1359,8 @@ def regenerate_panel(procedure, run_mode, image, drawables, config, data):
         path, _take = _record_take(
             root, manifest, seq, result["path"], "render", result["width"],
             result["height"], engine={k: result.get(k) for k in
-                                      ("seed", "width", "height", "prompt")})
+                                      ("seed", "width", "height", "prompt", "warnings")
+                                      if result.get(k) is not None})
     except (ValueError, KeyError) as exc:
         return _error(procedure, str(exc))
     stored = dict(spec, seq=seq, file=str(path),
@@ -4984,6 +4989,75 @@ def _dock_character_version(procedure, config, data):
     return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
 
 
+def _show_take_on_canvas(image, project_id, panel_id, take_id):
+    """Show the panel's ``take_id`` layer and hide its other whole-picture takes (staged
+    patch layers are the artist's additions and stay as they are). -> whether the take's
+    layer was on this page."""
+    found = False
+
+    def reference(layer):
+        parasite = layer.get_parasite(TAKE_PARASITE)
+        if parasite is None:
+            return None
+        try:
+            ref = json.loads(bytes(parasite.get_data()))
+        except (TypeError, ValueError):
+            return None
+        return ref if ref.get("project") == project_id and ref.get("panel") == panel_id \
+            else None
+
+    def walk(layers):
+        nonlocal found
+        for layer in layers:
+            ref = reference(layer)
+            if ref is not None:
+                meta = layer.get_parasite(PARASITE)
+                staged = False
+                if meta is not None:
+                    try:
+                        staged = bool(json.loads(bytes(meta.get_data())).get("stage"))
+                    except (TypeError, ValueError):
+                        pass
+                if not staged:
+                    wanted = ref.get("take") == take_id
+                    found = found or wanted
+                    layer.set_visible(wanted)
+            if layer.is_group():
+                walk(layer.get_children())
+
+    image.undo_group_start()
+    try:
+        walk(image.get_layers())
+    finally:
+        image.undo_group_end()
+    Gimp.displays_flush()
+    return found
+
+
+def _dock_activate_take(procedure, config, data):
+    """Context: a take's Make active -> it becomes the panel's active take, and on its
+    open page the take is the one shown. Item "<panel id>:<take id>"."""
+    try:
+        root = _DOCK_CONTEXT["root"]
+        panel_id, _, take_id = (config.get_property("item") or "").rpartition(":")
+        manifest = load_project(root)
+        set_active_take(manifest, panel_id, take_id)
+        save_project(root, manifest)
+        panel = next(p for p in manifest["panels"] if p["id"] == panel_id)
+        page_id = (panel.get("placement") or {}).get("page")
+        image = _open_page_images(manifest).get(page_id)
+        if image is not None:
+            if _show_take_on_canvas(image, manifest["project"]["id"], panel_id, take_id):
+                _save_project_page(image, root, manifest)
+            else:
+                Gimp.message("That take's layer isn't on the open page, so only the "
+                             "project record changed.")
+        _refresh_project_docks()
+    except Exception as exc:
+        return _error(procedure, str(exc))
+    return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+
+
 def _setup_models_run(procedure, config, data):
     """Imanganation > Set Up Models: the workspace shows the dialog (it keeps polling
     the engine's download progress while you work)."""
@@ -5801,6 +5875,7 @@ def _dock_actions(root, manifest):
             "delete_panel_action": DOCK_DELETE_PANEL,
             "add_cover_action": DOCK_ADD_COVER,
             "character_version_action": DOCK_CHARACTER_VERSION,
+            "take_action": DOCK_ACTIVATE_TAKE,
             "design_variant_menu": DOCK_DESIGN_VARIANT,
             "add_cover_page_action": DOCK_ADD_COVER_PAGE,
             "reorder_pages_action": DOCK_REORDER_PAGES,
@@ -6135,6 +6210,7 @@ def _add_dock_callbacks(plugin):
         (DOCK_DELETE_PANEL, _dock_panel_menu, "delete", True),
         (DOCK_ADD_COVER, _dock_panel_menu, "cover", True),
         (DOCK_CHARACTER_VERSION, _dock_character_version, "pick", True),
+        (DOCK_ACTIVATE_TAKE, _dock_activate_take, "take", True),
         (DOCK_DESIGN_VARIANT, _dock_character_menu, "variant", True),
         (DOCK_ADD_COVER_PAGE, _dock_page_menu, "cover", True),
         (DOCK_OPEN_CHARACTER_VERSION, _dock_open_character_version, "open", True),

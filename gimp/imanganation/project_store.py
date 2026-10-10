@@ -1050,3 +1050,14 @@ def set_character_version(document: dict[str, Any], panel_id: str, index: int,
         raise ProjectFileError("that character is no longer in the panel")
     characters[index]["version"] = version or None
     return characters[index]
+
+
+def set_active_take(document: dict[str, Any], panel_id: str, take_id: str) -> dict[str, Any]:
+    """Make one of the panel's takes the active one (the caller saves). Returns the take."""
+    panel = next((p for p in document["panels"] if p["id"] == panel_id), None)
+    if panel is None:
+        raise ProjectFileError("that panel is no longer in the project")
+    if take_id not in panel.get("takes", []) or take_id not in document.get("takes", {}):
+        raise ProjectFileError("that take no longer belongs to the panel")
+    panel["active_take"] = take_id
+    return document["takes"][take_id]

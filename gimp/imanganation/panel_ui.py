@@ -123,7 +123,8 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
                 add_cover_action: str = "",
                 character_version_action: str = "",
                 design_variant_menu: str = "",
-                add_cover_page_action: str = "") -> dict[str, str]:
+                add_cover_page_action: str = "",
+                take_action: str = "") -> dict[str, str]:
     """Build generic host content and stable selections from a project manifest.
 
     The Context (inspector) rows are editable fields; ``open_page_action``, a dock
@@ -156,7 +157,8 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
     picks which of their reference images the panel uses, and ``design_variant_menu``
     puts "Design another reference…" on each character's right-click menu.
     ``add_cover_page_action`` puts "Add cover page…" on the Pages heading until the
-    project has a Cover page."""
+    project has a Cover page. ``take_action`` gives each take that isn't the active one a
+    "Make active" button in Context (item ``<panel id>:<take id>``)."""
     panels = manifest.get("panels", [])
     pages = manifest.get("pages", [])
     page_by_id = {page["id"]: page for page in pages}
@@ -461,11 +463,18 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
                 details.append(f"{take['width']}×{take['height']}")
             if parent:
                 details.append(f"from {parent}")
+            engine = take.get("engine") or {}
+            if engine.get("seed") is not None:
+                details.append(f"seed {engine['seed']}")
             if root is not None and take.get("file"):
                 state = ("file ready" if (Path(root) / take["file"]).is_file()
                          else "file missing")
                 details.append(state)
-            inspector_rows.append(f"{take_id}{marker}\t{' · '.join(details)}")
+            button = (f"\t!{take_action}:{panel['id']}:{take_id}:Make active"
+                      if take_action and not marker and take else "")
+            inspector_rows.append(f"{take_id}{marker}\t{' · '.join(details)}{button}")
+            for warning in engine.get("warnings") or []:  # kept: they explain a bad render
+                inspector_rows.append(f"⚠ {take_id}\t{_label(warning)}")
     elif selected_id in page_by_id:
         page = page_by_id[selected_id]
         panels_on_page = [p for p in panels

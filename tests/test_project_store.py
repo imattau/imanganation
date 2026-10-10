@@ -474,3 +474,21 @@ def test_dialogue_and_sfx_are_added_edited_and_removed_from_context():
     assert panel["sfx"] == []
     with pytest.raises(ProjectFileError):
         apply_field_edit(document, f"{pid}.dialogue_5", "Yuki: x")
+
+
+def test_a_panels_active_take_can_be_switched_to_another_of_its_takes():
+    from gimp.imanganation.project_store import set_active_take
+
+    document = _script_project()
+    panel = document["panels"][0]
+    other = document["panels"][1]
+    document["takes"] = {"tk_a": {"panel": panel["id"]}, "tk_b": {"panel": panel["id"]},
+                         "tk_c": {"panel": other["id"]}}
+    panel["takes"] = ["tk_a", "tk_b"]
+    panel["active_take"] = "tk_b"
+    assert set_active_take(document, panel["id"], "tk_a") is document["takes"]["tk_a"]
+    assert panel["active_take"] == "tk_a"
+    with pytest.raises(ProjectFileError):
+        set_active_take(document, panel["id"], "tk_c")  # another panel's take
+    with pytest.raises(ProjectFileError):
+        set_active_take(document, "pnl_gone00", "tk_a")
