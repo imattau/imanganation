@@ -241,6 +241,13 @@ page placement metadata are still being migrated. Image procedures are grouped u
   a placed panel's) offers **Generate all N waiting panels**: it renders, one after
   another, each panel with a frame on the page and no render yet, and stops at the first
   cancel or failure.
+- **Gallery** (*Windows → Imanganation → Gallery*, a tile dock): the selection's
+  pictures. A panel shows its takes as thumbnails (the active one ticked); click one to
+  make it the active take. A character shows its reference images and a location its
+  reference image; click to open one in GIMP. **Duplicate panel** (right-click a panel
+  in Project) copies its brief into a new panel at the end of the same script page, so a
+  second beat or variation starts from the same cast, place and shot. It is kept by
+  Reload script; takes and placement aren't copied.
 - **Regenerate Panel…**: select a placed panel (its layer or group). It is re-rendered
   from the **current** `panels.json`, so script edits apply, at its frame's size. The
   new take (`003_take02.png`…) goes into the same group, cover-fitted to the frame

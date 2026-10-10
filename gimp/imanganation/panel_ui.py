@@ -120,6 +120,7 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
                 load_script_action: str = "",
                 add_panel_action: str = "",
                 delete_panel_action: str = "",
+                duplicate_panel_action: str = "",
                 add_cover_action: str = "",
                 character_version_action: str = "",
                 design_variant_menu: str = "",
@@ -151,7 +152,8 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
     Script dock is a plain list: no menus). ``add_panel_action`` puts "Add panel…" on the
     Script panels heading and "Add panel to this page…" on pages and panels (the
     dock procedure takes ``<page or panel id>``, or nothing from the heading), and
-    ``delete_panel_action`` "Delete panel…" on panels added by hand. ``add_cover_action``
+    ``delete_panel_action`` "Delete panel…" on panels added by hand, and
+    ``duplicate_panel_action`` "Duplicate panel" on every panel but the cover. ``add_cover_action``
     adds "Add cover…" there while the project has no cover (and the cover, a single
     picture, gets no "Add panel"). ``character_version_action`` gives each of a panel's
     characters a "Reference…" button in Context (item ``<panel id>:<index>``) that
@@ -244,6 +246,8 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
             f"{panel['id']}\t{_panel_label(panel)}"
             + _menu(("" if panel.get("cover") else add_panel_action,
                      "Add panel to this page…"),
+                    ("" if panel.get("cover") else duplicate_panel_action,
+                     "Duplicate panel"),
                     (delete_panel_action if panel.get("manual") else "",
                      "Delete panel…")))
     orphaned = [panel for panel in panels if panel.get("status") == "orphaned"]

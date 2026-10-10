@@ -444,3 +444,12 @@ def test_gallery_shows_reference_images_for_characters_and_locations():
     assert "loc:image\tSchool rooftop\t/p/roof.png" in build_gallery(
         manifest, place, None, {"image": "/p/roof.png"})
     assert build_gallery(manifest, None).startswith("# Gallery")
+
+
+def test_every_panel_but_the_cover_can_be_duplicated_from_the_project_tree():
+    manifest = copy.deepcopy(EXAMPLE)
+    tree = build_docks(manifest, duplicate_panel_action="dup")["project"]
+    assert tree.count("dup:Duplicate panel") == len(manifest["panels"])
+    manifest["panels"][0]["cover"] = True
+    tree = build_docks(manifest, duplicate_panel_action="dup")["project"]
+    assert tree.count("dup:Duplicate panel") == len(manifest["panels"]) - 1

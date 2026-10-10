@@ -1019,6 +1019,31 @@ def _insert_manual(document: dict[str, Any], live: list[dict[str, Any]],
     return panel
 
 
+def duplicate_panel(document: dict[str, Any], panel_id: str) -> dict[str, Any]:
+    """Copy a panel's brief (cast, place, shot, action, dialogue, SFX, notes) as a new,
+    unplaced panel at the end of the same script page, for a variation or a second beat
+    (the caller saves). The copy is ``manual``, so Reload script keeps it; takes,
+    placement and the seed are not copied."""
+    source = next((p for p in document["panels"] if p["id"] == panel_id), None)
+    if source is None:
+        raise ProjectFileError("that panel is no longer in the project")
+    if source.get("cover"):
+        raise ProjectFileError("a project has one cover; add pages for more pictures")
+    live = [p for p in document["panels"] if p.get("status") != "orphaned"]
+    page = source["label"]["page"]
+    copy = _panel_from_item({
+        **deepcopy(source),
+        "page": page,
+        "panel": max((p["label"]["panel"] for p in live if p["label"]["page"] == page),
+                     default=0) + 1,
+        "characters": [c["name"] for c in source.get("characters", [])],
+        "seed": None,
+    })
+    for index, entry in enumerate(source.get("characters", [])):
+        copy["characters"][index]["version"] = entry.get("version")
+    return _insert_manual(document, live, copy)
+
+
 def delete_panel(document: dict[str, Any], panel_id: str) -> dict[str, Any]:
     """Remove a hand-added panel that has no work on it (the caller saves)."""
     panel = next((p for p in document["panels"] if p["id"] == panel_id), None)

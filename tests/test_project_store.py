@@ -492,3 +492,30 @@ def test_a_panels_active_take_can_be_switched_to_another_of_its_takes():
         set_active_take(document, panel["id"], "tk_c")  # another panel's take
     with pytest.raises(ProjectFileError):
         set_active_take(document, "pnl_gone00", "tk_a")
+
+
+def test_duplicating_a_panel_copies_its_brief_but_none_of_its_work():
+    from gimp.imanganation.project_store import duplicate_panel
+
+    document = _script_project()
+    source = next(p for p in document["panels"] if p["characters"])
+    source["dialogue"] = [{"speaker": "Akira", "text": "Hi.", "kind": "speech"}]
+    source.update(takes=["tk_1"], active_take="tk_1", seed=7, status="placed",
+                  placement={"page": "pg_x", "frame": [0, 0, 1, 1]})
+    source["characters"][0]["version"] = "summer"
+    before = len(document["panels"])
+    copy = duplicate_panel(document, source["id"])
+
+    assert len(document["panels"]) == before + 1 and copy["id"] != source["id"]
+    assert copy["manual"] and copy["action"] == source["action"]
+    assert copy["dialogue"] == source["dialogue"] and copy["dialogue"] is not source["dialogue"]
+    assert copy["characters"][0] == {"name": source["characters"][0]["name"],
+                                     "version": "summer"}
+    assert copy["takes"] == [] and copy["active_take"] is None
+    assert copy["placement"] is None and copy["status"] == "unplaced" and copy["seed"] is None
+    page = [p["label"]["panel"] for p in document["panels"]
+            if p["label"]["page"] == source["label"]["page"]]
+    assert copy["label"]["panel"] == max(page) and page.count(max(page)) == 1
+    assert source["takes"] == ["tk_1"]  # the original is untouched
+    with pytest.raises(ProjectFileError):
+        duplicate_panel(document, "pnl_gone00")

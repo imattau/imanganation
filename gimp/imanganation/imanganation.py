@@ -84,6 +84,7 @@ try:
         delete_location,
         delete_page,
         delete_panel,
+        duplicate_panel,
         find_location,
         load_project,
         location_key,
@@ -215,6 +216,7 @@ DOCK_REORDER_PAGES = "plug-in-imanganation-dock-reorder-pages"
 # Project tree: right-click Add panel… (heading, page or panel row) / Delete panel…
 DOCK_ADD_PANEL = "plug-in-imanganation-dock-add-panel"
 DOCK_DELETE_PANEL = "plug-in-imanganation-dock-delete-panel"
+DOCK_DUPLICATE_PANEL = "plug-in-imanganation-dock-duplicate-panel"
 DOCK_ADD_COVER = "plug-in-imanganation-dock-add-cover"
 DOCK_OPEN_CHARACTER_VERSION = "plug-in-imanganation-dock-open-character-version"
 DOCK_ADD_COVER_PAGE = "plug-in-imanganation-dock-add-cover-page"
@@ -4959,7 +4961,7 @@ def _add_panel_target_page(manifest, item):
 
 def _dock_panel_menu(procedure, config, data):
     """Project tree right-click: Add panel… (Script panels heading, a page or a panel:
-    it goes at the end of that page), Add cover… (the heading) or Delete panel… (a panel added by hand)."""
+    it goes at the end of that page), Add cover… (the heading), Duplicate panel or Delete panel… (a panel added by hand)."""
     try:
         root = _DOCK_CONTEXT["root"]
         item = config.get_property("item") or ""
@@ -4975,6 +4977,10 @@ def _dock_panel_menu(procedure, config, data):
             save_project(root, manifest)
             if _DOCK_CONTEXT.get("selected_id") == item:
                 _DOCK_CONTEXT["selected_id"] = None
+        elif data == "duplicate":
+            panel = duplicate_panel(manifest, item)
+            save_project(root, manifest)
+            _DOCK_CONTEXT["selected_id"] = panel["id"]
         else:
             number = 0 if data == "cover" else _add_panel_target_page(manifest, item)
             chosen = _choose_new_panel(
@@ -5988,6 +5994,7 @@ def _dock_actions(root, manifest):
             "delete_page_action": DOCK_DELETE_PAGE,
             "add_panel_action": DOCK_ADD_PANEL,
             "delete_panel_action": DOCK_DELETE_PANEL,
+            "duplicate_panel_action": DOCK_DUPLICATE_PANEL,
             "add_cover_action": DOCK_ADD_COVER,
             "character_version_action": DOCK_CHARACTER_VERSION,
             "take_action": DOCK_ACTIVATE_TAKE,
@@ -6324,6 +6331,7 @@ def _add_dock_callbacks(plugin):
         (DOCK_DELETE_PAGE, _dock_page_menu, "delete", True),
         (DOCK_ADD_PANEL, _dock_panel_menu, "add", True),
         (DOCK_DELETE_PANEL, _dock_panel_menu, "delete", True),
+        (DOCK_DUPLICATE_PANEL, _dock_panel_menu, "duplicate", True),
         (DOCK_ADD_COVER, _dock_panel_menu, "cover", True),
         (DOCK_CHARACTER_VERSION, _dock_character_version, "pick", True),
         (DOCK_ACTIVATE_TAKE, _dock_activate_take, "take", True),
