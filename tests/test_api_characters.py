@@ -141,3 +141,55 @@ def test_characters_list_each_versions_image(tmp_path):
     assert listed["version_images"] == {
         "base": str(project / "characters/yuki/base.png"),
         "summer": str(project / "characters/yuki/summer.png")}
+
+
+def _two_versions(tmp_path):
+    project = _project(tmp_path)
+    client = _client(tmp_path)
+    body = {"project_dir": str(project), "name": "yuki", "image_path": str(_export(project)),
+            "make_default": False}
+    assert client.post("/characters/reference", json=body).json()["version"] == "gimp-01"
+    return project, client
+
+
+def test_make_a_reference_version_the_default(tmp_path):
+    project, client = _two_versions(tmp_path)
+    base = {"project_dir": str(project), "name": "Yuki"}
+    out = client.post("/characters/versions/default", json={**base, "version": "gimp-01"})
+    assert out.json() == {"name": "Yuki", "default_version": "gimp-01"}
+    reg = CharacterRegistry.from_path(project)
+    assert reg.reference_path("Yuki") == project / "characters/yuki/gimp-01.png"
+    assert client.post("/characters/versions/default",
+                       json={**base, "version": "nope"}).status_code == 404
+
+
+def test_rename_a_reference_version_moves_its_image_and_follows_the_default(tmp_path):
+    project, client = _two_versions(tmp_path)
+    base = {"project_dir": str(project), "name": "Yuki"}
+    client.post("/characters/versions/default", json={**base, "version": "gimp-01"})
+    out = client.post("/characters/versions/rename",
+                      json={**base, "version": "gimp-01", "new_version": "summer"}).json()
+    assert out["version"] == "summer" and out["default_version"] == "summer"
+    assert (project / "characters/yuki/summer.png").is_file()
+    assert not (project / "characters/yuki/gimp-01.png").exists()
+    reg = CharacterRegistry.from_path(project)
+    assert reg.reference_path("Yuki") == project / "characters/yuki/summer.png"
+    taken = client.post("/characters/versions/rename",
+                        json={**base, "version": "summer", "new_version": "base"})
+    assert taken.status_code == 409
+    bad = client.post("/characters/versions/rename",
+                      json={**base, "version": "summer", "new_version": "a b"})
+    assert bad.status_code == 422
+
+
+def test_delete_a_reference_version_sets_it_aside_and_keeps_one(tmp_path):
+    project, client = _two_versions(tmp_path)
+    base = {"project_dir": str(project), "name": "Yuki"}
+    client.post("/characters/versions/default", json={**base, "version": "gimp-01"})
+    out = client.post("/characters/versions/delete", json={**base, "version": "gimp-01"}).json()
+    assert out["default_version"] == "base"
+    assert Path(out["moved_to"]).is_file() and ".deleted-versions" in out["moved_to"]
+    assert not (project / "characters/yuki/gimp-01.png").exists()
+    last = client.post("/characters/versions/delete", json={**base, "version": "base"})
+    assert last.status_code == 409
+    assert (project / "characters/yuki/base.png").is_file()

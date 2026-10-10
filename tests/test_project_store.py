@@ -543,3 +543,17 @@ def test_saving_keeps_the_previous_project_file_as_a_backup(tmp_path):
     document["panels"][0]["notes"] = "changed"
     save_project(tmp_path, document)
     assert (tmp_path / "project.json.bak").read_text() == first
+
+
+def test_panels_follow_a_renamed_or_deleted_reference_version():
+    from gimp.imanganation.project_store import retarget_character_version
+
+    document = _script_project()
+    panel = next(p for p in document["panels"] if p["characters"])
+    name = panel["characters"][0]["name"]
+    panel["characters"][0]["version"] = "summer"
+    assert retarget_character_version(document, name.lower(), "winter", "x") == []
+    assert retarget_character_version(document, name, "summer", "beach") == [panel["id"]]
+    assert panel["characters"][0]["version"] == "beach"
+    assert retarget_character_version(document, name, "beach", None) == [panel["id"]]
+    assert panel["characters"][0]["version"] is None

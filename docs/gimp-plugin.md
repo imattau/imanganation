@@ -244,7 +244,12 @@ page placement metadata are still being migrated. Image procedures are grouped u
 - **Gallery** (*Windows → Imanganation → Gallery*, a tile dock): the selection's
   pictures. A panel shows its takes as thumbnails (the active one ticked); click one to
   make it the active take. A character shows its reference images and a location its
-  reference image; click to open one in GIMP. **Duplicate panel** (right-click a panel
+  reference image; click to open one in GIMP. Right-click a character's reference for
+  **Make default** (the one panels use unless they pin another), **Rename…** (the image
+  file is renamed with it, and panels that pinned it follow) and **Delete…** (the image is
+  set aside in `.deleted-versions`; panels that pinned it fall back to the default; a
+  character's only reference can't be deleted). Engine: `POST
+  /characters/versions/default|rename|delete`. **Duplicate panel** (right-click a panel
   in Project) copies its brief into a new panel at the end of the same script page, so a
   second beat or variation starts from the same cast, place and shot. It is kept by
   Reload script; takes and placement aren't copied.

@@ -120,6 +120,22 @@ class RefineRequest(BaseModel):
         return self
 
 
+class VersionRequest(BaseModel):
+    """Act on one reference version of a character."""
+
+    project_dir: str | None = None
+    project: str | None = Field(default=None, pattern=r"^prj_[a-z0-9]{6,}$")
+    name: str = Field(min_length=1)
+    version: str = Field(min_length=1)
+    new_version: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{1,40}$")
+
+    @model_validator(mode="after")
+    def _one_form(self):
+        if (self.project is None) == (self.project_dir is None):
+            raise ValueError("send either project (container id) or project_dir")
+        return self
+
+
 class ReferenceRequest(BaseModel):
     project_dir: str | None = None
     project: str | None = Field(default=None, pattern=r"^prj_[a-z0-9]{6,}$")
@@ -859,6 +875,50 @@ def create_app(
             raise HTTPException(404, f"no character {name!r} (known: {known})")
         character, moved = removed
         return {"name": character.name, "versions": [v.id for v in character.versions],
+                "moved_to": str(moved) if moved else None}
+
+    def _version_request(req: VersionRequest):
+        reg = _registry(req.project_dir, req.project)
+        character = reg.get(req.name)
+        if character is None:
+            known = ", ".join(c.name for c in reg.cast.characters) or "none"
+            raise HTTPException(404, f"no character {req.name!r} (known: {known})")
+        if character.version(req.version) is None:
+            have = ", ".join(v.id for v in character.versions) or "none"
+            raise HTTPException(404, f"{character.name} has no reference {req.version!r} "
+                                     f"(has: {have})")
+        return reg, character
+
+    @app.post("/characters/versions/default")
+    def make_version_default(req: VersionRequest) -> dict:
+        """Make one of a character's reference versions the one panels use by default."""
+        reg, character = _version_request(req)
+        reg.set_default(character.name, req.version)
+        return {"name": character.name, "default_version": req.version}
+
+    @app.post("/characters/versions/rename")
+    def rename_version(req: VersionRequest) -> dict:
+        """Give a reference version a new id (its image file is renamed too)."""
+        reg, character = _version_request(req)
+        if not req.new_version:
+            raise HTTPException(422, "send new_version")
+        try:
+            reg.rename_version(character.name, req.version, req.new_version)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return {"name": character.name, "version": req.new_version,
+                "was": req.version, "default_version": reg.get(character.name).default_version}
+
+    @app.post("/characters/versions/delete")
+    def delete_version(req: VersionRequest) -> dict:
+        """Set a reference version aside (its image moves to ``.deleted-versions``)."""
+        reg, character = _version_request(req)
+        try:
+            updated, moved = reg.remove_version(character.name, req.version)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return {"name": character.name, "deleted": req.version,
+                "default_version": updated.default_version,
                 "moved_to": str(moved) if moved else None}
 
     @app.post("/characters/reference")

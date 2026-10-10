@@ -98,6 +98,7 @@ try:
         reparse_script,
         save_project,
         script_page_number,
+        retarget_character_version,
         set_active_take,
         set_character_version,
     )
@@ -244,6 +245,10 @@ DOCK_MENU_LABELS = {
     DOCK_CHARACTERS: "_Character Bible", DOCK_PANEL: "P_anel",
 }
 DOCK_GALLERY_ITEM = "plug-in-imanganation-dock-gallery-item"
+# A character's reference tile in the Gallery: right-click menu (item "ref:<version>")
+DOCK_REF_DEFAULT = "plug-in-imanganation-dock-reference-default"
+DOCK_REF_RENAME = "plug-in-imanganation-dock-reference-rename"
+DOCK_REF_DELETE = "plug-in-imanganation-dock-reference-delete"
 DOCK_ITEMS = {
     DOCK_PROJECT: "plug-in-imanganation-dock-project-item",
     DOCK_INSPECTOR: "plug-in-imanganation-dock-inspector-field",  # an edited field
@@ -5246,7 +5251,11 @@ def _gallery_references(root, manifest, selected_id):
 
 def _gallery_content(root, manifest, selected_id):
     return build_gallery(manifest, selected_id, root,
-                         _gallery_references(root, manifest, selected_id))
+                         _gallery_references(root, manifest, selected_id),
+                         ((DOCK_GALLERY_ITEM, "Open"),
+                          (DOCK_REF_DEFAULT, "Make default"),
+                          (DOCK_REF_RENAME, "Rename…"),
+                          (DOCK_REF_DELETE, "Delete…")))
 
 
 def _dock_gallery_item(procedure, config, data):
@@ -5266,6 +5275,74 @@ def _dock_gallery_item(procedure, config, data):
             _open_selected_character_image(rest)
         elif kind == "loc":
             _open_selected_location_image()
+    except Exception as exc:
+        return _error(procedure, str(exc))
+    return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+
+
+def _ask_text(title, label, value="", action="OK"):
+    """A one-line text prompt -> the text, or None if cancelled or left blank."""
+    dialog = Gtk.Dialog(title=title, flags=Gtk.DialogFlags.MODAL)
+    dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, action, Gtk.ResponseType.OK)
+    dialog.set_default_response(Gtk.ResponseType.OK)
+    box = dialog.get_content_area()
+    box.set_spacing(8)
+    box.set_border_width(12)
+    box.add(Gtk.Label(label=label, xalign=0.0))
+    entry = Gtk.Entry(text=value, activates_default=True)
+    entry.set_width_chars(34)
+    box.add(entry)
+    dialog.show_all()
+    try:
+        if dialog.run() != Gtk.ResponseType.OK:
+            return None
+        return " ".join(entry.get_text().split()) or None
+    finally:
+        dialog.destroy()
+
+
+def _dock_reference_menu(procedure, config, data):
+    """Gallery > right-click a character's reference: Make default, Rename… or
+    Delete… (item "ref:<version>"). The engine holds the images; panels that pinned a
+    renamed or deleted reference follow it (a deleted one falls back to the default)."""
+    try:
+        root = _DOCK_CONTEXT["root"]
+        version = (config.get_property("item") or "").partition(":")[2]
+        manifest = load_project(root)
+        character = next((c for c in manifest["cast"]
+                          if character_row_id(c["name"]) == _DOCK_CONTEXT.get("selected_id")),
+                         None)
+        if character is None or not version:
+            raise ValueError("Select a character first")
+        name = character["name"]
+        body = {**_engine_project(root, manifest), "name": name, "version": version}
+        if data == "default":
+            _http("POST", f"{ENGINE_URL}/characters/versions/default", body, timeout=10)
+        elif data == "rename":
+            new = _ask_text(f"Rename {name}'s reference", "New name (letters, digits, - _):",
+                            version, "Rename")
+            if new is None or new == version:
+                return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
+            _http("POST", f"{ENGINE_URL}/characters/versions/rename",
+                  {**body, "new_version": new}, timeout=10)
+            retarget_character_version(manifest, name, version, new)
+            save_project(root, manifest)
+        else:
+            pinned = sum(1 for p in manifest["panels"] for c in p.get("characters", [])
+                         if c.get("name", "").casefold() == name.casefold()
+                         and c.get("version") == version)
+            detail = (f"{name}'s reference “{version}” is set aside in the engine's "
+                      "characters folder (.deleted-versions), where it can be restored by "
+                      "hand.")
+            if pinned:
+                detail += (f" {pinned} panel{'s' if pinned != 1 else ''} using it will use "
+                           "the default reference instead.")
+            if not _confirm(f"Delete reference “{version}”?", detail, "Delete"):
+                return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
+            _http("POST", f"{ENGINE_URL}/characters/versions/delete", body, timeout=10)
+            retarget_character_version(manifest, name, version, None)
+            save_project(root, manifest)
+        _refresh_project_docks()
     except Exception as exc:
         return _error(procedure, str(exc))
     return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
@@ -6428,6 +6505,9 @@ def _add_dock_callbacks(plugin):
         (DOCK_CHARACTER_VERSION, _dock_character_version, "pick", True),
         (DOCK_ACTIVATE_TAKE, _dock_activate_take, "take", True),
         (DOCK_GALLERY_ITEM, _dock_gallery_item, "gallery", True),
+        (DOCK_REF_DEFAULT, _dock_reference_menu, "default", True),
+        (DOCK_REF_RENAME, _dock_reference_menu, "rename", True),
+        (DOCK_REF_DELETE, _dock_reference_menu, "delete", True),
         (DOCK_DESIGN_VARIANT, _dock_character_menu, "variant", True),
         (DOCK_ADD_COVER_PAGE, _dock_page_menu, "cover", True),
         (DOCK_OPEN_CHARACTER_VERSION, _dock_open_character_version, "open", True),

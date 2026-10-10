@@ -1073,6 +1073,23 @@ def delete_panel(document: dict[str, Any], panel_id: str) -> dict[str, Any]:
     return panel
 
 
+def retarget_character_version(document: dict[str, Any], name: str, old: str,
+                               new: str | None) -> list[str]:
+    """After a reference version is renamed (``new``) or deleted (``None``: back to the
+    character's default), point every panel that pinned ``old`` at it (the caller
+    saves). Returns the ids of the panels that changed."""
+    member = find_cast_member(document, name)
+    spellings = {n.casefold() for n in
+                 ((member["name"], *member.get("aliases", [])) if member else (name,))}
+    changed = []
+    for panel in document["panels"]:
+        for entry in panel.get("characters", []):
+            if entry.get("name", "").casefold() in spellings and entry.get("version") == old:
+                entry["version"] = new
+                changed.append(panel["id"])
+    return changed
+
+
 def set_character_version(document: dict[str, Any], panel_id: str, index: int,
                           version: str | None) -> dict[str, Any]:
     """Pin which reference image (version) the panel's ``index``-th character uses, or

@@ -485,3 +485,15 @@ def test_blank_starting_picture_follows_the_frames_proportions():
     assert w % 64 == 0 and h % 64 == 0 and w < h and 0.9e6 < w * h < 1.2e6
     w, h = blank_size(3000, 100)  # an extreme strip still gets a usable height
     assert h >= 512 and w > h
+
+
+def test_reference_tiles_carry_a_right_click_menu():
+    from gimp.imanganation.panel_ui import build_gallery
+
+    manifest = copy.deepcopy(EXAMPLE)
+    who = character_row_id(manifest["cast"][0]["name"])
+    rows = build_gallery(manifest, who, None, {"versions": {"base": "/p/base.png"},
+                                               "default": "base"},
+                         (("open", "Open"), ("def", "Make default")))
+    assert "right-click" in rows.splitlines()[0]
+    assert "ref:base\t✓ base\t/p/base.png\t!open:Open|def:Make default" in rows

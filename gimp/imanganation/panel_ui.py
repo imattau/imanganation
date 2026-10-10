@@ -650,13 +650,16 @@ def build_welcome_docks(new_project_action: str = "",
 
 def build_gallery(manifest: dict[str, Any], selected_id: str | None,
                   root: str | Path | None = None,
-                  references: dict[str, Any] | None = None) -> str:
+                  references: dict[str, Any] | None = None,
+                  reference_menu: tuple[tuple[str, str], ...] = ()) -> str:
     """Tiles (``<id>\\t<label>\\t<absolute image path>``) for the Gallery dock: the
     selected panel's takes (click one to make it the active take), a character's
     reference images, or a location's reference image (click to open it in GIMP).
 
     ``references`` carries what only the engine knows: ``{"versions": {version: path},
-    "default": version}`` for a character, ``{"image": path}`` for a location."""
+    "default": version}`` for a character, ``{"image": path}`` for a location.
+    ``reference_menu`` is the right-click menu of a character's reference tiles, as
+    (dock procedure, label) pairs; each procedure gets the tile id ``ref:<version>``."""
     references = references or {}
     panel = next((p for p in manifest.get("panels", []) if p["id"] == selected_id), None)
     if panel is not None:
@@ -681,11 +684,13 @@ def build_gallery(manifest: dict[str, Any], selected_id: str | None,
     character = next((c for c in manifest.get("cast", [])
                       if character_row_id(c["name"]) == selected_id), None)
     if character is not None:
-        rows = [f"# References · {_label(character['name'])}"]
+        rows = [f"# References · {_label(character['name'])}"
+                + (" (right-click for more)" if reference_menu else "")]
         default = references.get("default")
+        menu = _menu(*reference_menu)
         for version, path in (references.get("versions") or {}).items():
             rows.append(f"ref:{version}\t{'✓ ' if version == default else ''}"
-                        f"{_label(version)}" + (f"\t{path}" if path else ""))
+                        f"{_label(version)}" + (f"\t{path}" if path else "") + menu)
         if len(rows) == 1:
             rows.append("Not designed yet")
         return "\n".join(rows)

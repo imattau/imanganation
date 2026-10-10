@@ -144,6 +144,69 @@ class CharacterRegistry:
         self.save()
         return character
 
+    def rename_version(self, name: str, version_id: str, new_id: str) -> Character:
+        """Give a reference version a new id, renaming its image file with it. Versions
+        derived from it and the character's default follow. KeyError: no such
+        character/version; ValueError: ``new_id`` is taken or the file would collide."""
+        character = self.cast.get(name)
+        version = character.version(version_id) if character else None
+        if version is None:
+            raise KeyError(f"{name} has no version {version_id}")
+        if new_id == version_id:
+            return character
+        if character.version(new_id) is not None:
+            raise ValueError(f"{character.name} already has a reference called {new_id}")
+        old_image = self.root / version.image
+        new_image = old_image.with_name(f"{new_id}{old_image.suffix}")
+        if new_image.exists():
+            raise ValueError(f"{new_image.name} already exists for {character.name}")
+        if old_image.is_file():
+            old_image.rename(new_image)
+        version.image = str(new_image.relative_to(self.root))
+        version.id = new_id
+        for other in character.versions:
+            if other.parent == version_id:
+                other.parent = new_id
+        if character.default_version == version_id:
+            character.default_version = new_id
+        self.save()
+        return character
+
+    def remove_version(self, name: str, version_id: str) -> tuple[Character, Path | None]:
+        """Set one reference version aside: its image moves to the character's
+        ``.deleted-versions`` folder rather than being erased. The default moves to the
+        first remaining version if it was this one; versions derived from it take its
+        parent. A character's only version can't be removed (delete the character).
+        -> (the character, where the image went or None)."""
+        character = self.cast.get(name)
+        version = character.version(version_id) if character else None
+        if version is None:
+            raise KeyError(f"{name} has no version {version_id}")
+        if len(character.versions) == 1:
+            raise ValueError(f"{character.name}'s only reference can't be deleted; "
+                             "design or add another first, or delete the character")
+        character.versions = [v for v in character.versions if v.id != version_id]
+        for other in character.versions:
+            if other.parent == version_id:
+                other.parent = version.parent
+        if character.default_version == version_id:
+            character.default_version = character.versions[0].id
+        moved = None
+        image = self.root / version.image
+        if image.is_file():
+            from datetime import datetime
+
+            folder = image.parent / ".deleted-versions"
+            folder.mkdir(exist_ok=True)
+            moved = folder / f"{image.stem}-{datetime.now().strftime('%Y%m%d-%H%M%S')}{image.suffix}"
+            n = 2
+            while moved.exists():
+                moved = moved.with_name(f"{moved.stem}-{n}{image.suffix}")
+                n += 1
+            image.rename(moved)
+        self.save()
+        return character, moved
+
     def add_user_reference(self, name: str, image_path: str, version_id: str = "base",
                            *, make_default: bool = True) -> Character:
         """Register a user-supplied reference image (no generation needed). With
