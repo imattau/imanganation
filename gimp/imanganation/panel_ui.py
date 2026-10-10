@@ -11,12 +11,12 @@ from urllib.parse import quote
 try:  # Installed plug-in imports siblings as top-level modules.
     from layouts import page_layout_availability
     from project_store import _location_name, format_dialogue
-    from project_store import prop_key
+    from project_store import field_choices, prop_key
     from project_store import location_key as _location_key
 except ImportError:  # Package import in tests and external tooling.
     from .layouts import page_layout_availability
     from .project_store import _location_name, format_dialogue
-    from .project_store import prop_key
+    from .project_store import field_choices, prop_key
     from .project_store import location_key as _location_key
 
 
@@ -175,7 +175,7 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
                 new_prop_action: str = "", design_prop_menu: str = "",
                 delete_prop_menu: str = "",
                 design_prop_action: str = "",
-                choose_action: str = "") -> dict[str, str]:
+                inline_choices: bool = False) -> dict[str, str]:
     """Build generic host content and stable selections from a project manifest.
 
     The Context (inspector) rows are editable fields; ``open_page_action``, a dock
@@ -216,9 +216,11 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
     that page have no render yet. Props mirror locations: ``new_prop_action`` on the Props
     heading, ``design_prop_menu`` and ``delete_prop_menu`` on each prop's row and
     ``design_prop_action`` a "Design prop" button in its Context (its notes are the
-    description). ``choose_action`` (a dock procedure taking ``<panel id>:<field>``) turns a
-    panel's Characters, Props, Location, Shot, Aspect ratio and Frame size from typed
-    fields into a value with a "Choose…" button that picks from the project's own lists."""
+    description). ``inline_choices`` turns a panel's Characters, Props, Location, Shot, Aspect ratio and
+    Frame size from typed fields into choice rows the host draws as a drop-down (one
+    value, typing allowed) or a check list (several, in order), built from the project's
+    own lists (``field_choices``). A choice commits like a field: ``<panel id>.<field>``
+    and the new text."""
     panels = manifest.get("panels", [])
     pages = manifest.get("pages", [])
     page_by_id = {page["id"]: page for page in pages}
@@ -462,10 +464,13 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
         characters = panel.get("characters", [])
 
         def pick(field, title, value):
-            """A value picked from a list (Choose…), else the typed field."""
-            if not choose_action:
+            """A value chosen from the project's lists, else the typed field."""
+            if not inline_choices:
                 return _field(pid, field, title, value)
-            return f"{title}\t{_label(value) or '—'}\t!{choose_action}:{pid}:{field}:Choose…"
+            choices = field_choices(manifest, pid, field)
+            options = "|".join(_label(o).replace("|", "/") for o in choices["options"])
+            mark = "+" if choices["mode"] == "many" else "?"
+            return f"{mark}{pid}.{field}\t{title}\t{_label(value)}\t{options}"
 
         inspector_rows.extend([
             pick("characters", "Characters",

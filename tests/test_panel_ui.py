@@ -570,15 +570,33 @@ def test_job_status_text_shows_the_queue_or_the_comfyui_step():
     assert "10/10 · pass 2 · 9s" in job_status_text(second, 9) and job_fraction(second) == 1.0
 
 
-def test_list_fields_become_choose_buttons_when_an_action_is_given():
+def test_list_fields_become_choice_rows_with_the_projects_own_options():
     manifest = copy.deepcopy(EXAMPLE)
     panel = manifest["panels"][0]
     typed = build_docks(manifest, panel["id"])["inspector"]
-    assert f"@{panel['id']}.camera\tShot" in typed and "Choose…" not in typed
+    assert f"@{panel['id']}.camera\tShot" in typed and "\t|" not in typed
 
-    picked = build_docks(manifest, panel["id"], choose_action="pick")["inspector"]
-    for field in ("characters", "props", "location", "camera", "aspect_ratio", "size"):
-        assert f"!pick:{panel['id']}:{field}:Choose…" in picked
-        assert f"@{panel['id']}.{field}\t" not in picked
-    assert f"@{panel['id']}.action\t" in picked  # free text stays free text
-    assert "Props\t—\t!pick:" in picked  # nothing chosen yet
+    rows = build_docks(manifest, panel["id"], inline_choices=True)["inspector"].splitlines()
+    by_key = {r.split("\t")[0][1:]: r.split("\t") for r in rows if r[:1] in "?+"}
+    pid = panel["id"]
+    assert set(by_key) == {f"{pid}.{f}" for f in ("characters", "props", "location", "camera",
+                                                  "aspect_ratio", "size")}
+    who = by_key[f"{pid}.characters"]
+    assert who[0].startswith("+")  # several: a check list
+    assert who[1] == "Characters" and who[2] == ", ".join(
+        c["name"] for c in panel["characters"])
+    assert set(who[3].split("|")) == {c["name"] for c in manifest["cast"]}
+    assert who[3].split("|")[: len(panel["characters"])] == [c["name"] for c in
+                                                            panel["characters"]]
+    shot = by_key[f"{pid}.camera"]
+    assert "close-up" in shot[3].split("|") and shot[0].startswith("?")  # one: a drop-down
+    assert f"@{pid}.action\t" in "\n".join(rows)  # free text stays free text
+
+
+def test_choice_options_cannot_break_the_row_format():
+    manifest = copy.deepcopy(EXAMPLE)
+    manifest["props"].append({"name": "Odd|prop\tname"})
+    row = next(r for r in build_docks(manifest, manifest["panels"][0]["id"],
+                                      inline_choices=True)["inspector"].splitlines()
+               if r.startswith("+") and ".props\t" in r)
+    assert len(row.split("\t")) == 4 and "Odd/prop name" in row.split("\t")[3].split("|")

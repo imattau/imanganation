@@ -285,14 +285,17 @@ page placement metadata are still being migrated. Image procedures are grouped u
   its own, so the bar restarts with *pass 2*; while models load, or an LLM step runs, there
   is no step yet and it shows elapsed time. The engine reads the steps from ComfyUI's
   websocket (`render/progress.py`; `GET /jobs/{id}` → `progress`).
-- **Choose from lists.** In a panel's Context, **Characters**, **Props**, **Location**,
-  **Shot**, **Aspect ratio** and **Frame size** show their value with a **Choose…** button
-  instead of a text box. Characters and Props open a checklist of the project's cast or
-  props (with arrows to reorder: a character's place in the frame follows the order, and
-  a box to add others by name); Location is a drop-down of the project's locations;
-  Shot, Aspect ratio and Frame size drop down fixed choices. Each also takes typing, so
-  a new character, prop or place is added to the project as before. What a panel already
-  has is always in the list. Action, Notes, Expressions and dialogue stay typed.
+- **Choose from lists.** In a panel's Context, **Location**, **Shot**, **Aspect ratio**
+  and **Frame size** are drop-downs, and **Characters** and **Props** are check lists in a
+  pop-over (▲ ▼ change the order: a character's place in the frame follows it, and an *Add
+  others* box takes new names). The options are the project's own cast, props and
+  locations, or fixed choices (the shots the renderer understands, wide / tall / square
+  and common ratios, small / large / splash). A drop-down also takes typing, a new
+  character, prop or place is added to the project as before, and whatever a panel
+  already has is always listed. Action, Notes, Expressions and dialogue stay typed. These
+  are the fork's new `?` (drop-down) and `+` (check list) rows of a properties dock
+  (`gimpextensionpanel.c`; `scripts/test-choice-widgets.sh` builds and runs them without
+  compiling GIMP). A host without them shows the rows as plain text.
 - **Regenerate Panel…**: select a placed panel (its layer or group). It is re-rendered
   from the **current** `panels.json`, so script edits apply, at its frame's size. The
   new take (`003_take02.png`…) goes into the same group, cover-fitted to the frame

@@ -545,6 +545,9 @@ def apply_field_edit(document: dict[str, Any], key: str, value: str,
                     raise ProjectFileError(f"size must be one of {', '.join(PANEL_SIZES)}")
             if value or field == "action":  # action is required, the rest optional
                 panel[field] = value
+                if field == "location" and find_location(document, value) is None:
+                    # a place new to the story joins the project's locations
+                    document.setdefault("locations", []).append({"name": value})
             else:
                 panel.pop(field, None)
         else:

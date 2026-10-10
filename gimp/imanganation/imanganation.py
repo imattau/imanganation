@@ -91,7 +91,6 @@ try:
         duplicate_panel,
         add_prop,
         delete_prop,
-        field_choices,
         find_location,
         find_prop,
         load_project,
@@ -257,8 +256,6 @@ DOCK_MENU_LABELS = {
     DOCK_CHARACTERS: "_Character Bible", DOCK_PANEL: "P_anel",
 }
 DOCK_GALLERY_ITEM = "plug-in-imanganation-dock-gallery-item"
-# Context: a panel field picked from the project's lists (item "<panel id>:<field>")
-DOCK_CHOOSE = "plug-in-imanganation-dock-choose"
 # Props, like locations: Context's Design prop, the tree's right-click menus, and a prop's
 # image tiles in the Gallery (item "img:<file name>")
 DOCK_DESIGN_PROP = "plug-in-imanganation-dock-design-prop"
@@ -3981,96 +3978,6 @@ def _poll_designs():
     return GLib.SOURCE_CONTINUE if _JOB_INFO else GLib.SOURCE_REMOVE
 
 
-def _choose_dialog(choices):
-    """The Choose… dialog for a panel field -> the new value as the field's text (names
-    joined by commas for a list), or None if cancelled. One value: a drop-down of the
-    project's options that also takes typing. Several: a checklist whose order can be
-    changed (a character's place in the frame follows it), and a box to add others."""
-    mode, options, current = choices["mode"], choices["options"], choices["current"]
-    dialog = Gtk.Dialog(title=f"Choose {choices['label'].lower()}", flags=Gtk.DialogFlags.MODAL)
-    dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, "Apply", Gtk.ResponseType.OK)
-    dialog.set_default_response(Gtk.ResponseType.OK)
-    box = dialog.get_content_area()
-    box.set_spacing(8)
-    box.set_border_width(12)
-    if mode == "one":
-        box.add(Gtk.Label(label=f"{choices['label']}: pick one, or type your own. Leave "
-                                "it empty for none.", xalign=0.0))
-        combo = Gtk.ComboBoxText.new_with_entry()
-        for option in options:
-            combo.append_text(option)
-        entry = combo.get_child()
-        entry.set_text(current or "")
-        entry.set_activates_default(True)
-        combo.set_size_request(320, -1)
-        box.add(combo)
-        dialog.show_all()
-        try:
-            return " ".join(entry.get_text().split()) if dialog.run() == Gtk.ResponseType.OK \
-                else None
-        finally:
-            dialog.destroy()
-    box.add(Gtk.Label(label=f"{choices['label']}: tick the ones that apply; the arrows "
-                            "change their order.", xalign=0.0))
-    rows = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-    checks = []
-
-    def move(row, step):
-        siblings = rows.get_children()
-        index = siblings.index(row) + step
-        if 0 <= index < len(siblings):
-            rows.reorder_child(row, index)
-
-    for option in options:
-        row = Gtk.Box(spacing=6)
-        check = Gtk.CheckButton(label=option, active=option in current)
-        row.pack_start(check, True, True, 0)
-        for arrow, step in (("▲", -1), ("▼", 1)):
-            button = Gtk.Button(label=arrow, relief=Gtk.ReliefStyle.NONE)
-            button.connect("clicked", lambda _b, r=row, d=step: move(r, d))
-            row.pack_end(button, False, False, 0)
-        rows.pack_start(row, False, False, 0)
-        checks.append((row, check))
-    scrolled = Gtk.ScrolledWindow(hexpand=True, vexpand=True)
-    scrolled.set_size_request(340, min(300, 30 * max(len(options), 3) + 8))
-    scrolled.add(rows)
-    box.add(scrolled)
-    others = Gtk.Entry(placeholder_text="Add others, comma-separated", activates_default=True)
-    box.add(others)
-    dialog.show_all()
-    try:
-        if dialog.run() != Gtk.ResponseType.OK:
-            return None
-        chosen = [check.get_label() for row in rows.get_children()
-                  for r, check in checks if r is row and check.get_active()]
-        chosen += [n.strip() for n in others.get_text().split(",")
-                   if n.strip() and n.strip() not in chosen]
-        return ", ".join(chosen)
-    finally:
-        dialog.destroy()
-
-
-def _dock_choose(procedure, config, data):
-    """Context: Choose… on a panel's Characters, Props, Location, Shot, Aspect ratio or
-    Frame size. Item "<panel id>:<field>". The options are the project's own."""
-    try:
-        root = _DOCK_CONTEXT["root"]
-        panel_id, _, field = (config.get_property("item") or "").rpartition(":")
-        manifest = load_project(root)
-        choices = field_choices(manifest, panel_id, field)
-        value = _choose_dialog(choices)
-        if value is None:
-            return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
-        apply_field_edit(manifest, f"{panel_id}.{field}", value)
-        if field == "location" and value and find_location(manifest, value) is None:
-            manifest.setdefault("locations", []).append({"name": " ".join(value.split())})
-        save_project(root, manifest)
-        _refresh_project_docks()
-    except Exception as exc:
-        return _error(procedure, str(exc))
-    return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
-
-
 def _dock_cancel_job(procedure, config, data):
     """Context: Cancel design on a character, location or prop being designed."""
     try:
@@ -6659,7 +6566,7 @@ def _dock_actions(root, manifest):
             "take_action": DOCK_ACTIVATE_TAKE,
             "generate_page_action": DOCK_GENERATE_PAGE,
             "design_prop_action": DOCK_DESIGN_PROP,
-            "choose_action": DOCK_CHOOSE,
+            "inline_choices": True,
             "new_prop_action": DOCK_NEW_PROP,
             "design_prop_menu": DOCK_DESIGN_PROP_ITEM,
             "delete_prop_menu": DOCK_DELETE_PROP,
@@ -7007,7 +6914,6 @@ def _add_dock_callbacks(plugin):
         (DOCK_ACTIVATE_TAKE, _dock_activate_take, "take", True),
         (DOCK_GALLERY_ITEM, _dock_gallery_item, "gallery", True),
         (DOCK_CANCEL_JOB, _dock_cancel_job, "cancel", True),
-        (DOCK_CHOOSE, _dock_choose, "choose", True),
         (DOCK_DESIGN_PROP, _dock_action, "design-prop", False),
         (DOCK_OPEN_PROP_IMAGE, _dock_action, "open-prop-image", False),
         (DOCK_NEW_PROP, _dock_prop_menu, "new", True),
