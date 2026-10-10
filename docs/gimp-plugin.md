@@ -311,6 +311,13 @@ page placement metadata are still being migrated. Image procedures are grouped u
   character keeps the old name as an alias (so the script's text still finds them), moves
   their folder in the engine, and renames them in every panel and expression; dialogue
   speakers are script text and stay as written (`POST /characters/rename`).
+- **Pages strip shape.** The Pages dock is always a single line of page tiles: a row when
+  its dock is wide (the bottom) and a column when it is taller than wide (a side dock),
+  with the **+** tile last. It scrolls along the line to reach the end, and scrolls to the
+  page you just added or selected. Near square it keeps whichever it was, so it cannot
+  flip back and forth. Drag-to-reorder shows its insert bar across the tile in a column.
+  (The fork's `strip` panel, `gimpextensionpanel.c`; `scripts/test-choice-widgets.sh`
+  tests the layout switching.)
 - **Regenerate Panel…**: select a placed panel (its layer or group). It is re-rendered
   from the **current** `panels.json`, so script edits apply, at its frame's size. The
   new take (`003_take02.png`…) goes into the same group, cover-fitted to the frame

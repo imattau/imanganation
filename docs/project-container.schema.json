@@ -50,6 +50,17 @@
       "properties": {
         "file": {"$ref": "#/$defs/relpath"},
         "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "original_file": {"$ref": "#/$defs/relpath",
+                           "description": "Immutable copy of the imported source script"},
+        "original_format": {"enum": ["canonical", "prose", "mangaplay"]},
+        "original_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "history": {"type": "array", "items": {"type": "object",
+          "required": ["file", "created"], "properties": {
+            "file": {"$ref": "#/$defs/relpath"},
+            "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "format": {"enum": ["canonical", "prose", "mangaplay"]},
+            "created": {"type": "string", "format": "date-time"},
+            "reason": {"type": "string"}}}},
         "format": {"enum": ["canonical", "prose", "mangaplay"]},
         "parsed_at": {"type": "string", "format": "date-time"},
         "parser": {"type": "object"}

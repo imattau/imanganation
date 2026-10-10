@@ -30,7 +30,8 @@ dock actions and item activation; the host sends row ids to those procedures.
 ```
 rooftop.imanga/            recommended project folder suffix
   project.json             the manifest (this schema)
-  script/rooftop.md        the source script, as given
+  script/originals/…      immutable imported source script
+  script/history/…         immutable working-script revisions
   pages/page-001.xcf       the artist's pages (one image per page)
   takes/                   every generated image; immutable, never overwritten
   masks/                   inpaint masks, kept for provenance
@@ -89,9 +90,12 @@ version, and preserve unknown keys within the same version.
 | `created`, `modified` | ISO 8601 timestamps. |
 
 ### `script`
-Where the panels came from: `file` (relative path), `sha256` of the source text (to
-detect edits since parsing), `format` (`canonical` / `prose` / `mangaplay`),
-`parsed_at`, and `parser` (e.g. `{"kind": "llm", "model": "qwen3.5:latest"}`).
+The active working script: `file` (relative path), `sha256` of its text, `format`
+(`canonical` / `prose` / `mangaplay`), `parsed_at`, and `parser`. `original_file`,
+`original_format`, and `original_sha256` identify the immutable imported source.
+Storyboard edits create immutable canonical script files and append prior versions to
+`history` with timestamps and reasons. Reloading the original or restoring history
+keeps the active version in history first.
 Re-parsing creates **new panels** and keeps old ones that have takes, marked
 `"status": "orphaned"`, so placed work is never silently dropped. A panel whose script
 content is identical (its `source` fingerprint, below) is kept as it is, renumbered:
@@ -105,7 +109,7 @@ production state.
 |---|---|
 | `id` | `pnl_…` |
 | `label` | `{"page": 2, "panel": 1}` from the script; display only. The script's `COVER` is page 0 |
-| `manual` | `true` for a panel added by hand (Project → *Add panel…* or *Add cover…*, the latter label page 0 with `cover`): it has no script text, is numbered after its page's last panel, and Reload script carries it through untouched |
+| `manual` | `true` for a panel added by hand through legacy Project actions. Storyboard Review additions are saved into the working script and no longer remain manual. |
 | `cover` | `true` for the cover picture (absent = false): a text-free key illustration, rendered into the page labelled **Cover** |
 | `scene_heading`, `location`, `action`, `camera`, `notes`, `flashback` | as in `PanelSpec` |
 | `characters` | `[{"name": "Yuki", "version": "summer"}]`. `version` is optional (the engine's active reference otherwise). This is how story continuity reaches the engine. |

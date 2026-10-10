@@ -82,6 +82,7 @@ PANEL 1
 | `[CHARACTERS: …]` | in a panel | exactly who is in the picture |
 | `[EXPRESSIONS: …]` | in a panel | each character's expression |
 | `[LOCATION: …]` | in a panel | this panel's place, when it differs from the scene |
+| `[PROPS: …]` | in a panel | comma-separated names of props shown in the panel |
 | `[ACTION]` | in a panel | section: what we see |
 | `[DIALOGUE]` (or `[DIALOG]`) | in a panel | section: spoken lines, thoughts, narration |
 | `[SFX]` | in a panel | section: sound effects, one per line |
@@ -91,6 +92,15 @@ Labels and `PAGE` / `PANEL` are not case-sensitive, and blank lines are ignored.
 section runs until the next label, `PANEL` or `PAGE`, so no end marker is needed
 (`[END DIALOGUE]` is accepted if you like closing them). Sections can come in any
 order within a panel.
+
+## Storyboard Review and working scripts
+
+Storyboard Review lets you add and edit beats, then drag the grip beside a beat to
+change its reading order within the page. Beat changes are written to a canonical
+working script in the project. Each saved version is retained in Script history;
+restoring a version or reloading the imported original keeps the current version in
+history. Panels with artwork or page placements that no longer match a restored
+script are kept under **Needs matching**.
 
 ## Characters (the cast block)
 
