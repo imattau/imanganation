@@ -82,6 +82,9 @@ try:
     )
     from project_store import (
         ProjectFileError,
+        ASPECT_CHOICES,
+        PANEL_SIZES,
+        SHOT_CHOICES,
         add_cover,
         add_panel,
         edit_panel_story,
@@ -3893,6 +3896,24 @@ def _edit_story_beat(root, page_number, panel=None, after_panel_id=None):
         for choice in choices: combo.append_text(choice)
         child = combo.get_child(); child.set_text(value or "")
         box.pack_start(combo, False, False, 0); fields[label] = child
+    def select_text(label, value, choices, *, editable=False):
+        box.pack_start(Gtk.Label(label=label, xalign=0), False, False, 0)
+        if editable:
+            combo = Gtk.ComboBoxText.new_with_entry()
+            combo.append_text("Unspecified")
+            for choice in choices: combo.append_text(choice)
+            child = combo.get_child(); child.set_text(value or "Unspecified")
+            fields[label] = child
+        else:
+            combo = Gtk.ComboBoxText()
+            combo.append_text("Unspecified")
+            for choice in choices: combo.append_text(choice)
+            try:
+                combo.set_active(choices.index(value) + 1)
+            except ValueError:
+                combo.set_active(0)
+            fields[label] = combo
+        box.pack_start(combo, False, False, 0)
     def text_area(label, value="", height=3):
         box.pack_start(Gtk.Label(label=label, xalign=0), False, False, 0)
         widget = Gtk.TextView(wrap_mode=Gtk.WrapMode.WORD_CHAR)
@@ -3908,7 +3929,8 @@ def _edit_story_beat(root, page_number, panel=None, after_panel_id=None):
                   [c.get("name", "") for c in manifest.get("cast", [])])
     entry_choices("Props (comma separated)", ", ".join(seed.get("props", [])) if panel else "",
                   [p.get("name", "") for p in manifest.get("props", [])])
-    entry("Shot", seed.get("camera", "") if panel else "")
+    select_text("Shot", seed.get("camera", "") if panel else "", SHOT_CHOICES,
+                editable=True)
     text_area("Action", seed.get("action", "") if panel else "", 4)
     dialogue = "\n".join(f"{d.get('speaker','')}"
                           + (f" ({d.get('kind')})" if d.get("kind") != "speech" else "")
@@ -3920,16 +3942,21 @@ def _edit_story_beat(root, page_number, panel=None, after_panel_id=None):
     expressions = "; ".join(f"{name}: {value}" for name, value in
                              (seed.get("expressions", {}) if panel else {}).items())
     entry("Expressions (Name: expression; …)", expressions)
-    entry("Frame shape (e.g. 2:1)", seed.get("aspect_ratio", "") if panel else "")
-    entry("Frame size (small, large, splash)", seed.get("size", "") if panel else "")
+    select_text("Frame shape", seed.get("aspect_ratio", "") if panel else "",
+                ASPECT_CHOICES, editable=True)
+    select_text("Frame size", seed.get("size", "") if panel else "", PANEL_SIZES)
     flashback = Gtk.CheckButton(label="This beat is in a flashback")
     flashback.set_active(bool(seed.get("flashback")))
     box.pack_start(flashback, False, False, 0)
     dialog.show_all()
     try:
         if dialog.run() != Gtk.ResponseType.OK: return None
-        data = {key: value.get_text() if isinstance(value, Gtk.Entry)
-                else _story_text(value) for key, value in fields.items()}
+        data = {key: (("" if value.get_text() == "Unspecified" else value.get_text())
+                      if isinstance(value, Gtk.Entry) else
+                      ("" if value.get_active_text() == "Unspecified"
+                       else value.get_active_text() or "")
+                      if isinstance(value, Gtk.ComboBoxText) else _story_text(value))
+                for key, value in fields.items()}
     finally:
         dialog.destroy()
     names = [n.strip() for n in data["Characters (comma separated)"].split(",") if n.strip()]
@@ -3951,8 +3978,8 @@ def _edit_story_beat(root, page_number, panel=None, after_panel_id=None):
                              for bit in data["Expressions (Name: expression; …)"].split(";")
                              if (name := bit.partition(":")[0].strip())
                              and (value := bit.partition(":")[2].strip())},
-             "aspect_ratio": data["Frame shape (e.g. 2:1)"],
-             "size": data["Frame size (small, large, splash)"],
+             "aspect_ratio": data["Frame shape"],
+             "size": data["Frame size"],
              "flashback": flashback.get_active()}
     updated = load_project(root)
     if panel:
