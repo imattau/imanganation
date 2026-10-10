@@ -686,7 +686,8 @@ def build_welcome_docks(new_project_action: str = "",
 def build_gallery(manifest: dict[str, Any], selected_id: str | None,
                   root: str | Path | None = None,
                   references: dict[str, Any] | None = None,
-                  reference_menu: tuple[tuple[str, str], ...] = ()) -> str:
+                  reference_menu: tuple[tuple[str, str], ...] = (),
+                  pending: str = "") -> str:
     """Tiles (``<id>\\t<label>\\t<absolute image path>``) for the Gallery dock: the
     selected panel's takes (click one to make it the active take), a character's
     reference images, or a location's reference image (click to open it in GIMP).
@@ -695,8 +696,20 @@ def build_gallery(manifest: dict[str, Any], selected_id: str | None,
     "default": version}`` for a character, ``{"image": path}`` for a location.
     ``references`` for a prop is ``{"images": {file name: path}, "current": file name}``.
     ``reference_menu`` is the right-click menu of a character's (or prop's) image tiles, as
-    (dock procedure, label) pairs; each procedure gets the tile id ``ref:<version>``."""
+    (dock procedure, label) pairs; each procedure gets the tile id ``ref:<version>``.
+    ``pending`` ("Rendering · 34s") adds a heading under the first one while the
+    selected character, location or prop is being designed."""
     references = references or {}
+    built = _gallery_rows(manifest, selected_id, root, references, reference_menu)
+    if pending and built.startswith("# ") and "\n" in built:
+        head, _, rest = built.partition("\n")
+        return f"{head}\n# ⏳ Designing: {pending}\n{rest}"
+    if pending:
+        return f"{built}\n# ⏳ Designing: {pending}"
+    return built
+
+
+def _gallery_rows(manifest, selected_id, root, references, reference_menu) -> str:
     panel = next((p for p in manifest.get("panels", []) if p["id"] == selected_id), None)
     if panel is not None:
         position = _position(panel.get("label", {}))

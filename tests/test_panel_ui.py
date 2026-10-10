@@ -537,3 +537,14 @@ def test_gallery_shows_a_props_images_with_the_current_one_ticked():
     assert "img:a-2.png\t✓ a-2.png\t/p/a-2.png\t!o:Open" in rows
     assert "img:a.png\ta.png\t/p/a.png\t!o:Open" in rows
     assert "Not designed yet" in build_gallery(manifest, row, None, {"images": {}})
+
+
+def test_gallery_says_when_the_selected_asset_is_being_designed():
+    from gimp.imanganation.panel_ui import build_gallery
+
+    manifest = copy.deepcopy(EXAMPLE)
+    who = character_row_id(manifest["cast"][0]["name"])
+    rows = build_gallery(manifest, who, None, {"versions": {}}, pending="Rendering · 34s")
+    lines = rows.splitlines()
+    assert lines[0].startswith("# References") and lines[1] == "# ⏳ Designing: Rendering · 34s"
+    assert "Designing" not in build_gallery(manifest, who, None, {"versions": {}})

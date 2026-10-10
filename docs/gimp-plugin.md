@@ -274,6 +274,12 @@ page placement metadata are still being migrated. Image procedures are grouped u
   started. Saving the project keeps the previous `project.json` as `project.json.bak`,
   the way back from a bad edit. The engine-not-reachable message points at *Restart
   Workspace*.
+- **Design progress.** While a character, location or prop is being designed, its
+  Context shows **Design: Queued behind N jobs · 12s** or **Rendering · 34s** (ticking
+  while it is selected), with a **Cancel design** button, and the Gallery heads its
+  images with the same line. A failed design stays in Context as **Design failed** with
+  the engine's reason, until the next try. There is no step-by-step bar: ComfyUI's
+  per-step progress isn't read yet.
 - **Regenerate Panel…**: select a placed panel (its layer or group). It is re-rendered
   from the **current** `panels.json`, so script edits apply, at its frame's size. The
   new take (`003_take02.png`…) goes into the same group, cover-fitted to the frame

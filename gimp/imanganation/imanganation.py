@@ -3105,8 +3105,7 @@ def _engine_location(root, manifest, name):
 
 def _engine_location_rows(root, manifest, name):
     rows = ["# Engine location reference"]
-    if location_key(name) in _LOCATION_DESIGN_JOBS.values():
-        rows.append("Design\tIn progress…")
+    rows += _design_rows("location", location_key(name))
     try:
         record = _engine_location(root, manifest, name)
     except EngineError as exc:
@@ -3342,14 +3341,12 @@ def _refresh_project_docks(sync_canvas=False):
     elif selected_id in {character_row_id(c["name"]) for c in manifest["cast"]}:
         character = next(c for c in manifest["cast"]
                          if character_row_id(c["name"]) == selected_id)
-        engine_rows = "\n".join(_engine_character_rows(root, character["name"]))
-        if character["name"] in _DESIGN_JOBS.values():
-            engine_rows += "\nDesign\tIn progress…"
+        engine_rows = "\n".join(_engine_character_rows(root, character["name"])
+                                + _design_rows("character", character["name"], cancel=False))
         contents["characters"] += "\n" + engine_rows
         engine_rows = "\n".join(_engine_character_rows(
-            root, character["name"], open_buttons=True))
-        if character["name"] in _DESIGN_JOBS.values():
-            engine_rows += "\nDesign\tIn progress…"
+            root, character["name"], open_buttons=True)
+            + _design_rows("character", character["name"]))
         if "\nReference image\tAvailable" in engine_rows:
             engine_rows += (f"\n!{DOCK_OPEN_CHARACTER_IMAGE}\tOpen reference image"
                             "\nPaint over\tOpen it, edit, then Imanganation > Set "
@@ -3882,6 +3879,105 @@ def _dock_action(procedure, config, data):
 
 
 _DESIGN_JOBS = {}  # engine job id -> character name, while a design sheet renders
+_JOB_INFO = {}  # engine job id -> what the docks show for a design in flight
+_DESIGN_FAILURES = {}  # (kind, key) -> why the last design failed, until the next try
+DOCK_CANCEL_JOB = "plug-in-imanganation-dock-cancel-job"
+
+
+def _track_design(job, kind, key, jobs, name=None):
+    """Follow an engine design job (a character, location or prop) so the docks can show
+    its queue position and time, offer Cancel, and say why it failed."""
+    jobs[job["id"]] = key
+    _DESIGN_FAILURES.pop((kind, key), None)
+    _JOB_INFO[job["id"]] = {"kind": kind, "key": key, "name": name or key, "jobs": jobs,
+                            "queued_at": time.monotonic(), "status": job["status"],
+                            "ahead": job.get("queue_position")}
+    if len(_JOB_INFO) == 1:
+        GLib.timeout_add_seconds(2, _exclusive(_poll_designs))
+
+
+def _design_status(kind, key):
+    """-> (job id, "Rendering · 34s") for a design in flight, else None."""
+    for job_id, info in _JOB_INFO.items():
+        if info["kind"] == kind and info["key"] == key:
+            seconds = int(time.monotonic() - info["queued_at"])
+            if info["status"] == "queued":
+                ahead = info.get("ahead")
+                where = (f"Queued behind {ahead} job{'s' if ahead != 1 else ''}"
+                         if ahead else "Next in the queue")
+                return job_id, f"{where} · {seconds}s"
+            return job_id, f"Rendering · {seconds}s"
+    return None
+
+
+def _design_rows(kind, key, cancel=True):
+    """Context rows for an asset's design: progress with a Cancel button, or why the last
+    try failed."""
+    status = _design_status(kind, key)
+    if status is not None:
+        job_id, text = status
+        return [f"Design\t{text}" + (f"\t!{DOCK_CANCEL_JOB}:{job_id}:Cancel design"
+                                      if cancel else "")]
+    if (kind, key) in _DESIGN_FAILURES:
+        return [f"Design failed\t{' '.join(_DESIGN_FAILURES[(kind, key)].split())[:200]}"]
+    return []
+
+
+def _selected_design(manifest):
+    """(kind, key) of the selected character, location or prop."""
+    selected = _DOCK_CONTEXT.get("selected_id")
+    for c in manifest.get("cast", []):
+        if character_row_id(c["name"]) == selected:
+            return "character", c["name"]
+    for loc in manifest.get("locations", []):
+        if location_row_id(loc["name"]) == selected:
+            return "location", location_key(loc["name"])
+    for p in manifest.get("props", []):
+        if prop_row_id(p["name"]) == selected:
+            return "prop", prop_key(p["name"])
+    return None
+
+
+def _poll_designs():
+    """Every 2 s while a design is in flight: update each job's state, redraw the docks
+    while the selected asset is the one rendering (so its time ticks), and on finishing
+    refresh them (a failure is kept and shown in Context)."""
+    finished = False
+    for job_id, info in list(_JOB_INFO.items()):
+        try:
+            job = _http("GET", f"{ENGINE_URL}/jobs/{job_id}", timeout=3)
+        except EngineError:
+            continue  # engine restarting: try again next tick
+        info["status"], info["ahead"] = job["status"], job.get("queue_position")
+        if job["status"] in ("queued", "running"):
+            continue
+        del _JOB_INFO[job_id]
+        info["jobs"].pop(job_id, None)
+        finished = True
+        if job["status"] == "error":
+            _DESIGN_FAILURES[(info["kind"], info["key"])] = job.get("error") or "failed"
+            Gimp.message(f"Designing {info['name']} failed: {job.get('error')}")
+    try:
+        root = _DOCK_CONTEXT.get("root")
+        selected = _selected_design(load_project(root)) if root else None
+        if finished or (selected and any((i["kind"], i["key"]) == selected
+                                         for i in _JOB_INFO.values())):
+            _refresh_project_docks()
+    except Exception:
+        pass
+    return GLib.SOURCE_CONTINUE if _JOB_INFO else GLib.SOURCE_REMOVE
+
+
+def _dock_cancel_job(procedure, config, data):
+    """Context: Cancel design on a character, location or prop being designed."""
+    try:
+        job_id = config.get_property("item") or ""
+        if job_id in _JOB_INFO:
+            _http("POST", f"{ENGINE_URL}/jobs/{job_id}/cancel", {}, timeout=10)
+            _JOB_INFO[job_id]["status"] = "cancelled"
+    except Exception as exc:
+        return _error(procedure, str(exc))
+    return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
 
 
 def _choose_new_project():
@@ -4380,27 +4476,7 @@ def _queue_character_design(root, manifest, character, redesign=False, describe=
             "aliases": character.get("aliases", []), "redesign": redesign,
             **_style_options(manifest)}
     job = _http("POST", f"{ENGINE_URL}/characters", body)
-    if not _DESIGN_JOBS:
-        GLib.timeout_add_seconds(3, _exclusive(_poll_design_jobs))
-    _DESIGN_JOBS[job["id"]] = character["name"]
-
-
-def _poll_design_jobs():
-    for job_id, name in list(_DESIGN_JOBS.items()):
-        try:
-            job = _http("GET", f"{ENGINE_URL}/jobs/{job_id}", timeout=3)
-        except EngineError:
-            continue  # engine restarting: try again next tick
-        if job["status"] in ("queued", "running"):
-            continue
-        del _DESIGN_JOBS[job_id]
-        if job["status"] == "error":
-            Gimp.message(f"Designing {name} failed: {job.get('error')}")
-        try:
-            _refresh_project_docks()
-        except Exception:
-            pass
-    return GLib.SOURCE_CONTINUE if _DESIGN_JOBS else GLib.SOURCE_REMOVE
+    _track_design(job, "character", character["name"], _DESIGN_JOBS)
 
 
 def _design_selected_character():
@@ -4498,9 +4574,7 @@ def _design_another_reference():
                 {**_engine_project(root, manifest), "name": character["name"],
                  "variant_id": ident, "variant_description": text,
                  **_style_options(manifest)})
-    if not _DESIGN_JOBS:
-        GLib.timeout_add_seconds(3, _exclusive(_poll_design_jobs))
-    _DESIGN_JOBS[job["id"]] = character["name"]
+    _track_design(job, "character", character["name"], _DESIGN_JOBS)
     _refresh_project_docks()
     return True
 
@@ -5339,8 +5413,11 @@ def _gallery_content(root, manifest, selected_id):
     else:
         menu = ((DOCK_GALLERY_ITEM, "Open"), (DOCK_REF_DEFAULT, "Make default"),
                 (DOCK_REF_RENAME, "Rename…"), (DOCK_REF_DELETE, "Delete…"))
+    designing = _selected_design(manifest)
+    status = _design_status(*designing) if designing else None
     return build_gallery(manifest, selected_id, root,
-                         _gallery_references(root, manifest, selected_id), menu)
+                         _gallery_references(root, manifest, selected_id), menu,
+                         pending=status[1] if status else "")
 
 
 def _dock_gallery_item(procedure, config, data):
@@ -5752,28 +5829,8 @@ def _queue_single_location_design(root, manifest, location, redesign=False):
             "description": location.get("notes", ""), "redesign": redesign,
             **_look_options(manifest)}
     job = _http("POST", f"{ENGINE_URL}/locations", body)
-    if not _LOCATION_DESIGN_JOBS:
-        GLib.timeout_add_seconds(3, _exclusive(_poll_single_location_jobs))
-    _LOCATION_DESIGN_JOBS[job["id"]] = location_key(location["name"])
-
-
-def _poll_single_location_jobs():
-    for job_id, key in list(_LOCATION_DESIGN_JOBS.items()):
-        try:
-            job = _http("GET", f"{ENGINE_URL}/jobs/{job_id}", timeout=3)
-        except EngineError:
-            continue  # engine restarting: try again next tick
-        if job["status"] in ("queued", "running"):
-            continue
-        del _LOCATION_DESIGN_JOBS[job_id]
-        if job["status"] == "error":
-            Gimp.message(f"Designing {job['request'].get('name', key)} failed: "
-                         f"{job.get('error')}")
-        try:
-            _refresh_project_docks()
-        except Exception:
-            pass
-    return GLib.SOURCE_CONTINUE if _LOCATION_DESIGN_JOBS else GLib.SOURCE_REMOVE
+    _track_design(job, "location", location_key(location["name"]), _LOCATION_DESIGN_JOBS,
+                  location["name"])
 
 
 def _selected_location(manifest):
@@ -5883,28 +5940,7 @@ def _queue_prop_design(root, manifest, prop, redesign=False):
             "description": prop.get("notes", ""), "redesign": redesign,
             **_look_options(manifest)}
     job = _http("POST", f"{ENGINE_URL}/props", body)
-    if not _PROP_DESIGN_JOBS:
-        GLib.timeout_add_seconds(3, _exclusive(_poll_prop_jobs))
-    _PROP_DESIGN_JOBS[job["id"]] = prop_key(prop["name"])
-
-
-def _poll_prop_jobs():
-    for job_id, key in list(_PROP_DESIGN_JOBS.items()):
-        try:
-            job = _http("GET", f"{ENGINE_URL}/jobs/{job_id}", timeout=3)
-        except EngineError:
-            continue  # engine restarting: try again next tick
-        if job["status"] in ("queued", "running"):
-            continue
-        del _PROP_DESIGN_JOBS[job_id]
-        if job["status"] == "error":
-            Gimp.message(f"Designing {job['request'].get('name', key)} failed: "
-                         f"{job.get('error')}")
-        try:
-            _refresh_project_docks()
-        except Exception:
-            pass
-    return GLib.SOURCE_CONTINUE if _PROP_DESIGN_JOBS else GLib.SOURCE_REMOVE
+    _track_design(job, "prop", prop_key(prop["name"]), _PROP_DESIGN_JOBS, prop["name"])
 
 
 def _selected_prop(manifest):
@@ -5948,8 +5984,7 @@ def _open_selected_prop_image(image_name=None):
 
 def _engine_prop_rows(root, manifest, prop):
     rows = ["# Engine prop reference"]
-    if prop_key(prop["name"]) in _PROP_DESIGN_JOBS.values():
-        rows.append("Design\tIn progress…")
+    rows += _design_rows("prop", prop_key(prop["name"]))
     try:
         record = _engine_prop(root, manifest, prop["name"])
     except EngineError as exc:
@@ -6867,6 +6902,7 @@ def _add_dock_callbacks(plugin):
         (DOCK_CHARACTER_VERSION, _dock_character_version, "pick", True),
         (DOCK_ACTIVATE_TAKE, _dock_activate_take, "take", True),
         (DOCK_GALLERY_ITEM, _dock_gallery_item, "gallery", True),
+        (DOCK_CANCEL_JOB, _dock_cancel_job, "cancel", True),
         (DOCK_DESIGN_PROP, _dock_action, "design-prop", False),
         (DOCK_OPEN_PROP_IMAGE, _dock_action, "open-prop-image", False),
         (DOCK_NEW_PROP, _dock_prop_menu, "new", True),
