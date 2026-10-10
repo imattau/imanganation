@@ -121,6 +121,7 @@ PROC_REGEN = "plug-in-imanganation-regenerate-panel"
 PROC_SETREF = "plug-in-imanganation-set-character-reference"
 PROC_SET_LOCATION_REF = "plug-in-imanganation-set-location-reference"
 PROC_INPAINT = "plug-in-imanganation-inpaint-selection"
+PROC_STAGE = "plug-in-imanganation-develop-panel-stage"
 PROC_STATUS = "plug-in-imanganation-engine-status"
 PROC_PROJECT_DOCKS = "plug-in-imanganation-project-docks"
 PROC_CLOSE_PROJECT = "plug-in-imanganation-close-project"
@@ -895,7 +896,8 @@ def _selected_panel(drawables):
         raise ValueError("Select a placed imanganation panel (its layer or group).")
     meta = json.loads(bytes(layer.get_parasite(PARASITE).get_data()))
     seq = meta.get("seq")
-    source = meta.get("file") or (meta.get("render") or {}).get("path")
+    source = (meta.get("stage_source") if meta.get("stage") else None) \
+        or meta.get("file") or (meta.get("render") or {}).get("path")
     if not seq or not source:
         raise ValueError("This layer has no panel number or source file (placed with "
                          "Place Panel?). Re-place it with Place Next Panel.")
@@ -977,6 +979,14 @@ def _base_name(layer):
     return name
 
 
+def _without_stage(meta):
+    """A replacement take is a complete image, no longer an individual patch layer."""
+    stored = dict(meta)
+    stored.pop("stage", None)
+    stored.pop("stage_source", None)
+    return stored
+
+
 def refine_panel(procedure, run_mode, image, drawables, config, data):
     try:
         layer, meta, seq, source = _selected_panel(drawables)
@@ -1012,7 +1022,7 @@ def refine_panel(procedure, run_mode, image, drawables, config, data):
             {k: result.get(k) for k in ("width", "height", "upscaler", "denoise", "seed")})
     except ValueError as exc:
         return _error(procedure, str(exc))
-    stored = dict(meta, file=str(path),
+    stored = dict(_without_stage(meta), file=str(path),
                   refined={k: result.get(k) for k in ("source", "width", "height",
                                                       "upscaler", "denoise", "seed")})
     hires = _swap_in(image, layer, str(path), stored, f"{_base_name(layer)} hi-res",
@@ -1166,7 +1176,7 @@ def _name_list(text):
     return [name.strip() for name in (text or "").split(",") if name.strip()]
 
 
-def inpaint_selection(procedure, run_mode, image, drawables, config, data):
+def inpaint_selection(procedure, run_mode, image, drawables, config, data, *, staged=False):
     _, non_empty, x1, y1, x2, y2 = Gimp.Selection.bounds(image)
     if not non_empty:
         return _error(procedure, "Select the area to repaint first.")
@@ -1185,7 +1195,8 @@ def inpaint_selection(procedure, run_mode, image, drawables, config, data):
     if not source.is_file():
         return _error(procedure, f"This take's file is missing: {source}")
 
-    if run_mode == Gimp.RunMode.INTERACTIVE and not _dialog(procedure, config, PROC_INPAINT):
+    if run_mode == Gimp.RunMode.INTERACTIVE and not _dialog(
+            procedure, config, PROC_STAGE if staged else PROC_INPAINT):
         return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
     prompt = (config.get_property("prompt") or "").strip()
     if not prompt:
@@ -1213,11 +1224,19 @@ def inpaint_selection(procedure, run_mode, image, drawables, config, data):
                 body["reading_order"] = manifest["project"].get("reading_order", "rtl")
         if "project" in engine_project:  # the project's look, as its panels have
             body.update(engine_ui.style_options(_manifest_for(root)) if engine_ui else {})
+        label = "Developing" if staged else "Inpainting"
         result = _run_job(config.get_property("engine-url").rstrip("/"), "/inpaint", body,
-                          f"Inpainting panel {seq:03d}: {prompt[:40]}…")
+                          f"{label} panel {seq:03d}: {prompt[:40]}…")
     except (EngineError, ValueError) as exc:
         return _error(procedure, str(exc))
 
+    overlay_path = result.get("overlay_path")
+    if staged and not (overlay_path and Path(overlay_path).is_file()):
+        # Checked before recording the take: an engine without stage layers (or one whose
+        # output folder this GIMP can't read) must not leave a take in the project
+        # history that no layer on the page shows.
+        return _error(procedure, "The engine did not return a transparent stage layer. "
+                                 "Update the engine and try again.")
     try:
         mask_ref = mask.relative_to(root).as_posix()
         path, _take = _record_derived_take(
@@ -1226,17 +1245,75 @@ def inpaint_selection(procedure, run_mode, image, drawables, config, data):
                                   ("prompt", "denoise", "grow_mask_by", "seed")}})
     except (ValueError, KeyError) as exc:
         return _error(procedure, str(exc))
-    stored = dict(meta, file=str(path),
-                  inpainted={k: result.get(k) for k in ("prompt", "source", "mask", "denoise",
-                                                        "grow_mask_by", "seed")})
-    new = _swap_in(image, layer, str(path), stored, f"{_base_name(layer)} inpaint",
-                   fit="layer", take_ref=_take_reference(root, seq, path))
-    Gimp.message(f"Inpainted panel {seq:03d} ({Path(result['path']).name}); outside the "
-                 f"selection the take is unchanged. Previous take kept, hidden.")
+    take_ref = _take_reference(root, seq, path)
+    if staged:
+        stage_number = int((meta.get("stage") or {}).get("step", 0)) + 1
+        stage_meta = {
+            "step": stage_number, "prompt": prompt,
+            "source": str(source), "take": str(path),
+            "mask": mask_ref, "seed": result.get("seed"),
+            "denoise": result.get("denoise"),
+            "grow_mask_by": result.get("grow_mask_by"),
+            "overlay": str(overlay_path),
+        }
+        stored = dict(meta, file=str(overlay_path), stage_source=str(path),
+                      stage=stage_meta,
+                      inpainted={k: result.get(k) for k in
+                                 ("prompt", "source", "mask", "denoise",
+                                  "grow_mask_by", "seed")})
+        saved = Gimp.Selection.save(image)
+        image.undo_group_start()
+        try:
+            new = Gimp.file_load_layer(
+                Gimp.RunMode.NONINTERACTIVE, image, Gio.File.new_for_path(overlay_path))
+            new.set_name(f"Stage {stage_number:02d} · {prompt[:48]}")
+            image.insert_layer(new, layer.get_parent(), image.get_item_position(layer))
+            new.scale(layer.get_width(), layer.get_height(), False)
+            _, lx, ly = layer.get_offsets()
+            new.set_offsets(lx, ly)
+            # Respect a frame mask on the original panel as well as the transparent
+            # edit alpha returned by the engine.
+            panel_mask = layer.get_mask()
+            if panel_mask is not None:
+                image.select_item(Gimp.ChannelOps.REPLACE, panel_mask)
+                new.add_mask(new.create_mask(Gimp.AddMaskType.SELECTION))
+            new.attach_parasite(Gimp.Parasite.new(
+                PARASITE, Gimp.PARASITE_PERSISTENT,
+                list(json.dumps(stored).encode())))
+            if take_ref:
+                new.attach_parasite(Gimp.Parasite.new(
+                    TAKE_PARASITE, Gimp.PARASITE_PERSISTENT,
+                    list(json.dumps(take_ref, separators=(",", ":")).encode())))
+                _tag_panel_group(layer.get_parent(), take_ref)
+        except Exception as exc:
+            return _error(procedure, f"Could not add the development stage: {exc}")
+        finally:
+            image.select_item(Gimp.ChannelOps.REPLACE, saved)
+            image.remove_channel(saved)
+            image.undo_group_end()
+        Gimp.displays_flush()
+    else:
+        stored = dict(_without_stage(meta), file=str(path),
+                      inpainted={k: result.get(k) for k in ("prompt", "source", "mask",
+                                                            "denoise", "grow_mask_by", "seed")})
+        new = _swap_in(image, layer, str(path), stored, f"{_base_name(layer)} inpaint",
+                       fit="layer", take_ref=take_ref)
+    if staged:
+        Gimp.message(f"Added stage {stage_number} to panel {seq:03d}. The accepted edit "
+                     "is a separate layer; the full result is the source for the next stage.")
+    else:
+        Gimp.message(f"Inpainted panel {seq:03d} ({Path(result['path']).name}); outside the "
+                     f"selection the take is unchanged. Previous take kept, hidden.")
     manifest = _manifest_for(root)
     if manifest is not None:
         _save_project_page(image, root, manifest)
     return _success(procedure, new)
+
+
+def develop_panel_stage(procedure, run_mode, image, drawables, config, data):
+    """Add a masked AI edit as a new editable layer above the current panel take."""
+    return inpaint_selection(procedure, run_mode, image, drawables, config, data,
+                             staged=True)
 
 
 def _image_project(image):
@@ -5660,7 +5737,8 @@ class Imanganation(Gimp.PlugIn):
         return False, None, None
 
     def do_query_procedures(self):
-        return [PROC_RENDER, PROC_NEXT, PROC_REGEN, PROC_INPAINT, PROC_REFINE, PROC_SETREF,
+        return [PROC_RENDER, PROC_NEXT, PROC_REGEN, PROC_INPAINT, PROC_STAGE,
+                PROC_REFINE, PROC_SETREF,
                 PROC_SET_LOCATION_REF,
                 PROC_PLACE, PROC_STATUS, PROC_PROJECT_DOCKS, PROC_CLOSE_PROJECT,
                 PROC_RELOAD_SCRIPT,
@@ -5841,7 +5919,8 @@ class Imanganation(Gimp.PlugIn):
                PROC_PAGE_LAYOUT: page_layout, PROC_SCREENTONE: screentone,
                PROC_SPEED_LINES: speed_lines, PROC_IMPACT_BURST: impact_burst,
                PROC_COVER_DESIGNER: cover_designer,
-               PROC_EXPORT_PROJECT: export_project}[name]
+               PROC_EXPORT_PROJECT: export_project,
+               PROC_STAGE: develop_panel_stage}[name]
         proc = Gimp.ImageProcedure.new(self, name, Gimp.PDBProcType.PLUGIN, run, None)
         proc.set_image_types("*")
         proc.set_sensitivity_mask(
@@ -5866,6 +5945,7 @@ class Imanganation(Gimp.PlugIn):
             PROC_PLACE: "Create",
             PROC_REGEN: "Create",
             PROC_INPAINT: "Create",
+            PROC_STAGE: "Create",
             PROC_REFINE: "Create",
         }
         proc.add_menu_path(f"<Image>/Imanganation/{menu_groups[name]}")
@@ -5962,14 +6042,23 @@ class Imanganation(Gimp.PlugIn):
         proc.add_layer_return_value(
             "layer", "Layer", "The placed panel layer", False, GObject.ParamFlags.READWRITE)
 
-        if name == PROC_INPAINT:
-            proc.set_menu_label("_Inpaint Selection...")
-            proc.set_documentation(
-                "Repaint the selected area of a panel",
-                "Repaint only the selected area of the selected panel's take from a short "
-                "prompt; everything outside the selection stays exactly as it was. The "
-                "result is swapped in as a new take, the previous one kept hidden.",
-                name)
+        if name in (PROC_INPAINT, PROC_STAGE):
+            if name == PROC_STAGE:
+                proc.set_menu_label("Develop Panel in _Stages...")
+                proc.set_documentation(
+                    "Add a manual AI development stage to the selected panel",
+                    "Use the current selection and prompt to repaint part of the latest "
+                    "panel take. Add the accepted patch as a separate editable layer; "
+                    "select the panel group and run again to continue. Start with "
+                    "Render Panel into Frame. The selection remains unchanged.", name)
+            else:
+                proc.set_menu_label("_Inpaint Selection...")
+                proc.set_documentation(
+                    "Repaint the selected area of a panel",
+                    "Repaint only the selected area of the selected panel's take from a "
+                    "short prompt; everything outside the selection stays exactly as it "
+                    "was. The result is swapped in as a new take, the previous one kept "
+                    "hidden.", name)
             proc.add_string_argument(
                 "prompt", "_Prompt", "What to paint in the selection, e.g. \"open hand\"",
                 "", GObject.ParamFlags.READWRITE)

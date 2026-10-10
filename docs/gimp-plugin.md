@@ -248,6 +248,15 @@ page placement metadata are still being migrated. Image procedures are grouped u
   selection the take is pixel-identical. **Characters** (comma-separated, optional)
   names who is in the selection, so their faces stay on-model; with several, each
   covers their side of the patch in the project's reading order.
+- **Develop Panel in Stages…**: start with a rendered panel, select the panel (or its
+  group), then select the area to develop and describe one change. The engine repaints
+  that area from the latest complete take and returns both the full updated take and a
+  transparent patch. The patch is added above the previous work as an editable layer;
+  the previous layers stay visible. Repeat for each change, selecting the panel group
+  and a new area each time. Accepted prompts, masks, seeds, source takes, and outputs
+  are recorded on each layer and in project take history, so the XCF can be saved and
+  reopened mid-process. Use ordinary **Inpaint Selection…** when you want to replace
+  the visible take instead of keeping a staged layer.
 - **Set Character Reference from Layer…**: select the layer that shows a character
   (optionally drag a selection around them) and type their name or alias. The region
   is grown to a square around its centre on white, with layer masks applied, capped at

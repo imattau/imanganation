@@ -133,6 +133,11 @@ Unknown characters or versions fail, listing what exists. Leave `characters` out
 props and backgrounds. Recommended plug-in default: the panel's characters as choices,
 none preselected for a two-shot.
 
+The job result also includes `overlay_path`: an RGBA PNG containing just the generated
+patch, with the same soft/grown blend mask used by the full stitched result. GIMP uses
+this to keep staged edits as separate layers while the full `path` remains the source
+for the next stage.
+
 ## Characters
 
 `GET /characters?project=prj_…` lists the project's cast from its identity store.

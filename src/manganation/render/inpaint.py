@@ -53,6 +53,7 @@ class InpaintResult:
     crop: list[int] = field(default_factory=list)  # [x0, y0, x1, y1] in source px
     characters: dict[str, str] = field(default_factory=dict)  # name -> version used
     work_size: list[int] = field(default_factory=list)  # [w, h] the crop was painted at
+    overlay_path: str = ""  # transparent patch, for compositing the edit as a layer
 
 
 def resolve_characters(
@@ -347,15 +348,26 @@ def inpaint_image(
     # Stitch: patch back at crop size, pasted only through the (grown, soft) mask.
     patch = Image.open(io.BytesIO(blobs[0])).convert("RGB").resize((crop_w, crop_h),
                                                                    Image.LANCZOS)
+    effective_mask = blend_mask(mask_im.crop(box), grow_mask_by)
     stitched = source_im.copy()
-    stitched.paste(patch, box[:2], blend_mask(mask_im.crop(box), grow_mask_by))
+    stitched.paste(patch, box[:2], effective_mask)
 
     out.parent.mkdir(parents=True, exist_ok=True)
     stitched.save(out)
+    # Preserve the generated pixels as a transparent overlay too. GIMP can stack this
+    # above the previous accepted take while the full stitched image remains the exact
+    # source for the next AI stage.
+    overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    patch_rgba = patch.convert("RGBA")
+    patch_rgba.putalpha(effective_mask)
+    overlay.paste(patch_rgba, box[:2])
+    overlay_path = out.with_name(f"{out.stem}-overlay.png")
+    overlay.save(overlay_path)
     return InpaintResult(
         path=str(out), seq=None, source=str(src), mask=str(mask_path), prompt=prompt,
         width=width, height=height, denoise=denoise, grow_mask_by=grow_mask_by, seed=seed,
         positive=positive, crop=list(box), work_size=[work_w, work_h], characters=used,
+        overlay_path=str(overlay_path),
     )
 
 
