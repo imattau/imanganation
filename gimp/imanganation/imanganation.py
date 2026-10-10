@@ -4240,7 +4240,7 @@ def _storyboard_review(root, page_id):
         open_panel_button.set_sensitive(first is not None)
     dialog.show_all()
     response = dialog.run()
-    selected = beat_list.get_selected_row() if response == 1 else None
+    selected = beat_list.get_selected_row()
     selected_panel_id = selected.get_name() if selected is not None else None
     reordered_ids = [beat_list.get_row_at_index(i).get_name()
                      for i in range(beat_list.get_children().__len__())
