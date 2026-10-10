@@ -272,7 +272,10 @@ page placement metadata are still being migrated. Image procedures are grouped u
   names who is in the selection, so their faces stay on-model; with several, each
   covers their side of the patch in the project's reading order.
 - **Develop Panel in Stages…**: start with a rendered panel, select the panel or its
-  group, then run this command for each development pass. Its guided dialog suggests
+  group, or start from nothing: with no render yet, select the script panel in the docks
+  and a frame on its page, and the first stage begins on a blank paper-white picture in
+  the frame's proportions (kept as the panel's first take, full strength so the stage
+  paints freely). Then run this command for each development pass. Its guided dialog suggests
   the next phase and explains what to focus on and select: **Panel composition →
   Rough character blocking → Background and perspective → Acting, interaction, and
   props → Linework and cleanup → Black shapes and shadow design → Effects and final

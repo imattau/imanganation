@@ -69,6 +69,7 @@ try:
     from panel_ui import (
         build_docks,
         build_gallery,
+        blank_size,
         build_welcome_docks,
         character_row_id,
         location_row_id,
@@ -114,6 +115,7 @@ except ImportError:  # Keep older single-file plug-in installs usable for legacy
     new_id = None
     new_project_document = None
     build_docks = None
+    blank_size = None
     build_gallery = None
     character_row_id = location_row_id = None
     panel_label = None
@@ -1470,6 +1472,68 @@ def _name_list(text):
     return [name.strip() for name in (text or "").split(",") if name.strip()]
 
 
+def _blank_target(image):
+    """Develop in Stages with nothing rendered yet starts from a blank picture. The panel
+    is the one selected in the docks (or on the canvas), else the project's next.
+    -> (root, manifest, seq, page id); ValueError says what's missing, so the artist
+    hears it before filling in a dialog."""
+    root = _DOCK_CONTEXT.get("root")
+    manifest = _manifest_for(root) if root is not None else None
+    page_id = _project_page_id_for_image(image, manifest) if manifest else None
+    if page_id is None:
+        raise ValueError("Open a project page to develop a new panel on, or render the "
+                         "panel first (Render Panel into Frame).")
+    ids = [panel["id"] for panel in manifest["panels"]]
+    panel_id = (_selected_canvas_panel_id(manifest) or _DOCK_CONTEXT.get("selected_id")
+                or manifest["cursor"].get("next_panel"))
+    if panel_id not in ids:
+        raise ValueError("Select the script panel to develop in Project or Script "
+                         "first, then make the selection for its frame.")
+    seq = ids.index(panel_id) + 1
+    panel = manifest["panels"][seq - 1]
+    if panel.get("takes"):
+        raise ValueError("This panel already has a picture; select its layer or group "
+                         "to develop it.")
+    placement = panel.get("placement")
+    if placement and placement.get("page") != page_id:
+        raise ValueError("This panel is placed on another project page. Open that page "
+                         "first.")
+    return root, manifest, seq, page_id
+
+
+def _blank_base_layer(image, target, x1, y1, x2, y2):
+    """Put a blank paper-white base take in the panel's frame (the one saved for it on
+    this page, else the selection) for the first stage to paint onto. -> the new layer."""
+    root, manifest, seq, page_id = target
+    panel = manifest["panels"][seq - 1]
+    saved_frame = _placed_frame_for_image(image, manifest, panel)
+    if saved_frame is not None:
+        x1, y1, width, height = saved_frame
+    else:
+        width, height = x2 - x1, y2 - y1
+    w, h = blank_size(width, height)
+    tmp = Path(root) / "tmp"
+    tmp.mkdir(exist_ok=True)
+    blank = tmp / f"blank_{seq:03d}_{secrets.token_hex(4)}.png"
+    png = rgb_png(w, h, b"\xff" * (w * h * 3)) if rgb_png else None
+    if png is None:
+        raise ValueError("This plug-in install can't make a blank starting picture")
+    blank.write_bytes(png)
+    if saved_frame is None:
+        panel["placement"] = {"page": page_id, "frame": [x1, y1, width, height]}
+        panel["status"] = "placed"
+        save_project(root, manifest)
+    path, _take = _record_take(root, manifest, seq, str(blank), "import", w, h,
+                               engine={"blank": True})
+    blank.unlink(missing_ok=True)
+    take_ref = _take_reference(root, seq, path)
+    manifest = _manifest_for(root)
+    panel = manifest["panels"][seq - 1]
+    return _place(image, Gio.File.new_for_path(str(path)), _container_spec(panel), seq,
+                  render={"path": str(path), "width": w, "height": h, "blank": True},
+                  take_ref=take_ref, frame=saved_frame)
+
+
 def inpaint_selection(procedure, run_mode, image, drawables, config, data, *, staged=False):
     _, non_empty, x1, y1, x2, y2 = Gimp.Selection.bounds(image)
     if not non_empty:
@@ -1479,15 +1543,24 @@ def inpaint_selection(procedure, run_mode, image, drawables, config, data, *, st
     if _panel_layer(drawables) is None:
         under = _panel_under_selection(image, x1, y1, x2, y2)
         drawables = [under] if under is not None else drawables
+    blank_target = None  # nothing rendered yet: begin from a blank picture (below)
     try:
         layer, meta, seq, source = _selected_panel(drawables)
     except ValueError as exc:
-        return _error(procedure, str(exc))
-    _, lx, ly = layer.get_offsets()
-    if x2 <= lx or y2 <= ly or x1 >= lx + layer.get_width() or y1 >= ly + layer.get_height():
-        return _error(procedure, "The selection doesn't overlap the selected panel.")
-    if not source.is_file():
-        return _error(procedure, f"This take's file is missing: {source}")
+        if not staged:
+            return _error(procedure, str(exc))
+        try:
+            blank_target = _blank_target(image)
+        except ValueError as blank_exc:
+            return _error(procedure, str(blank_exc))
+        layer, meta, seq, source = None, {}, blank_target[2], None
+    if blank_target is None:
+        _, lx, ly = layer.get_offsets()
+        if (x2 <= lx or y2 <= ly or x1 >= lx + layer.get_width()
+                or y1 >= ly + layer.get_height()):
+            return _error(procedure, "The selection doesn't overlap the selected panel.")
+        if not source.is_file():
+            return _error(procedure, f"This take's file is missing: {source}")
 
     stage_phase = _suggested_development_phase(meta) if staged else None
     if run_mode == Gimp.RunMode.INTERACTIVE and staged:
@@ -1505,6 +1578,13 @@ def inpaint_selection(procedure, run_mode, image, drawables, config, data, *, st
     prompt = (config.get_property("prompt") or "").strip()
     if not prompt:
         return _error(procedure, "Describe what to paint in the selection.")
+    if blank_target is not None:  # nothing to keep: paint the selection fresh
+        try:
+            layer = _blank_base_layer(image, blank_target, x1, y1, x2, y2)
+            layer, meta, seq, source = _selected_panel([layer])
+        except (ValueError, ProjectFileError) as exc:
+            return _error(procedure, str(exc))
+        config.set_property("denoise", 1.0)
 
     root = source.parent.parent
     mask = root / "tmp" / f"inpaint_{seq:03d}_{time.strftime('%Y%m%d-%H%M%S')}_{secrets.token_hex(4)}.png"
@@ -6899,7 +6979,8 @@ class Imanganation(Gimp.PlugIn):
                     "and rough character blocking through background, acting, linework, "
                     "shadows, and effects. Select the area, describe the change, and add "
                     "the result as a separate editable layer. Choose another phase to "
-                    "skip or revisit. Start with Render Panel into Frame.", name)
+                    "skip or revisit. Select a frame and a script panel to start from a blank picture, or develop "
+                    "an existing render.", name)
             else:
                 proc.set_menu_label("_Inpaint Selection...")
                 proc.set_documentation(

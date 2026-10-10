@@ -101,6 +101,14 @@ def rgb_png(width: int, height: int, pixels: bytes) -> bytes | None:
             + chunk(b"IDAT", zlib.compress(scanlines, 6)) + chunk(b"IEND", b""))
 
 
+def blank_size(width: float, height: float, target: int = 1024 * 1024) -> tuple[int, int]:
+    """Pixel size of a blank starting picture in a frame's proportions: about ``target``
+    pixels, on the 64-px grid the renderer uses (at least 512 each way)."""
+    ratio = max(width, 1) / max(height, 1)
+    return (max(512, round((target * ratio) ** 0.5 / 64) * 64),
+            max(512, round((target / ratio) ** 0.5 / 64) * 64))
+
+
 def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
                 root: str | Path | None = None,
                 previews: dict[str, str] | None = None,

@@ -475,3 +475,13 @@ def test_export_page_range_is_read_in_project_order():
     for bad in ("0", "2-1", "6", "a", "1-2-3", "1,,2"):
         with pytest.raises(ValueError):
             parse_page_range(bad, 5)
+
+
+def test_blank_starting_picture_follows_the_frames_proportions():
+    from gimp.imanganation.panel_ui import blank_size
+
+    assert blank_size(500, 500) == (1024, 1024)
+    w, h = blank_size(522, 640)
+    assert w % 64 == 0 and h % 64 == 0 and w < h and 0.9e6 < w * h < 1.2e6
+    w, h = blank_size(3000, 100)  # an extreme strip still gets a usable height
+    assert h >= 512 and w > h
