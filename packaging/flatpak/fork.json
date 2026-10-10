@@ -1,5 +1,5 @@
 {
   "//": "The imanganation-gimp commit CI and releases build (make_manifest.py --fork-pinned). Bump it when the fork changes.",
   "repo": "https://github.com/imattau/imanganation-gimp.git",
-  "commit": "2f3831b0b59ad6e2e656b51b0d9246ac579e1753"
+  "commit": "c9be165bc75c5cd74ad5f2e71b24d55501bf304e"
 }
