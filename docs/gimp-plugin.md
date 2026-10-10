@@ -278,8 +278,13 @@ page placement metadata are still being migrated. Image procedures are grouped u
   Context shows **Design: Queued behind N jobs · 12s** or **Rendering · 34s** (ticking
   while it is selected), with a **Cancel design** button, and the Gallery heads its
   images with the same line. A failed design stays in Context as **Design failed** with
-  the engine's reason, until the next try. There is no step-by-step bar: ComfyUI's
-  per-step progress isn't read yet.
+  the engine's reason, until the next try. Every job that renders shows ComfyUI's
+  real step as a bar: the Cancel window and GIMP's progress bar for Render, Regenerate,
+  Refine, Inpaint and Develop in Stages, the Context and Gallery lines above for designs,
+  and Engine Status (**▶ … pass 2 step 14/28**). A refine or face pass queues a prompt of
+  its own, so the bar restarts with *pass 2*; while models load, or an LLM step runs, there
+  is no step yet and it shows elapsed time. The engine reads the steps from ComfyUI's
+  websocket (`render/progress.py`; `GET /jobs/{id}` → `progress`).
 - **Regenerate Panel…**: select a placed panel (its layer or group). It is re-rendered
   from the **current** `panels.json`, so script edits apply, at its frame's size. The
   new take (`003_take02.png`…) goes into the same group, cover-fitted to the frame

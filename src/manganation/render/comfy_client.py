@@ -20,7 +20,11 @@ class ComfyError(RuntimeError):
 class ComfyClient:
     def __init__(self, base_url: str = "http://127.0.0.1:8188", client_id: str | None = None):
         self.base_url = base_url.rstrip("/")
-        self.client_id = client_id or uuid.uuid4().hex
+        # One id for the whole process: ComfyUI reports a prompt's progress only to the
+        # client that queued it, and progress.ProgressHub listens as this one.
+        from manganation.render.progress import CLIENT_ID
+
+        self.client_id = client_id or CLIENT_ID
 
     def is_up(self) -> bool:
         try:

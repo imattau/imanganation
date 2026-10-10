@@ -70,6 +70,8 @@ try:
         build_docks,
         build_gallery,
         blank_size,
+        job_fraction,
+        job_status_text,
         build_welcome_docks,
         character_row_id,
         location_row_id,
@@ -122,6 +124,7 @@ except ImportError:  # Keep older single-file plug-in installs usable for legacy
     new_id = None
     new_project_document = None
     build_docks = None
+    job_fraction = job_status_text = None
     prop_row_id = prop_key = None
     blank_size = None
     build_gallery = None
@@ -860,11 +863,14 @@ class _JobWindow:
         while context.iteration(False):
             pass
 
-    def update(self, text):
+    def update(self, text, fraction=None):
         if self.window is not None:
             if not self.cancelled:
                 self.detail.set_text(text)
-            self.bar.pulse()
+            if fraction is None:
+                self.bar.pulse()
+            else:
+                self.bar.set_fraction(fraction)
             self._pump()
 
     def close(self):
@@ -875,13 +881,10 @@ class _JobWindow:
 
 
 def _job_detail(job, started):
-    waited = int(time.monotonic() - started)
-    if job["status"] == "queued":
-        ahead = job.get("queue_position")
-        where = (f"Queued behind {ahead} job{'s' if ahead != 1 else ''}"
-                 if ahead else "Next in the queue")
-        return f"{where} · {waited}s"
-    return f"Rendering · {waited}s"
+    seconds = int(time.monotonic() - started)
+    if job_status_text is None:
+        return f"{'Queued' if job['status'] == 'queued' else 'Rendering'} · {seconds}s"
+    return job_status_text(job, seconds)
 
 
 def _run_job(engine, path, body, label):
@@ -899,10 +902,14 @@ def _run_job(engine, path, body, label):
             if time.monotonic() > deadline:
                 raise EngineError(f"timed out after {RENDER_TIMEOUT}s (job {job['id']})")
             time.sleep(0.5)
-            Gimp.progress_pulse()
+            fraction = job_fraction(job) if job_fraction is not None else None
+            if fraction is None:
+                Gimp.progress_pulse()
+            else:
+                Gimp.progress_update(fraction)
             text = _job_detail(job, started)
             Gimp.progress_set_text(text)
-            window.update(text)
+            window.update(text, fraction)
             if window.cancelled and not asked:
                 asked = True
                 try:
@@ -2016,7 +2023,10 @@ def _status_report(st, engine):
     lines.append(f"Jobs: {n.get('running', 0)} running, {n.get('queued', 0)} queued, "
                  f"{n.get('done', 0)} done, {n.get('error', 0)} failed")
     for j in st.get("running", []):
-        lines.append(f"  ▶ {job(j)}: {j.get('elapsed_s', 0)} s so far")
+        step = j.get("progress") or {}
+        steps = (f" · pass {step['pass']} step {step['step']}/{step['steps']}"
+                 if step.get("steps") else "")
+        lines.append(f"  ▶ {job(j)}: {j.get('elapsed_s', 0)} s so far{steps}")
     if st.get("queued"):
         lines.append("  … queued: " + ", ".join(job(j) for j in st["queued"]))
     for j in st.get("recent", []):
@@ -3897,16 +3907,15 @@ def _track_design(job, kind, key, jobs, name=None):
 
 
 def _design_status(kind, key):
-    """-> (job id, "Rendering · 34s") for a design in flight, else None."""
+    """-> (job id, "Rendering · ▰▰▱▱▱▱▱▱▱▱ 7/28 · 34s") for a design in flight, else None."""
     for job_id, info in _JOB_INFO.items():
         if info["kind"] == kind and info["key"] == key:
             seconds = int(time.monotonic() - info["queued_at"])
-            if info["status"] == "queued":
-                ahead = info.get("ahead")
-                where = (f"Queued behind {ahead} job{'s' if ahead != 1 else ''}"
-                         if ahead else "Next in the queue")
-                return job_id, f"{where} · {seconds}s"
-            return job_id, f"Rendering · {seconds}s"
+            job = {"status": info["status"], "queue_position": info.get("ahead"),
+                   "progress": info.get("progress")}
+            if job_status_text is None:
+                return job_id, f"{info['status']} · {seconds}s"
+            return job_id, job_status_text(job, seconds)
     return None
 
 
@@ -3949,6 +3958,7 @@ def _poll_designs():
         except EngineError:
             continue  # engine restarting: try again next tick
         info["status"], info["ahead"] = job["status"], job.get("queue_position")
+        info["progress"] = job.get("progress")
         if job["status"] in ("queued", "running"):
             continue
         del _JOB_INFO[job_id]

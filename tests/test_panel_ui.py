@@ -548,3 +548,23 @@ def test_gallery_says_when_the_selected_asset_is_being_designed():
     lines = rows.splitlines()
     assert lines[0].startswith("# References") and lines[1] == "# ⏳ Designing: Rendering · 34s"
     assert "Designing" not in build_gallery(manifest, who, None, {"versions": {}})
+
+
+def test_job_status_text_shows_the_queue_or_the_comfyui_step():
+    from gimp.imanganation.panel_ui import job_fraction, job_status_text, progress_bar
+
+    assert progress_bar(0, 10) == "▱" * 10 and progress_bar(10, 10) == "▰" * 10
+    assert progress_bar(3, 10) == "▰▰▰" + "▱" * 7 and progress_bar(5, 0) == "▱" * 10
+    queued = {"status": "queued", "queue_position": 2}
+    assert job_status_text(queued, 12) == "Queued behind 2 jobs · 12s"
+    assert job_status_text({"status": "queued", "queue_position": 1}, 1).startswith(
+        "Queued behind 1 job ·")
+    assert job_status_text({"status": "queued", "queue_position": 0}, 3) == (
+        "Next in the queue · 3s")
+    loading = {"status": "running", "progress": None}
+    assert job_status_text(loading, 5) == "Rendering · 5s" and job_fraction(loading) is None
+    running = {"status": "running", "progress": {"pass": 1, "step": 7, "steps": 28}}
+    assert job_status_text(running, 34) == "Rendering · ▰▰▱▱▱▱▱▱▱▱ 7/28 · 34s"
+    assert job_fraction(running) == 0.25
+    second = {"status": "running", "progress": {"pass": 2, "step": 10, "steps": 10}}
+    assert "10/10 · pass 2 · 9s" in job_status_text(second, 9) and job_fraction(second) == 1.0

@@ -90,6 +90,36 @@ def prop_row_id(name: str) -> str:
     return "prop:" + quote(name, safe="")
 
 
+def progress_bar(step: int, steps: int, width: int = 10) -> str:
+    """▰▰▰▱▱▱▱▱▱▱ for step 3 of 10 (text, so docks and dialogs can all show it)."""
+    filled = 0 if steps <= 0 else max(0, min(width, round(width * step / steps)))
+    return "▰" * filled + "▱" * (width - filled)
+
+
+def job_status_text(job: dict[str, Any], seconds: int) -> str:
+    """What an engine job is doing, for every window and dock that follows one: its place
+    in the queue, or its ComfyUI step ("Rendering · ▰▰▱▱▱▱▱▱▱▱ 7/28 · pass 2 · 34s")."""
+    if job.get("status") == "queued":
+        ahead = job.get("queue_position")
+        where = (f"Queued behind {ahead} job{'s' if ahead != 1 else ''}" if ahead
+                 else "Next in the queue")
+        return f"{where} · {seconds}s"
+    progress = job.get("progress") or {}
+    if progress.get("steps"):
+        step, steps = progress.get("step", 0), progress["steps"]
+        passes = f" · pass {progress['pass']}" if progress.get("pass", 1) > 1 else ""
+        return f"Rendering · {progress_bar(step, steps)} {step}/{steps}{passes} · {seconds}s"
+    return f"Rendering · {seconds}s"
+
+
+def job_fraction(job: dict[str, Any]) -> float | None:
+    """How far through the current ComfyUI pass (0-1), or None when it isn't known."""
+    progress = job.get("progress") or {}
+    if job.get("status") == "running" and progress.get("steps"):
+        return max(0.0, min(1.0, progress.get("step", 0) / progress["steps"]))
+    return None
+
+
 def rgb_png(width: int, height: int, pixels: bytes) -> bytes | None:
     """Encode packed RGB8 pixels as a small standards-compliant PNG."""
     if width < 1 or height < 1 or len(pixels) != width * height * 3:

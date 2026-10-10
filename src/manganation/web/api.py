@@ -339,6 +339,9 @@ class Job(BaseModel):
     result: dict | None = None
     error: str | None = None
     cancel_requested: bool = False
+    progress: dict | None = Field(
+        default=None, description="While running: {'pass', 'step', 'steps'} of what "
+        "ComfyUI is rendering; None before its first step or without ComfyUI progress")
     queue_position: int | None = Field(
         default=None, description="Jobs ahead of this one while it is queued (0 = next)")
     created: float = Field(default_factory=time.time)
@@ -401,11 +404,17 @@ def create_app(
     engines_report=None,
     design_location=None,
     design_prop=None,
+    progress=None,
 ) -> FastAPI:
     app = FastAPI(title="imanganation engine")
     jobs: dict[str, Job] = {}
     lock = threading.Lock()
     worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="render")
+    if progress is None:
+        from manganation.config import load_settings
+        from manganation.render.progress import ProgressHub
+
+        progress = ProgressHub(lambda: load_settings().comfyui.base_url)
 
     def submit_job(kind: JobKind, request: dict, work) -> Job:
         job = Job(id=uuid.uuid4().hex[:12], kind=kind, request=request)
@@ -421,6 +430,7 @@ def create_app(
                 job.finished = time.time()
                 return
             job.status, job.started = "running", time.time()
+        progress.reset()
         try:
             result = work()
             with lock:
@@ -871,6 +881,8 @@ def create_app(
                 out["panel"] = j.request["panel"].get("id")
             if j.status == "running" and j.started:
                 out["elapsed_s"] = round(now - j.started, 1)
+                if progress.snapshot():
+                    out["progress"] = progress.snapshot()
             if j.finished and j.started:
                 out["took_s"] = round(j.finished - j.started, 1)
             if j.error:
@@ -1163,6 +1175,8 @@ def create_app(
             if job is None:
                 raise HTTPException(404, "unknown job")
             out = job.model_copy()
+            if out.status == "running":
+                out.progress = progress.snapshot()
             if out.status == "queued":
                 out.queue_position = sum(
                     1 for j in jobs.values()

@@ -249,7 +249,8 @@ references in all), other engines its name, and its description when there is on
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /jobs/{id}` | Job status: `queued` / `running` / `done` / `error`, with `result` or `error` |
+| `GET /jobs/{id}` | Job status: `queued` / `running` / `done` / `error` / `cancelled`, with `result` or `error`; `queue_position` while queued and `progress` (`pass`, `step`, `steps` of the running ComfyUI prompt) while running |
+| `POST /jobs/{id}/cancel` | Drop a queued job, or interrupt the running one in ComfyUI |
 | `POST /refine`, `POST /inpaint` | Above |
 | `GET /characters` | The cast, by `project` or legacy `project_dir` |
 | `POST /characters/reference` | Register an image as a character's new active reference version |
