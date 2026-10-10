@@ -213,6 +213,7 @@ DOCK_ADD_PANEL = "plug-in-imanganation-dock-add-panel"
 DOCK_DELETE_PANEL = "plug-in-imanganation-dock-delete-panel"
 DOCK_ADD_COVER = "plug-in-imanganation-dock-add-cover"
 DOCK_OPEN_CHARACTER_VERSION = "plug-in-imanganation-dock-open-character-version"
+DOCK_ADD_COVER_PAGE = "plug-in-imanganation-dock-add-cover-page"
 DOCK_DESIGN_VARIANT = "plug-in-imanganation-dock-design-variant"
 # Context: a panel character's "Reference…" (item "<panel id>:<index>")
 DOCK_CHARACTER_VERSION = "plug-in-imanganation-dock-character-version"
@@ -3372,6 +3373,10 @@ def _create_project_page(root, manifest, width, height, number=None, resolution=
     page_label = f"Page {number}"
     if cover:
         relative, page_label = "pages/cover.xcf", "Cover"
+        spare = 1
+        while (Path(root) / relative).exists():  # a deleted cover's file may linger
+            spare += 1
+            relative = f"pages/cover-{spare}.xcf"
     destination = Path(root) / relative
     temporary = destination.with_name(f".{destination.stem}.{secrets.token_hex(4)}.tmp.xcf")
     if resolution is None:
@@ -4677,11 +4682,29 @@ def _trash_page_file(root, relative):
 
 
 def _dock_page_menu(procedure, config, data):
-    """Delete page… (a page's right-click menu) or a drop in the page strip."""
+    """Delete page… (a page's right-click menu), Add cover page… (the Pages heading) or
+    a drop in the page strip."""
     try:
         root = _DOCK_CONTEXT["root"]
         item = config.get_property("item")
         manifest = load_project(root)
+        if data == "cover":
+            if any(p.get("cover") or str(p.get("label", "")).casefold() == "cover"
+                   for p in manifest["pages"]):
+                raise ValueError("This project already has a cover page")
+            width, height = _default_page_size(root, manifest)
+            size = _choose_page_size(width, height)
+            if size is None:
+                return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
+            page_id = _create_project_page(root, manifest, *size, cover=True)
+            manifest = load_project(root)  # the cover leads the reading order
+            cover = manifest["pages"].pop()
+            manifest["pages"].insert(0, cover)
+            save_project(root, manifest)
+            _DOCK_CONTEXT["selected_id"] = page_id
+            _refresh_project_docks()
+            _show_project_page(root, load_project(root), page_id)
+            return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
         if data == "reorder":
             dragged, _, target = item.partition("\t")
             reorder_pages(manifest, dragged, target)
@@ -5692,6 +5715,7 @@ def _dock_actions(root, manifest):
             "add_cover_action": DOCK_ADD_COVER,
             "character_version_action": DOCK_CHARACTER_VERSION,
             "design_variant_menu": DOCK_DESIGN_VARIANT,
+            "add_cover_page_action": DOCK_ADD_COVER_PAGE,
             "reorder_pages_action": DOCK_REORDER_PAGES,
             "bubble_line_action": DOCK_BUBBLE_LINE, "bubbled": frozenset(bubbled),
             "new_bubble_action": DOCK_NEW_BUBBLE,
@@ -6025,6 +6049,7 @@ def _add_dock_callbacks(plugin):
         (DOCK_ADD_COVER, _dock_panel_menu, "cover", True),
         (DOCK_CHARACTER_VERSION, _dock_character_version, "pick", True),
         (DOCK_DESIGN_VARIANT, _dock_character_menu, "variant", True),
+        (DOCK_ADD_COVER_PAGE, _dock_page_menu, "cover", True),
         (DOCK_OPEN_CHARACTER_VERSION, _dock_open_character_version, "open", True),
         (DOCK_REORDER_PAGES, _dock_page_menu, "reorder", True),
         (DOCK_BUBBLE_LINE, _dock_bubble, "line", True),

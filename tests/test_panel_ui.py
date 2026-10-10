@@ -343,3 +343,15 @@ def test_characters_offer_designing_another_reference():
     who = character_row_id("Yuki")
     assert (f"\t\t{who}\tYuki\t!d:Design character|v:Design another reference…|"
             "x:Delete character…") in docks["project"]
+
+
+def test_add_cover_page_sits_on_the_pages_heading_until_there_is_one():
+    manifest = copy.deepcopy(EXAMPLE)
+    heading = lambda: next(l for l in build_docks(
+        manifest, add_cover_page_action="cp")["project"].splitlines()
+        if l.startswith("# Pages"))
+    manifest["pages"][0]["label"] = "Page 1"
+    assert heading() == "# Pages\t!cp:Add cover page…"
+    manifest["pages"].insert(0, {"id": "pg_cover01", "label": "Cover",
+                                 "file": "pages/cover.xcf"})
+    assert heading() == "# Pages"

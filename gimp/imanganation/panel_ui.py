@@ -122,7 +122,8 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
                 delete_panel_action: str = "",
                 add_cover_action: str = "",
                 character_version_action: str = "",
-                design_variant_menu: str = "") -> dict[str, str]:
+                design_variant_menu: str = "",
+                add_cover_page_action: str = "") -> dict[str, str]:
     """Build generic host content and stable selections from a project manifest.
 
     The Context (inspector) rows are editable fields; ``open_page_action``, a dock
@@ -153,7 +154,9 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
     picture, gets no "Add panel"). ``character_version_action`` gives each of a panel's
     characters a "Reference…" button in Context (item ``<panel id>:<index>``) that
     picks which of their reference images the panel uses, and ``design_variant_menu``
-    puts "Design another reference…" on each character's right-click menu."""
+    puts "Design another reference…" on each character's right-click menu.
+    ``add_cover_page_action`` puts "Add cover page…" on the Pages heading until the
+    project has a Cover page."""
     panels = manifest.get("panels", [])
     pages = manifest.get("pages", [])
     page_by_id = {page["id"]: page for page in pages}
@@ -213,7 +216,10 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
         project_rows.append(f"Preset\t{preset_name}")
     if chapter:
         project_rows.append(f"# {chapter}")
-    project_rows.append("# Pages")
+    has_cover_page = any(p.get("cover") or _label(p.get("label")).casefold() == "cover"
+                         for p in pages)
+    project_rows.append("# Pages" + _menu(
+        ("" if has_cover_page else add_cover_page_action, "Add cover page…")))
     for page in pages:
         page_label = _label(page.get("label")) or "Page"
         is_cover = page.get("cover") or page_label.strip().casefold() == "cover"
