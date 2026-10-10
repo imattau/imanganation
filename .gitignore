@@ -32,9 +32,6 @@ projects/*/characters/**/*.webp
 *.swp
 .env
 
-# Customised GIMP fork: its own git repo (github.com/imattau/imanganation-gimp)
-imanganation-gimp/
-
 # More generated images: datasets, retake/backup folders (panels_*, characters_*)
 projects/*/datasets/**/*.png
 projects/*/panels*/*.png
