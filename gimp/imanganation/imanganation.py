@@ -196,6 +196,16 @@ DOCK_BUBBLES = "bubbles"  # the bubble library: click a bubble to add it to the 
 DOCK_GALLERY = "gallery"  # the selection's pictures: takes, references; click to use
 DOCK_IDS = (DOCK_PROJECT, DOCK_INSPECTOR, DOCK_FILMSTRIP, DOCK_SCRIPT,
             DOCK_CHARACTERS, DOCK_PANEL, DOCK_BUBBLES, DOCK_GALLERY)
+DOCK_ICON_NAMES = {
+    DOCK_PROJECT: "imanganation-project",
+    DOCK_INSPECTOR: "imanganation-context",
+    DOCK_FILMSTRIP: "imanganation-pages",
+    DOCK_SCRIPT: "imanganation-script",
+    DOCK_CHARACTERS: "imanganation-characters",
+    DOCK_PANEL: "imanganation-panel",
+    DOCK_BUBBLES: "imanganation-bubbles",
+    DOCK_GALLERY: "imanganation-gallery",
+}
 DOCK_ACTIONS = {
     DOCK_PROJECT: "plug-in-imanganation-dock-project-action",
     DOCK_INSPECTOR: "plug-in-imanganation-dock-inspector-generate",
@@ -7294,6 +7304,7 @@ def _register_project_docks(plugin):
         _dock_pdb_call("gimp-extension-panel-register", {
             "identifier": identifier,
             "title": title,
+            "icon-name": DOCK_ICON_NAMES[identifier],
             "content": content,
             "presentation": presentation,
             "selected-item": selected,
