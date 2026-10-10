@@ -154,6 +154,8 @@
           }
         },
         "sfx": {"type": "array", "items": {"type": "string"}},
+        "props": {"type": "array", "items": {"type": "string"},
+                  "description": "Names of the project's props this panel shows"},
         "notes": {"type": "string"},
         "flashback": {"type": "boolean"},
         "cover": {"type": "boolean", "description": "The cover picture (label page 0)"},

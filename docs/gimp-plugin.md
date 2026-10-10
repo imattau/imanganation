@@ -109,6 +109,20 @@ opens their active reference in GIMP; paint over it and run *Imanganation → Se
 Character Reference from Layer…*, which already knows the project and character, to make
 it a new reference version. The engine has ComfyUI unload its models before an LLM
 step and unloads the LLM before a render, so both fit on 16 GB.
+**Props** work like locations. Right-click **Props** under Assets for **New prop…** (a
+name and a description: shape, materials, colours, wear; designed straight away if you
+like), or a prop for **Design prop** or **Delete prop…**. Selecting a prop shows its
+notes (editable; they are the description), how many panels show it, and the engine's
+reference: **Design prop** draws the object alone on a plain ground (`POST /props`), a
+new image if it has one, and **Open reference image** opens it in GIMP. Paint over it and
+run *Imanganation → Set Prop Reference from Layer…* (project and prop are filled in) to
+make that the reference. The **Gallery** shows a prop's images; right-click for **Make
+current** or **Delete…**. A panel lists the props it shows under **Props** in its Context
+(comma-separated; a new name joins the project's props, and deleting a prop removes it
+from its panels). Qwen-Image 2.1 renders get each listed prop's picture as a reference
+and keep the object the same in every panel (up to ten references in all, characters and
+the location first); other engines put the prop's name, and its description, in the
+prompt. Notes are saved with the project and sent to the engine as you edit them.
 **Locations** are designed the same way. Right-click **Locations** under Assets for
 **New location…** (a name as the script writes the place, and a description: inside
 or out, era, layout, landmarks; designed straight away if you like), or a location for

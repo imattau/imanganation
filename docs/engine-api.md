@@ -225,6 +225,20 @@ use, stored with the project's characters. Result: `{"designed": [{"key", "name"
 "details", "image"}], "existing": [keys]}`. Qwen-Image renders then give the panel's
 place as a reference.
 
+## Props: `/props`
+
+A prop is an object that keeps its look (props.py), stored beside locations.
+`GET /props?project=` lists them (`key`, `name`, `description`, `image`, `image_name`,
+`previous`: file name → path). `POST /props` (`project`, `name`, `description`, `seed`,
+`redesign`, `style`, `engine`) designs one as a job (kind `prop`; 409 if it has a design
+and `redesign` is false). `POST /props/description` keeps the author's words without a
+picture, `POST /props/reference` registers an image (earlier ones are kept),
+`POST /props/images/default` and `/props/images/delete` (`name`, `image`) make an earlier
+image current or set one aside (a prop's only image can't be deleted), and
+`DELETE /props?name=` moves the prop's images to `props/.deleted/`. A panel lists props by
+name in `props`; Qwen-Image renders get each prop's picture as a reference (up to ten
+references in all), other engines its name, and its description when there is one.
+
 ## Paths in container forms
 
 `source`, `mask` and `image_path` must be existing files under the projects root
@@ -239,6 +253,7 @@ place as a reference.
 | `POST /refine`, `POST /inpaint` | Above |
 | `GET /characters` | The cast, by `project` or legacy `project_dir` |
 | `POST /characters/reference` | Register an image as a character's new active reference version |
+| `POST /characters/versions/default\|rename\|delete` | Make a character's reference version the default, rename it, or set it aside |
 | `DELETE /characters` | Remove a character; their designs move to `characters/.deleted/` |
 | `GET /setup`, `POST /setup/download\|link\|cancel` | Model files: state, download, link existing, pause |
 | `GET /status` | ComfyUI/GPU health, running/queued/recent jobs (by project + panel id), missing models |

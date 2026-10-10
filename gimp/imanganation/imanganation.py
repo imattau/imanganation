@@ -73,6 +73,7 @@ try:
         build_welcome_docks,
         character_row_id,
         location_row_id,
+        prop_row_id,
         rgb_png,
     )
     from project_store import (
@@ -86,12 +87,17 @@ try:
         delete_page,
         delete_panel,
         duplicate_panel,
+        add_prop,
+        delete_prop,
         find_location,
+        find_prop,
         load_project,
         location_key,
         new_id,
         new_project_document,
         panels_at_location,
+        panels_with_prop,
+        prop_key,
         project_from_script,
         record_take,
         reorder_pages,
@@ -116,6 +122,7 @@ except ImportError:  # Keep older single-file plug-in installs usable for legacy
     new_id = None
     new_project_document = None
     build_docks = None
+    prop_row_id = prop_key = None
     blank_size = None
     build_gallery = None
     character_row_id = location_row_id = None
@@ -132,6 +139,7 @@ PROC_REFINE = "plug-in-imanganation-refine-panel"
 PROC_REGEN = "plug-in-imanganation-regenerate-panel"
 PROC_SETREF = "plug-in-imanganation-set-character-reference"
 PROC_SET_LOCATION_REF = "plug-in-imanganation-set-location-reference"
+PROC_SET_PROP_REF = "plug-in-imanganation-set-prop-reference"
 PROC_INPAINT = "plug-in-imanganation-inpaint-selection"
 PROC_STAGE = "plug-in-imanganation-develop-panel-stage"
 DEVELOPMENT_PHASES = (
@@ -245,6 +253,15 @@ DOCK_MENU_LABELS = {
     DOCK_CHARACTERS: "_Character Bible", DOCK_PANEL: "P_anel",
 }
 DOCK_GALLERY_ITEM = "plug-in-imanganation-dock-gallery-item"
+# Props, like locations: Context's Design prop, the tree's right-click menus, and a prop's
+# image tiles in the Gallery (item "img:<file name>")
+DOCK_DESIGN_PROP = "plug-in-imanganation-dock-design-prop"
+DOCK_NEW_PROP = "plug-in-imanganation-dock-new-prop"
+DOCK_DESIGN_PROP_ITEM = "plug-in-imanganation-dock-design-prop-item"
+DOCK_DELETE_PROP = "plug-in-imanganation-dock-delete-prop"
+DOCK_OPEN_PROP_IMAGE = "plug-in-imanganation-dock-open-prop-image"
+DOCK_PROP_IMAGE_DEFAULT = "plug-in-imanganation-dock-prop-image-default"
+DOCK_PROP_IMAGE_DELETE = "plug-in-imanganation-dock-prop-image-delete"
 # A character's reference tile in the Gallery: right-click menu (item "ref:<version>")
 DOCK_REF_DEFAULT = "plug-in-imanganation-dock-reference-default"
 DOCK_REF_RENAME = "plug-in-imanganation-dock-reference-rename"
@@ -265,6 +282,7 @@ PANEL_PARASITE = "imanganation-panel"
 TAKE_PARASITE = "imanganation-take"
 # On a reference image opened from Context: {"project": root, "name": who / place}
 LOCATION_PARASITE = "imanganation-location"
+PROP_PARASITE = "imanganation-prop"
 CHARACTER_PARASITE = "imanganation-character"
 CURSOR_FILE = "gimp_cursor.json"  # per project: which panel comes next
 ENGINE_URL = "http://127.0.0.1:8790"
@@ -1908,6 +1926,55 @@ def set_location_reference(procedure, run_mode, image, drawables, config, data):
     return _success(procedure, layers[0])
 
 
+def set_prop_reference(procedure, run_mode, image, drawables, config, data):
+    """Use the selected layer (or its part inside the selection) as a prop's reference:
+    Open reference image from Context, paint over it, then this. The engine keeps the
+    earlier images."""
+    layers = [d for d in drawables if isinstance(d, Gimp.Layer)]
+    if not layers:
+        return _error(procedure, "Select the layer that shows the object.")
+    root, recorded = _reference_target(image, PROP_PARASITE)
+    if recorded and not config.get_property("prop"):
+        config.set_property("prop", recorded)
+    if run_mode == Gimp.RunMode.INTERACTIVE and not _dialog(procedure, config,
+                                                            PROC_SET_PROP_REF):
+        return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
+
+    root = root or _image_project(image)
+    if root is None:
+        chosen = config.get_property("project-dir")
+        if chosen is None:
+            return _error(procedure, "This image isn't from a project; choose the project "
+                                     "folder.")
+        root = Path(chosen.get_path())
+    name = (config.get_property("prop") or "").strip()
+    engine = config.get_property("engine-url").rstrip("/")
+    try:
+        manifest = _manifest_for(root)
+        if manifest is None:
+            raise ValueError(f"{root} has no project.json; props need a project container")
+        prop = find_prop(manifest, name) if name else None
+        if prop is None:
+            known = ", ".join(p["name"] for p in manifest.get("props", []))
+            raise ValueError(f"Unknown prop {name!r}. This project has: "
+                             f"{known or 'none'} (add one with New prop… first).")
+        slug = re.sub(r"[^a-z0-9]+", "_", prop_key(prop["name"])).strip("_")
+        path = (root / "tmp"
+                / f"gimp_prop_{slug or 'prop'}_{time.strftime('%Y%m%d-%H%M%S')}.png")
+        side = _export_reference(image, layers[0], path, square=False, max_side=REF_MAX)
+        result = _http("POST", f"{engine}/props/reference",
+                       {"project": manifest["project"]["id"], "name": prop["name"],
+                        "image_path": str(path)})
+    except (EngineError, ValueError) as exc:
+        return _error(procedure, str(exc))
+
+    scaled = f", scaled from {side}px" if side > REF_MAX else ""
+    Gimp.message(f"{prop['name']}'s reference is now {result['image_name']}{scaled}"
+                 ". New Qwen-Image renders that list it use it.")
+    _notify_project_docks(root)
+    return _success(procedure, layers[0])
+
+
 def _project_progress(root):
     """'3/5 rendered · next: panel 004 (script page 2, panel 2)' for a project."""
     try:
@@ -3288,6 +3355,9 @@ def _refresh_project_docks(sync_canvas=False):
                             "\nPaint over\tOpen it, edit, then Imanganation > Set "
                             "Character Reference from Layer…")
         contents["inspector"] += "\n" + engine_rows
+    elif selected_id in {prop_row_id(p["name"]) for p in manifest.get("props", [])}:
+        prop = next(p for p in manifest["props"] if prop_row_id(p["name"]) == selected_id)
+        contents["inspector"] += "\n" + "\n".join(_engine_prop_rows(root, manifest, prop))
     elif selected_id in {location_row_id(loc["name"]) for loc in manifest.get("locations", [])}:
         location = next(loc for loc in manifest.get("locations", [])
                         if location_row_id(loc["name"]) == selected_id)
@@ -3794,6 +3864,10 @@ def _dock_action(procedure, config, data):
             _design_selected_location()
         elif data == "open-location-image":
             _open_selected_location_image()
+        elif data == "design-prop":
+            _design_selected_prop()
+        elif data == "open-prop-image":
+            _open_selected_prop_image()
         elif data == "open-character-image":
             _open_selected_character_image()
         elif data == "setup-models":
@@ -5244,18 +5318,29 @@ def _gallery_references(root, manifest, selected_id):
         if location is not None:
             record = _engine_location(root, manifest, location["name"]) or {}
             return {"image": record.get("image") or ""}
+        prop = next((p for p in manifest.get("props", [])
+                     if prop_row_id(p["name"]) == selected_id), None)
+        if prop is not None:
+            record = _engine_prop(root, manifest, prop["name"]) or {}
+            images = {}
+            if record.get("image_name"):
+                images[record["image_name"]] = record.get("image") or ""
+            images.update(record.get("previous") or {})
+            return {"images": images, "current": record.get("image_name")}
     except EngineError:
         pass
     return {}
 
 
 def _gallery_content(root, manifest, selected_id):
+    if selected_id and selected_id.startswith("prop:"):
+        menu = ((DOCK_GALLERY_ITEM, "Open"), (DOCK_PROP_IMAGE_DEFAULT, "Make current"),
+                (DOCK_PROP_IMAGE_DELETE, "Delete…"))
+    else:
+        menu = ((DOCK_GALLERY_ITEM, "Open"), (DOCK_REF_DEFAULT, "Make default"),
+                (DOCK_REF_RENAME, "Rename…"), (DOCK_REF_DELETE, "Delete…"))
     return build_gallery(manifest, selected_id, root,
-                         _gallery_references(root, manifest, selected_id),
-                         ((DOCK_GALLERY_ITEM, "Open"),
-                          (DOCK_REF_DEFAULT, "Make default"),
-                          (DOCK_REF_RENAME, "Rename…"),
-                          (DOCK_REF_DELETE, "Delete…")))
+                         _gallery_references(root, manifest, selected_id), menu)
 
 
 def _dock_gallery_item(procedure, config, data):
@@ -5275,6 +5360,8 @@ def _dock_gallery_item(procedure, config, data):
             _open_selected_character_image(rest)
         elif kind == "loc":
             _open_selected_location_image()
+        elif kind == "img":
+            _open_selected_prop_image(rest)
     except Exception as exc:
         return _error(procedure, str(exc))
     return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
@@ -5765,6 +5852,271 @@ def _dock_open_character_version(procedure, config, data):
     return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
 
 
+_PROP_DESIGN_JOBS = {}  # engine job id -> prop key, while one prop renders
+
+
+def _engine_prop(root, manifest, name):
+    """The engine's record of this prop ({"key", "image", "previous", …}), or None if it
+    has none. Raises EngineError when the engine isn't answering."""
+    query = urllib.parse.urlencode(_engine_project(root, manifest))
+    known = _http("GET", f"{ENGINE_URL}/props?{query}", timeout=3)
+    key = prop_key(name)
+    return next((p for p in known if p.get("key") == key), None)
+
+
+def _send_prop_description(root, manifest, prop):
+    """Keep the prop's notes in the engine, so renders on any engine put them in the
+    prompt (best effort: the notes are saved in the project either way)."""
+    try:
+        _http("POST", f"{ENGINE_URL}/props/description",
+              {**_engine_project(root, manifest), "name": prop["name"],
+               "description": prop.get("notes", "")}, timeout=5)
+    except EngineError:
+        pass
+
+
+def _queue_prop_design(root, manifest, prop, redesign=False):
+    """Ask the engine to design one prop from its notes; the docks refresh when the
+    image is ready. The image is drawn by Qwen-Image whatever engine the panels use,
+    like a location's, because Qwen renders are what read it."""
+    body = {"project": manifest["project"]["id"], "name": prop["name"],
+            "description": prop.get("notes", ""), "redesign": redesign,
+            **_look_options(manifest)}
+    job = _http("POST", f"{ENGINE_URL}/props", body)
+    if not _PROP_DESIGN_JOBS:
+        GLib.timeout_add_seconds(3, _exclusive(_poll_prop_jobs))
+    _PROP_DESIGN_JOBS[job["id"]] = prop_key(prop["name"])
+
+
+def _poll_prop_jobs():
+    for job_id, key in list(_PROP_DESIGN_JOBS.items()):
+        try:
+            job = _http("GET", f"{ENGINE_URL}/jobs/{job_id}", timeout=3)
+        except EngineError:
+            continue  # engine restarting: try again next tick
+        if job["status"] in ("queued", "running"):
+            continue
+        del _PROP_DESIGN_JOBS[job_id]
+        if job["status"] == "error":
+            Gimp.message(f"Designing {job['request'].get('name', key)} failed: "
+                         f"{job.get('error')}")
+        try:
+            _refresh_project_docks()
+        except Exception:
+            pass
+    return GLib.SOURCE_CONTINUE if _PROP_DESIGN_JOBS else GLib.SOURCE_REMOVE
+
+
+def _selected_prop(manifest):
+    selected = _DOCK_CONTEXT.get("selected_id")
+    return next((p for p in manifest.get("props", [])
+                 if prop_row_id(p["name"]) == selected), None)
+
+
+def _design_selected_prop():
+    """Context's Design prop: design (or redesign) the selected prop from its notes. A
+    prop with no notes is drawn from its name alone."""
+    root = _DOCK_CONTEXT["root"]
+    manifest = load_project(root)
+    prop = _selected_prop(manifest)
+    if prop is None:
+        raise ValueError("Select a prop first")
+    if prop_key(prop["name"]) in _PROP_DESIGN_JOBS.values():
+        raise ValueError(f"{prop['name']} is already being designed")
+    record = _engine_prop(root, manifest, prop["name"])
+    _queue_prop_design(root, manifest, prop, redesign=bool(record and record.get("image")))
+    _refresh_project_docks()
+
+
+def _open_selected_prop_image(image_name=None):
+    """Open the selected prop's reference image (or one of its earlier images, by file
+    name) in GIMP, to look at or paint over."""
+    root = _DOCK_CONTEXT["root"]
+    manifest = load_project(root)
+    prop = _selected_prop(manifest)
+    if prop is None:
+        raise ValueError("Select a prop first")
+    record = _engine_prop(root, manifest, prop["name"])
+    path = None
+    if record is not None:
+        path = (record.get("previous") or {}).get(image_name) if image_name \
+            and image_name != record.get("image_name") else record.get("image")
+    if not path:
+        raise ValueError(f"{prop['name']} has no reference image yet")
+    _open_reference_image(path, PROP_PARASITE, root, prop["name"])
+
+
+def _engine_prop_rows(root, manifest, prop):
+    rows = ["# Engine prop reference"]
+    if prop_key(prop["name"]) in _PROP_DESIGN_JOBS.values():
+        rows.append("Design\tIn progress…")
+    try:
+        record = _engine_prop(root, manifest, prop["name"])
+    except EngineError as exc:
+        return rows + [f"Status\t{_engine_status(exc)}"]
+    if record is None or not record.get("image"):
+        rows.append("Reference image\tNot designed yet")
+    else:
+        count = len(record.get("previous") or {}) + 1
+        rows.extend([
+            f"Reference image\t{record['image_name']}"
+            + (f" · {count} images" if count > 1 else ""),
+            f"Designed\t{record.get('created_at') or 'Unknown'}",
+            f"!{DOCK_OPEN_PROP_IMAGE}\tOpen reference image",
+            "Paint over\tOpen it, edit, then Imanganation > Set Prop Reference from "
+            "Layer…",
+        ])
+    if engine_ui is not None and engine_ui.project_render(manifest)["engine"] != "qwen_image_21":
+        rows.append("Used by\tQwen-Image 2.1 renders as a picture; other engines use "
+                    "its name and notes")
+    return rows
+
+
+def _choose_new_prop():
+    """New Prop dialog -> (name, description, design now) or None."""
+    dialog = Gtk.Dialog(title="New Prop", flags=Gtk.DialogFlags.MODAL)
+    dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+                       "Create", Gtk.ResponseType.OK)
+    dialog.set_default_response(Gtk.ResponseType.OK)
+    grid = Gtk.Grid(column_spacing=12, row_spacing=8, margin=12)
+    name = Gtk.Entry(activates_default=True, hexpand=True,
+                     placeholder_text="As panels list it, e.g. Red umbrella")
+    description = Gtk.TextView(wrap_mode=Gtk.WrapMode.WORD_CHAR, accepts_tab=False,
+                               left_margin=4, right_margin=4, top_margin=4, bottom_margin=4)
+    scrolled = Gtk.ScrolledWindow(hexpand=True, vexpand=True)
+    scrolled.set_size_request(380, 120)
+    scrolled.set_shadow_type(Gtk.ShadowType.IN)
+    scrolled.add(description)
+    hint = Gtk.Label(label="Shape, size, materials, colours, wear, markings. List the "
+                           "prop under Props in a panel's Context to keep it the same "
+                           "in every panel.",
+                     xalign=0.0, wrap=True, max_width_chars=48)
+    hint.get_style_context().add_class("dim-label")
+    design = Gtk.CheckButton(label="Design the prop now (uses the engine)", active=True)
+    for row, (label, widget) in enumerate((("Name", name), ("Description", scrolled))):
+        caption = Gtk.Label(label=label, xalign=0.0, valign=Gtk.Align.START)
+        grid.attach(caption, 0, row, 1, 1)
+        grid.attach(widget, 1, row, 1, 1)
+    grid.attach(hint, 1, 2, 1, 1)
+    grid.attach(design, 1, 3, 1, 1)
+    dialog.get_content_area().add(grid)
+    dialog.show_all()
+    try:
+        while dialog.run() == Gtk.ResponseType.OK:
+            buffer = description.get_buffer()
+            text = buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), False)
+            chosen = (" ".join(name.get_text().split()), " ".join(text.split()),
+                      design.get_active())
+            if any(ch.isalnum() for ch in chosen[0]):
+                return chosen
+            Gimp.message("Give the prop a name.")
+        return None
+    finally:
+        dialog.destroy()
+
+
+def _dock_prop_menu(procedure, config, data):
+    """Project tree right-click: New prop… (Props heading), or Design prop / Delete
+    prop… (a prop row, whose id is the item)."""
+    try:
+        root = _DOCK_CONTEXT["root"]
+        if data == "design":
+            _DOCK_CONTEXT["selected_id"] = config.get_property("item")
+            _design_selected_prop()
+            return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+        if data == "delete":
+            if not _delete_prop(root, config.get_property("item")):
+                return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
+            return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+        chosen = _choose_new_prop()
+        if chosen is None:
+            return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
+        name, description, design = chosen
+        manifest = load_project(root)
+        prop = add_prop(manifest, name, description)
+        save_project(root, manifest)
+        _DOCK_CONTEXT["selected_id"] = prop_row_id(prop["name"])
+        _send_prop_description(root, manifest, prop)
+        if design:
+            try:
+                _queue_prop_design(root, manifest, prop)
+            except EngineError as exc:
+                Gimp.message(f"{name} was added but not designed: {_engine_status(exc)}. "
+                             "Use Design prop when the engine runs.")
+        _refresh_project_docks()
+    except Exception as exc:
+        return _error(procedure, str(exc))
+    return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+
+
+def _delete_prop(root, row_id):
+    """Delete prop…: confirm, take it out of the project's props and its panels, and have
+    the engine set its images aside. -> False if cancelled."""
+    manifest = load_project(root)
+    prop = next((p for p in manifest.get("props", []) if prop_row_id(p["name"]) == row_id),
+                None)
+    if prop is None:
+        raise ValueError("That prop is no longer in the project")
+    name = prop["name"]
+    if prop_key(name) in _PROP_DESIGN_JOBS.values():
+        raise ValueError(f"{name} is being designed; delete it when the design finishes")
+    try:
+        record, engine_down = _engine_prop(root, manifest, name), None
+    except EngineError as exc:
+        record, engine_down = None, exc
+    panels = len(panels_with_prop(manifest, name))
+    detail = f"{name} is removed from the project's props"
+    detail += (f" and from {panels} panel{'s' if panels != 1 else ''}." if panels else ".")
+    if record is not None:
+        detail += (" Its images move to the engine's props/.deleted folder, where they "
+                   "can be restored by hand.")
+    elif engine_down is not None:
+        detail += (f" The engine isn't reachable ({_engine_status(engine_down)}), so any "
+                   "image stays in the engine.")
+    if not _confirm(f"Delete {name}?", detail, "Delete"):
+        return False
+    delete_prop(manifest, name)
+    save_project(root, manifest)
+    if record is not None:
+        query = urllib.parse.urlencode({**_engine_project(root, manifest), "name": name})
+        try:
+            _http("DELETE", f"{ENGINE_URL}/props?{query}", timeout=10)
+        except EngineError as exc:
+            Gimp.message(f"{name} was removed from the project, but the engine kept its "
+                         f"images: {_engine_status(exc)}")
+    if _DOCK_CONTEXT.get("selected_id") == row_id:
+        _DOCK_CONTEXT["selected_id"] = None
+    _refresh_project_docks()
+    return True
+
+
+def _dock_prop_image_menu(procedure, config, data):
+    """Gallery > right-click a prop's image: Make current or Delete… (item
+    "img:<file name>")."""
+    try:
+        root = _DOCK_CONTEXT["root"]
+        image_name = (config.get_property("item") or "").partition(":")[2]
+        manifest = load_project(root)
+        prop = _selected_prop(manifest)
+        if prop is None or not image_name:
+            raise ValueError("Select a prop first")
+        body = {**_engine_project(root, manifest), "name": prop["name"], "image": image_name}
+        if data == "default":
+            _http("POST", f"{ENGINE_URL}/props/images/default", body, timeout=10)
+        else:
+            if not _confirm(f"Delete {image_name}?",
+                            f"{prop['name']}'s image {image_name} is set aside in the "
+                            "engine's props/.deleted folder, where it can be restored by "
+                            "hand. If it is the current image, the newest earlier one "
+                            "takes its place.", "Delete"):
+                return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
+            _http("POST", f"{ENGINE_URL}/props/images/delete", body, timeout=10)
+        _refresh_project_docks()
+    except Exception as exc:
+        return _error(procedure, str(exc))
+    return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+
+
 def _choose_new_location():
     """New Location dialog -> (name, description, design now) or None."""
     dialog = Gtk.Dialog(title="New Location", flags=Gtk.DialogFlags.MODAL)
@@ -6168,6 +6520,10 @@ def _dock_actions(root, manifest):
             "character_version_action": DOCK_CHARACTER_VERSION,
             "take_action": DOCK_ACTIVATE_TAKE,
             "generate_page_action": DOCK_GENERATE_PAGE,
+            "design_prop_action": DOCK_DESIGN_PROP,
+            "new_prop_action": DOCK_NEW_PROP,
+            "design_prop_menu": DOCK_DESIGN_PROP_ITEM,
+            "delete_prop_menu": DOCK_DELETE_PROP,
             "design_variant_menu": DOCK_DESIGN_VARIANT,
             "add_cover_page_action": DOCK_ADD_COVER_PAGE,
             "reorder_pages_action": DOCK_REORDER_PAGES,
@@ -6378,8 +6734,13 @@ def _dock_field_edit(procedure, config, data):
             return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
         root = _DOCK_CONTEXT["root"]
         manifest = load_project(root)
-        apply_field_edit(manifest, key, value, character_row_id, location_row_id)
+        row_id = apply_field_edit(manifest, key, value, character_row_id, location_row_id,
+                                  prop_row_id)
         save_project(root, manifest)
+        prop = next((p for p in manifest.get("props", [])
+                     if prop_row_id(p["name"]) == row_id), None)
+        if prop is not None and key.endswith(".notes"):
+            _send_prop_description(root, manifest, prop)
         _refresh_project_docks()
     except Exception as exc:
         return _error(procedure, f"Could not save that change: {exc}")
@@ -6394,6 +6755,7 @@ def _dock_item_action(procedure, config, data):
         valid.update(page["id"] for page in manifest["pages"])
         valid.update(character_row_id(c["name"]) for c in manifest["cast"])
         valid.update(location_row_id(loc["name"]) for loc in manifest.get("locations", []))
+        valid.update(prop_row_id(p["name"]) for p in manifest.get("props", []))
         if item not in valid:
             raise ValueError(f"Unknown project item id: {item}")
         if data == DOCK_SCRIPT:
@@ -6505,6 +6867,13 @@ def _add_dock_callbacks(plugin):
         (DOCK_CHARACTER_VERSION, _dock_character_version, "pick", True),
         (DOCK_ACTIVATE_TAKE, _dock_activate_take, "take", True),
         (DOCK_GALLERY_ITEM, _dock_gallery_item, "gallery", True),
+        (DOCK_DESIGN_PROP, _dock_action, "design-prop", False),
+        (DOCK_OPEN_PROP_IMAGE, _dock_action, "open-prop-image", False),
+        (DOCK_NEW_PROP, _dock_prop_menu, "new", True),
+        (DOCK_DESIGN_PROP_ITEM, _dock_prop_menu, "design", True),
+        (DOCK_DELETE_PROP, _dock_prop_menu, "delete", True),
+        (DOCK_PROP_IMAGE_DEFAULT, _dock_prop_image_menu, "default", True),
+        (DOCK_PROP_IMAGE_DELETE, _dock_prop_image_menu, "delete", True),
         (DOCK_REF_DEFAULT, _dock_reference_menu, "default", True),
         (DOCK_REF_RENAME, _dock_reference_menu, "rename", True),
         (DOCK_REF_DELETE, _dock_reference_menu, "delete", True),
@@ -6747,7 +7116,7 @@ class Imanganation(Gimp.PlugIn):
     def do_query_procedures(self):
         return [PROC_RENDER, PROC_NEXT, PROC_REGEN, PROC_INPAINT, PROC_STAGE,
                 PROC_REFINE, PROC_SETREF,
-                PROC_SET_LOCATION_REF,
+                PROC_SET_LOCATION_REF, PROC_SET_PROP_REF,
                 PROC_PLACE, PROC_STATUS, PROC_PROJECT_DOCKS, PROC_CLOSE_PROJECT,
                 PROC_RELOAD_SCRIPT,
                 PROC_PAGE_LAYOUT, PROC_SCREENTONE, PROC_SPEED_LINES, PROC_IMPACT_BURST,
@@ -6923,6 +7292,7 @@ class Imanganation(Gimp.PlugIn):
                PROC_REFINE: refine_panel, PROC_REGEN: regenerate_panel,
                PROC_SETREF: set_character_reference, PROC_INPAINT: inpaint_selection,
                PROC_SET_LOCATION_REF: set_location_reference,
+               PROC_SET_PROP_REF: set_prop_reference,
                PROC_PLACE: place_panel, PROC_STATUS: engine_status,
                PROC_PAGE_LAYOUT: page_layout, PROC_SCREENTONE: screentone,
                PROC_SPEED_LINES: speed_lines, PROC_IMPACT_BURST: impact_burst,
@@ -6948,6 +7318,7 @@ class Imanganation(Gimp.PlugIn):
             PROC_IMPACT_BURST: "Manga Tools",
             PROC_SETREF: "Project",
             PROC_SET_LOCATION_REF: "Project",
+            PROC_SET_PROP_REF: "Project",
             PROC_RENDER: "Create",
             PROC_NEXT: "Create",
             PROC_PLACE: "Create",
@@ -7128,6 +7499,26 @@ class Imanganation(Gimp.PlugIn):
             proc.add_string_argument(
                 "location", "_Location", "Location name in the project (any time of day)",
                 "", GObject.ParamFlags.READWRITE)
+            proc.add_file_argument(
+                "project-dir", "_Project folder", "Only needed if this image isn't from "
+                "the project", Gimp.FileChooserAction.SELECT_FOLDER, True, None,
+                GObject.ParamFlags.READWRITE)
+            proc.add_string_argument(
+                "engine-url", "_Engine URL", "imanganation engine (manganation serve)",
+                ENGINE_URL, GObject.ParamFlags.READWRITE)
+            return proc
+
+        if name == PROC_SET_PROP_REF:
+            proc.set_menu_label("Set Pr_op Reference from Layer...")
+            proc.set_documentation(
+                "Use the selected layer as a prop's reference",
+                "Export the selected layer (or its part inside the selection), keeping "
+                "its proportions, and register it as the prop's reference for "
+                "Qwen-Image renders. Earlier images are kept. On a reference image "
+                "opened from Context, the project and prop are filled in.",
+                name)
+            proc.add_string_argument(
+                "prop", "_Prop", "Prop name in the project", "", GObject.ParamFlags.READWRITE)
             proc.add_file_argument(
                 "project-dir", "_Project folder", "Only needed if this image isn't from "
                 "the project", Gimp.FileChooserAction.SELECT_FOLDER, True, None,
