@@ -68,6 +68,7 @@ try:
     from panel_ui import _panel_label as panel_label
     from panel_ui import (
         build_docks,
+        build_gallery,
         build_welcome_docks,
         character_row_id,
         location_row_id,
@@ -112,6 +113,7 @@ except ImportError:  # Keep older single-file plug-in installs usable for legacy
     new_id = None
     new_project_document = None
     build_docks = None
+    build_gallery = None
     character_row_id = location_row_id = None
     panel_label = None
     rgb_png = None
@@ -175,8 +177,9 @@ DOCK_SCRIPT = "script"
 DOCK_CHARACTERS = "characters"
 DOCK_PANEL = "panel"
 DOCK_BUBBLES = "bubbles"  # the bubble library: click a bubble to add it to the page
+DOCK_GALLERY = "gallery"  # the selection's pictures: takes, references; click to use
 DOCK_IDS = (DOCK_PROJECT, DOCK_INSPECTOR, DOCK_FILMSTRIP, DOCK_SCRIPT,
-            DOCK_CHARACTERS, DOCK_PANEL, DOCK_BUBBLES)
+            DOCK_CHARACTERS, DOCK_PANEL, DOCK_BUBBLES, DOCK_GALLERY)
 DOCK_ACTIONS = {
     DOCK_PROJECT: "plug-in-imanganation-dock-project-action",
     DOCK_INSPECTOR: "plug-in-imanganation-dock-inspector-generate",
@@ -233,9 +236,10 @@ DOCK_FIT_BUBBLE = "plug-in-imanganation-dock-fit-bubble"
 DOCK_SHOW = {dock: f"plug-in-imanganation-show-dock-{dock}" for dock in DOCK_IDS}
 DOCK_MENU_LABELS = {
     DOCK_PROJECT: "_Project", DOCK_INSPECTOR: "_Context", DOCK_BUBBLES: "_Bubbles",
-    DOCK_FILMSTRIP: "P_ages", DOCK_SCRIPT: "_Script",
+    DOCK_FILMSTRIP: "P_ages", DOCK_SCRIPT: "_Script", DOCK_GALLERY: "_Gallery",
     DOCK_CHARACTERS: "_Character Bible", DOCK_PANEL: "P_anel",
 }
+DOCK_GALLERY_ITEM = "plug-in-imanganation-dock-gallery-item"
 DOCK_ITEMS = {
     DOCK_PROJECT: "plug-in-imanganation-dock-project-item",
     DOCK_INSPECTOR: "plug-in-imanganation-dock-inspector-field",  # an edited field
@@ -3144,6 +3148,7 @@ def _refresh_project_docks(sync_canvas=False):
         manifest, selected_id, root, _project_page_thumbnails(root, manifest),
         DOCK_OPEN_PAGE, DOCK_GENERATE_LAYOUT, **_dock_actions(root, manifest))
     _DOCK_CONTEXT["selected_id"] = contents["selected_id"]
+    contents["gallery"] = _gallery_content(root, manifest, contents["selected_id"])
     canvas_rows = _canvas_take_rows(manifest)
     if canvas_rows:
         contents["inspector"] += "\n" + "\n".join(canvas_rows)
@@ -3196,7 +3201,8 @@ def _refresh_project_docks(sync_canvas=False):
             (DOCK_FILMSTRIP, "filmstrip", "filmstrip_selected"),
             (DOCK_SCRIPT, "script", "script_selected"),
             (DOCK_CHARACTERS, "characters", "character_selected"),
-            (DOCK_PANEL, "panel", None)):  # properties rows have no selection
+            (DOCK_PANEL, "panel", None),  # properties rows have no selection
+            (DOCK_GALLERY, "gallery", None)):
         values = {"identifier": identifier, "content": contents[content_key],
                   "selected-item": contents[selection_key] if selection_key else ""}
         _dock_pdb_call("gimp-extension-panel-update", values)
@@ -5088,25 +5094,80 @@ def _show_take_on_canvas(image, project_id, panel_id, take_id):
     return found
 
 
+def _activate_take(root, panel_id, take_id):
+    """The panel's ``take_id`` becomes its active take; on its open page it is the one
+    shown."""
+    manifest = load_project(root)
+    set_active_take(manifest, panel_id, take_id)
+    save_project(root, manifest)
+    panel = next(p for p in manifest["panels"] if p["id"] == panel_id)
+    page_id = (panel.get("placement") or {}).get("page")
+    image = _open_page_images(manifest).get(page_id)
+    if image is not None:
+        if _show_take_on_canvas(image, manifest["project"]["id"], panel_id, take_id):
+            _save_project_page(image, root, manifest)
+        else:
+            Gimp.message("That take's layer isn't on the open page, so only the "
+                         "project record changed.")
+    _refresh_project_docks()
+
+
 def _dock_activate_take(procedure, config, data):
-    """Context: a take's Make active -> it becomes the panel's active take, and on its
-    open page the take is the one shown. Item "<panel id>:<take id>"."""
+    """Context: a take's Make active. Item "<panel id>:<take id>"."""
+    try:
+        panel_id, _, take_id = (config.get_property("item") or "").rpartition(":")
+        _activate_take(_DOCK_CONTEXT["root"], panel_id, take_id)
+    except Exception as exc:
+        return _error(procedure, str(exc))
+    return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+
+
+def _gallery_references(root, manifest, selected_id):
+    """What the engine holds for the selected character or location (see
+    panel_ui.build_gallery); empty if nothing is selected or the engine is down."""
+    try:
+        character = next((c for c in manifest["cast"]
+                          if character_row_id(c["name"]) == selected_id), None)
+        if character is not None:
+            query = urllib.parse.urlencode(_engine_project(root, manifest))
+            known = _http("GET", f"{ENGINE_URL}/characters?{query}", timeout=3)
+            record = next((c for c in known if c.get("name", "").casefold()
+                           == character["name"].casefold()), None) or {}
+            images = record.get("version_images") or {}
+            return {"versions": {v: images.get(v, "") for v in record.get("versions", [])},
+                    "default": record.get("default_version")}
+        location = next((loc for loc in manifest.get("locations", [])
+                         if location_row_id(loc["name"]) == selected_id), None)
+        if location is not None:
+            record = _engine_location(root, manifest, location["name"]) or {}
+            return {"image": record.get("image") or ""}
+    except EngineError:
+        pass
+    return {}
+
+
+def _gallery_content(root, manifest, selected_id):
+    return build_gallery(manifest, selected_id, root,
+                         _gallery_references(root, manifest, selected_id))
+
+
+def _dock_gallery_item(procedure, config, data):
+    """Gallery: a tile was clicked. "take:<panel id>:<take id>" makes that the active
+    take; "ref:<version>" and "loc:image" open the reference image in GIMP."""
     try:
         root = _DOCK_CONTEXT["root"]
-        panel_id, _, take_id = (config.get_property("item") or "").rpartition(":")
-        manifest = load_project(root)
-        set_active_take(manifest, panel_id, take_id)
-        save_project(root, manifest)
-        panel = next(p for p in manifest["panels"] if p["id"] == panel_id)
-        page_id = (panel.get("placement") or {}).get("page")
-        image = _open_page_images(manifest).get(page_id)
-        if image is not None:
-            if _show_take_on_canvas(image, manifest["project"]["id"], panel_id, take_id):
-                _save_project_page(image, root, manifest)
-            else:
-                Gimp.message("That take's layer isn't on the open page, so only the "
-                             "project record changed.")
-        _refresh_project_docks()
+        item = config.get_property("item") or ""
+        kind, _, rest = item.partition(":")
+        if kind == "take":
+            panel_id, _, take_id = rest.rpartition(":")
+            manifest = load_project(root)
+            panel = next((p for p in manifest["panels"] if p["id"] == panel_id), None)
+            if panel is not None and panel.get("active_take") != take_id:
+                _activate_take(root, panel_id, take_id)
+        elif kind == "ref":
+            _open_selected_character_image(rest)
+        elif kind == "loc":
+            _open_selected_location_image()
     except Exception as exc:
         return _error(procedure, str(exc))
     return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
@@ -6266,6 +6327,7 @@ def _add_dock_callbacks(plugin):
         (DOCK_ADD_COVER, _dock_panel_menu, "cover", True),
         (DOCK_CHARACTER_VERSION, _dock_character_version, "pick", True),
         (DOCK_ACTIVATE_TAKE, _dock_activate_take, "take", True),
+        (DOCK_GALLERY_ITEM, _dock_gallery_item, "gallery", True),
         (DOCK_DESIGN_VARIANT, _dock_character_menu, "variant", True),
         (DOCK_ADD_COVER_PAGE, _dock_page_menu, "cover", True),
         (DOCK_OPEN_CHARACTER_VERSION, _dock_open_character_version, "open", True),
@@ -6310,6 +6372,7 @@ def _register_project_docks(plugin):
             "characters": "# Character Bible\nOpen a project to see its cast.",
             "panel": "# Panel\nSelect a panel to see its production brief.",
         })
+        contents.setdefault("gallery", "# Gallery\nOpen a project to see its pictures.")
         rows = [
             (DOCK_PROJECT, "Project", "tree", contents["project"], "",
              "Open project…", DOCK_OPEN_PROJECT, ""),
@@ -6325,6 +6388,8 @@ def _register_project_docks(plugin):
              "", "", "", ""),
             (DOCK_BUBBLES, "Bubbles", "tiles", _bubble_library(), "", "", "",
              DOCK_BUBBLE_ITEM),
+            (DOCK_GALLERY, "Gallery", "tiles", contents["gallery"], "", "", "",
+             DOCK_GALLERY_ITEM),
         ]
     else:
         manifest = load_project(root)
@@ -6332,6 +6397,7 @@ def _register_project_docks(plugin):
             manifest, _DOCK_CONTEXT.get("selected_id"), root,
             _project_page_thumbnails(root, manifest), DOCK_OPEN_PAGE,
             DOCK_GENERATE_LAYOUT, **_dock_actions(root, manifest))
+        contents["gallery"] = _gallery_content(root, manifest, contents["selected_id"])
         rows = [
             (DOCK_PROJECT, "Project", "tree", contents["project"],
              contents["project_selected"], "Add page", DOCK_ACTIONS[DOCK_PROJECT],
@@ -6351,6 +6417,8 @@ def _register_project_docks(plugin):
              "", "Set frame", DOCK_ACTIONS[DOCK_PANEL], ""),
             (DOCK_BUBBLES, "Bubbles", "tiles", _bubble_library(), "", "", "",
              DOCK_BUBBLE_ITEM),
+            (DOCK_GALLERY, "Gallery", "tiles", contents["gallery"], "", "", "",
+             DOCK_GALLERY_ITEM),
         ]
     for identifier, title, presentation, content, selected, action_label, action, item in rows:
         _dock_pdb_call("gimp-extension-panel-register", {

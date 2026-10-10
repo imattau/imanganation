@@ -628,3 +628,56 @@ def build_welcome_docks(new_project_action: str = "",
         "panel": "# Panel\nSelect a script panel to see its production brief.",
         "panel_selected": "",
     }
+
+
+def build_gallery(manifest: dict[str, Any], selected_id: str | None,
+                  root: str | Path | None = None,
+                  references: dict[str, Any] | None = None) -> str:
+    """Tiles (``<id>\\t<label>\\t<absolute image path>``) for the Gallery dock: the
+    selected panel's takes (click one to make it the active take), a character's
+    reference images, or a location's reference image (click to open it in GIMP).
+
+    ``references`` carries what only the engine knows: ``{"versions": {version: path},
+    "default": version}`` for a character, ``{"image": path}`` for a location."""
+    references = references or {}
+    panel = next((p for p in manifest.get("panels", []) if p["id"] == selected_id), None)
+    if panel is not None:
+        position = _position(panel.get("label", {}))
+        rows = [f"# Takes · {position}"]
+        takes = manifest.get("takes", {})
+        for take_id in panel.get("takes", []):
+            take = takes.get(take_id, {})
+            active = take_id == panel.get("active_take")
+            kind = _label(take.get("kind")) or "take"
+            seed = (take.get("engine") or {}).get("seed")
+            text = ("✓ " if active else "") + kind + (f" · seed {seed}" if seed is not None
+                                                      else "")
+            path = ""
+            if take.get("file") and root is not None:
+                candidate = Path(root) / take["file"]
+                path = str(candidate) if candidate.is_file() else ""
+            rows.append(f"take:{panel['id']}:{take_id}\t{text}" + (f"\t{path}" if path else ""))
+        if len(rows) == 1:
+            rows.append("No renders yet")
+        return "\n".join(rows)
+    character = next((c for c in manifest.get("cast", [])
+                      if character_row_id(c["name"]) == selected_id), None)
+    if character is not None:
+        rows = [f"# References · {_label(character['name'])}"]
+        default = references.get("default")
+        for version, path in (references.get("versions") or {}).items():
+            rows.append(f"ref:{version}\t{'✓ ' if version == default else ''}"
+                        f"{_label(version)}" + (f"\t{path}" if path else ""))
+        if len(rows) == 1:
+            rows.append("Not designed yet")
+        return "\n".join(rows)
+    location = next((loc for loc in manifest.get("locations", [])
+                     if location_row_id(loc["name"]) == selected_id), None)
+    if location is not None:
+        rows = [f"# Reference · {_label(location['name'])}"]
+        if references.get("image"):
+            rows.append(f"loc:image\t{_label(location['name'])}\t{references['image']}")
+        else:
+            rows.append("Not designed yet")
+        return "\n".join(rows)
+    return "# Gallery\nSelect a panel, character or location to see its pictures"

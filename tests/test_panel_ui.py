@@ -408,3 +408,39 @@ def test_a_page_offers_to_generate_its_panels_that_have_no_render():
     waiting["takes"] = ["tk_x"]
     assert "Generate all" not in build_docks(
         manifest, page["id"], generate_page_action="gen")["inspector"]
+
+
+def test_gallery_shows_takes_with_thumbnails_and_the_active_one_marked(tmp_path):
+    from gimp.imanganation.panel_ui import build_gallery
+
+    manifest = copy.deepcopy(EXAMPLE)
+    panel = manifest["panels"][0]
+    first = panel["takes"][0]
+    (tmp_path / "takes").mkdir()
+    image = tmp_path / manifest["takes"][first]["file"]
+    image.parent.mkdir(parents=True, exist_ok=True)
+    image.write_bytes(b"png")
+
+    rows = build_gallery(manifest, panel["id"], tmp_path).splitlines()
+
+    assert rows[0].startswith("# Takes")
+    assert f"take:{panel['id']}:{first}\t" in rows[1] and rows[1].endswith(f"\t{image}")
+    active = next(r for r in rows if r.startswith(f"take:{panel['id']}:{panel['active_take']}"))
+    assert "✓" in active and active.count("\t") == 1  # no file on disk: no preview
+    assert sum("✓" in r for r in rows) == 1
+
+
+def test_gallery_shows_reference_images_for_characters_and_locations():
+    from gimp.imanganation.panel_ui import build_gallery
+
+    manifest = copy.deepcopy(EXAMPLE)
+    who = character_row_id(manifest["cast"][0]["name"])
+    rows = build_gallery(manifest, who, None, {
+        "versions": {"base": "/p/base.png", "gimp-01": "/p/g1.png"}, "default": "gimp-01"})
+    assert "ref:base\tbase\t/p/base.png" in rows
+    assert "ref:gimp-01\t✓ gimp-01\t/p/g1.png" in rows
+    assert "Not designed yet" in build_gallery(manifest, who, None, {"versions": {}})
+    place = location_row_id("School rooftop")
+    assert "loc:image\tSchool rooftop\t/p/roof.png" in build_gallery(
+        manifest, place, None, {"image": "/p/roof.png"})
+    assert build_gallery(manifest, None).startswith("# Gallery")
