@@ -215,7 +215,7 @@ def build_prompt(
         poses = staging.pose(spec.characters[0]) if solo else []
         action = ", ".join([*poses, *staging.shared])
         place = ", ".join(staging.setting) or setting(spec)
-    parts += [shot_tags(spec.camera), action, place]
+    parts += [shot_tags(spec.camera), action, place, *spec.props]
     # Names mean nothing to SDXL; their registered appearance tags do.
     for name in spec.characters if characters else []:
         parts += character_group(
@@ -272,10 +272,14 @@ def shot_prose(camera: str) -> str:
 
 def prose_prompt(spec: PanelSpec, appearances: dict[str, list[str]],
                  refs: dict[str, int] | None = None, location_ref: int | None = None,
-                 style: str = "clean line art and cel shading") -> str:
+                 style: str = "clean line art and cel shading",
+                 prop_refs: dict[str, int] | None = None,
+                 prop_notes: dict[str, str] | None = None) -> str:
     """A panel in plain English, for models with an LLM text encoder (Qwen-Image,
     Z-Image): the script's own sentences, each character introduced by name with their
-    look, and (``refs``: name -> image number) a pointer to their reference image."""
+    look, and (``refs``: name -> image number) a pointer to their reference image. Props
+    (props.py) the panel lists are named too: with a picture (``prop_refs``: name -> image
+    number) the renderer keeps that object, else the author's words (``prop_notes``)."""
     count = len(spec.characters)
     who = {0: "no people", 1: "exactly one person", 2: "exactly two people",
            3: "exactly three people"}.get(count, f"exactly {count} people")
@@ -311,6 +315,16 @@ def prose_prompt(spec: PanelSpec, appearances: dict[str, list[str]],
         line = f"{name} is {kind}{ref}" + (f": {looks}." if looks else ".")
         face = spec.expressions.get(name)
         parts.append(line + (f" {name}'s expression: {face}." if face else ""))
+    for prop in spec.props:
+        note = (prop_notes or {}).get(prop, "")
+        the = prop[:1].upper() + prop[1:] if re.match(r"(?i)(the|a|an)\s", prop) \
+            else f"The {prop}"
+        if prop_refs and prop in prop_refs:
+            parts.append(f"{the} is exactly the object shown in <image{prop_refs[prop]}> "
+                         "(keep its shape, materials and colours; place and angle it as this "
+                         "panel's action describes).")
+        else:
+            parts.append(the + (f": {note.rstrip('.')}." if note else " is in view."))
     if spec.action:
         parts.append(f"What happens: {action_text(spec)}")
     if spec.flashback:
@@ -328,6 +342,18 @@ def trial_files(models: dict, group: str) -> dict[str, str]:
         raise RenderError(f"no trial {group!r} in models.yaml "
                           f"(known: {', '.join(models.get('trials', {})) or 'none'})")
     return {part: e["id"] for part, e in entry.items()}
+
+
+MAX_REFERENCES = 10  # Qwen-Image 2.1 takes up to ten reference images
+
+
+def _prop_notes(identity: Path, spec: PanelSpec) -> dict[str, str]:
+    """The author's words for each prop the panel lists (props.py)."""
+    from manganation.props import PropRegistry
+
+    registry = PropRegistry.from_path(identity)
+    return {name: prop.description for name in spec.props
+            if (prop := registry.get(name)) is not None and prop.description}
 
 
 def _prose_graph(engine: str, spec: PanelSpec, identity: Path, client, models: dict,
@@ -365,15 +391,26 @@ def _prose_graph(engine: str, spec: PanelSpec, identity: Path, client, models: d
             else:
                 uploaded.append(client.upload_image(str(place_ref))["name"])
             location_ref = len(uploaded)
+        from manganation.props import PropRegistry
+
+        props = PropRegistry.from_path(identity)
+        prop_refs = {}
+        for name in spec.props:
+            image = props.reference_path(name)
+            if image is not None and len(uploaded) < MAX_REFERENCES:
+                uploaded.append(client.upload_image(str(image))["name"])
+                prop_refs[name] = len(uploaded)
         prompt = prose_prompt(spec, appearances, {n: i for i, n in enumerate(refs, 1)},
-                              location_ref, style=style["prose"])
+                              location_ref, style=style["prose"], prop_refs=prop_refs,
+                              prop_notes=_prop_notes(identity, spec))
         graph = graphs.qwen_image21(unet=files["model"], clip=files["text_encoder"],
                                     vae=files["vae"], prompt=prompt, refs=uploaded,
                                     width=width, height=height, seed=seed, prefix=prefix,
                                     resolution=resolution)
         return graph, prompt, ",".join(refs) or None
     files = trial_files(models, "z_anime")
-    prompt = prose_prompt(spec, appearances, style=style["prose"])
+    prompt = prose_prompt(spec, appearances, style=style["prose"],
+                          prop_notes=_prop_notes(identity, spec))
     negative = (style.get("negative", "") + ", comic, multiple panels, border, "
                 "speech bubble, extra people" if spec.characters else style.get("negative", ""))
     graph = graphs.z_image(unet=files["model"], clip=files["text_encoder"], vae=files["vae"],

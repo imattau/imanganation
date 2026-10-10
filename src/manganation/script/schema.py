@@ -50,6 +50,8 @@ class PanelSpec(BaseModel):
     scene_heading: str = ""
     location: str = ""
     characters: list[str] = Field(default_factory=list)
+    # Objects the panel shows that keep their look (props.py): names in the project's props
+    props: list[str] = Field(default_factory=list)
     action: str = ""
 
     # staging

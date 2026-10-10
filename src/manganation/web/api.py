@@ -244,7 +244,7 @@ class ScriptParseRequest(BaseModel):
 
 
 JobKind = Literal["render", "refine", "inpaint", "character", "parse", "locations",
-                  "location"]
+                  "location", "prop"]
 
 
 class LocationsRequest(BaseModel):
@@ -265,6 +265,41 @@ class LocationReferenceRequest(BaseModel):
     project: str = Field(pattern=r"^prj_[a-z0-9]{6,}$")
     name: str = Field(min_length=1, max_length=120)
     image_path: str = Field(description="PNG under the projects root, e.g. exported by GIMP")
+
+
+class PropReferenceRequest(BaseModel):
+    """An image (e.g. a designed one painted over in GIMP) as a prop's reference."""
+
+    project: str = Field(pattern=r"^prj_[a-z0-9]{6,}$")
+    name: str = Field(min_length=1, max_length=120)
+    image_path: str = Field(description="PNG under the projects root, e.g. exported by GIMP")
+
+
+class PropRequest(BaseModel):
+    """Design one prop from the author's description: the object alone on a plain
+    ground (the project's render engine), queued with the renders."""
+
+    project: str = Field(pattern=r"^prj_[a-z0-9]{6,}$")
+    name: str = Field(min_length=1, max_length=120)
+    description: str = Field(default="", max_length=4000)
+    seed: int | None = None
+    redesign: bool = False  # a prop that has an image: draw a new one, keep the old
+    style: StyleOptions | None = None
+    engine: Literal["sdxl", "qwen_image_21", "z_anime"] | None = None
+
+
+class PropImageRequest(BaseModel):
+    """Act on one of a prop's images (a file name from GET /props)."""
+
+    project: str = Field(pattern=r"^prj_[a-z0-9]{6,}$")
+    name: str = Field(min_length=1, max_length=120)
+    image: str = Field(min_length=1, max_length=200)
+
+
+class PropDescriptionRequest(BaseModel):
+    project: str = Field(pattern=r"^prj_[a-z0-9]{6,}$")
+    name: str = Field(min_length=1, max_length=120)
+    description: str = Field(default="", max_length=4000)
 
 
 class LocationRequest(BaseModel):
@@ -365,6 +400,7 @@ def create_app(
     design_locations=None,
     engines_report=None,
     design_location=None,
+    design_prop=None,
 ) -> FastAPI:
     app = FastAPI(title="imanganation engine")
     jobs: dict[str, Job] = {}
@@ -681,6 +717,117 @@ def create_app(
         location, moved = removed
         return {"key": location.key, "name": location.name,
                 "moved_to": str(moved) if moved else None}
+
+    def _prop_registry(project: str):
+        from manganation import props as pr
+        from manganation.identity import IdentityError, identity_root
+
+        try:
+            return pr.PropRegistry.from_path(identity_root(project, root=root))
+        except IdentityError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    def _prop_record(registry, prop) -> dict:
+        image = registry.root / prop.image if prop.image else None
+        return {"key": prop.key, "name": prop.name, "description": prop.description,
+                "image": str(image) if image is not None and image.is_file() else None,
+                "image_name": prop.image or None,
+                "previous": {p: str(registry.root / p) for p in prop.previous
+                             if (registry.root / p).is_file()},
+                "seed": prop.seed, "created_at": prop.created_at}
+
+    @app.get("/props")
+    def props_list(project: str = Query(pattern=r"^prj_[a-z0-9]{6,}$")) -> list[dict]:
+        """The project's props: key, name, the author's description, the reference image
+        (None until one exists) and the earlier images by file name."""
+        registry = _prop_registry(project)
+        return [_prop_record(registry, p) for p in registry.props.values()]
+
+    @app.post("/props", status_code=202)
+    def prop_design(req: PropRequest) -> Job:
+        """Design (or, with ``redesign``, draw anew) one prop from its description."""
+        from manganation import props as pr
+        from manganation.identity import identity_root
+
+        registry = _prop_registry(req.project)
+        if not any(ch.isalnum() for ch in pr.prop_key(req.name)):
+            raise HTTPException(422, f"no object in {req.name!r}")
+        if registry.reference_path(req.name) is not None and not req.redesign:
+            raise HTTPException(409, f"{req.name} already has a design; send redesign "
+                                     "to draw a new one")
+        identity = identity_root(req.project, root=root)
+
+        def work():
+            design = design_prop or pr.design
+            prop = design(identity, req.name, seed=req.seed,
+                          description=req.description.strip() or None,
+                          **({"style": req.style.model_dump()} if req.style else {}),
+                          **({"engine": req.engine} if req.engine else {}))
+            return _prop_record(pr.PropRegistry.from_path(identity), prop)
+
+        return submit_job("prop", req.model_dump(), work)
+
+    @app.post("/props/description")
+    def prop_description(req: PropDescriptionRequest) -> dict:
+        """Keep the author's words for a prop (no picture needed): renders on any engine
+        put them in the prompt. Synchronous."""
+        from manganation.props import prop_key
+
+        registry = _prop_registry(req.project)
+        if not any(ch.isalnum() for ch in prop_key(req.name)):
+            raise HTTPException(422, f"no object in {req.name!r}")
+        return _prop_record(registry, registry.set_description(req.name, req.description))
+
+    @app.post("/props/reference")
+    def prop_reference(req: PropReferenceRequest) -> dict:
+        """Register an image as a prop's new reference (earlier images are kept).
+        Synchronous: a file copy, no GPU."""
+        from PIL import Image, UnidentifiedImageError
+
+        from manganation.props import prop_key
+
+        registry = _prop_registry(req.project)
+        if not any(ch.isalnum() for ch in prop_key(req.name)):
+            raise HTTPException(422, f"no object in {req.name!r}")
+        image = _engine_file(req.image_path, "image")
+        try:
+            with Image.open(image) as im:
+                im.verify()
+        except (UnidentifiedImageError, OSError) as exc:
+            raise HTTPException(400, f"not a readable image: {exc}") from exc
+        return _prop_record(registry, registry.set_reference(req.name, image))
+
+    @app.post("/props/images/default")
+    def prop_image_default(req: PropImageRequest) -> dict:
+        """Make one of a prop's earlier images its reference again."""
+        registry = _prop_registry(req.project)
+        try:
+            return _prop_record(registry, registry.make_current(req.name, req.image))
+        except KeyError as exc:
+            raise HTTPException(404, str(exc.args[0])) from exc
+
+    @app.post("/props/images/delete")
+    def prop_image_delete(req: PropImageRequest) -> dict:
+        """Set one of a prop's images aside (``props/.deleted``)."""
+        registry = _prop_registry(req.project)
+        try:
+            prop, moved = registry.remove_image(req.name, req.image)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc.args[0])) from exc
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return {**_prop_record(registry, prop), "moved_to": str(moved) if moved else None}
+
+    @app.delete("/props")
+    def prop_delete(name: str, project: str = Query(pattern=r"^prj_[a-z0-9]{6,}$")) -> dict:
+        """Forget a prop. Its images move to ``props/.deleted/``, not erased."""
+        registry = _prop_registry(project)
+        removed = registry.remove(name)
+        if removed is None:
+            known = ", ".join(registry.props) or "none"
+            raise HTTPException(404, f"no prop {name!r} (known: {known})")
+        prop, moved = removed
+        return {"key": prop.key, "name": prop.name, "moved_to": str(moved) if moved else None}
 
     @app.get("/styles")
     def styles_list() -> list[dict]:
