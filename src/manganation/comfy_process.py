@@ -9,6 +9,7 @@ stops with GIMP). A ComfyUI already answering on the port is left alone.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -24,6 +25,12 @@ def _die_with_parent() -> None:
         ctypes.CDLL(None, use_errno=True).prctl(1, signal.SIGTERM)  # PR_SET_PDEATHSIG
     except Exception:  # noqa: BLE001 - best-effort; stop() still ends it
         pass
+
+
+def _engine_env() -> dict[str, str]:
+    """The child's environment. PyTorch's native Triton ops compile a kernel at first
+    use, which fails in the Flatpak (no C compiler); the eager ops do the same work."""
+    return {**os.environ, "TORCH_DISABLE_NATIVE_JIT": "1"}
 
 
 def _up(url: str) -> bool:
@@ -74,7 +81,8 @@ class ComfyProcess:
         with open(self.log_file, "ab") as log:
             self.process = self._popen(
                 self.command(installer), cwd=installer.comfy, stdin=subprocess.DEVNULL,
-                stdout=log, stderr=subprocess.STDOUT, preexec_fn=_die_with_parent)
+                stdout=log, stderr=subprocess.STDOUT, preexec_fn=_die_with_parent,
+                env=_engine_env())
         return "started"
 
     def stop(self) -> None:
