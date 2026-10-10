@@ -7,8 +7,12 @@
     "reading_order": "rtl",
     "default_color_mode": "bw",
     "created": "2026-10-04T02:17:46.722972+00:00",
-    "modified": "2026-10-09T06:30:43+11:00",
-    "imported_from": "rooftop"
+    "modified": "2026-10-09T16:49:55+11:00",
+    "imported_from": "rooftop",
+    "render": {
+      "engine": "qwen_image_21",
+      "face_pass": true
+    }
   },
   "panels": [
     {
@@ -58,9 +62,10 @@
         "tk_2cc44cfe6d2c",
         "tk_57f01a07a5ec",
         "tk_60df24a6530d",
-        "tk_a022302341e8"
+        "tk_a022302341e8",
+        "tk_2066e341d109"
       ],
-      "active_take": "tk_a022302341e8",
+      "active_take": "tk_2066e341d109",
       "source": "84cacf7f4f3a3d59"
     },
     {
@@ -109,9 +114,10 @@
       "takes": [
         "tk_77117031d8df",
         "tk_98f58eb35bff",
-        "tk_7fc18b229965"
+        "tk_7fc18b229965",
+        "tk_b5f74ef8676d"
       ],
-      "active_take": "tk_7fc18b229965",
+      "active_take": "tk_b5f74ef8676d",
       "source": "8cdc3de22cd962f5"
     },
     {
@@ -155,24 +161,19 @@
       "flashback": false,
       "aspect_ratio": "16:9",
       "seed": null,
-      "status": "placed",
-      "placement": {
-        "page": "pg_b10540a4eafd",
-        "frame": [
-          70,
-          102,
-          1460,
-          804
-        ]
-      },
+      "status": "unplaced",
+      "placement": null,
       "takes": [
         "tk_b9eadd76af20",
         "tk_fdb51b90a7a6",
         "tk_75f018ce23cb",
         "tk_c8c5717431d1",
-        "tk_00bf7f1c0f62"
+        "tk_00bf7f1c0f62",
+        "tk_3afd1819ab32",
+        "tk_7b923be88cf8",
+        "tk_9b6ca07e6ff5"
       ],
-      "active_take": "tk_00bf7f1c0f62",
+      "active_take": "tk_9b6ca07e6ff5",
       "source": "ad2793cd11554870"
     },
     {
@@ -206,21 +207,14 @@
       "flashback": false,
       "aspect_ratio": "1:2",
       "seed": null,
-      "status": "placed",
-      "placement": {
-        "page": "pg_b10540a4eafd",
-        "frame": [
-          70,
-          966,
-          710,
-          1332
-        ]
-      },
+      "status": "unplaced",
+      "placement": null,
       "takes": [
         "tk_6546e8b427cb",
-        "tk_9cda797855d3"
+        "tk_9cda797855d3",
+        "tk_3fd24483142a"
       ],
-      "active_take": "tk_9cda797855d3",
+      "active_take": "tk_3fd24483142a",
       "source": "149f1a79f9da106d"
     },
     {
@@ -261,42 +255,31 @@
       "flashback": false,
       "aspect_ratio": "1:2",
       "seed": null,
-      "status": "placed",
-      "placement": {
-        "page": "pg_b10540a4eafd",
-        "frame": [
-          820,
-          966,
-          710,
-          1332
-        ]
-      },
+      "status": "unplaced",
+      "placement": null,
       "takes": [
         "tk_c724705917ff",
         "tk_9343226d5027",
         "tk_20274ed291d5",
         "tk_ed67631a8619",
-        "tk_b6e4ee10b1d4"
+        "tk_b6e4ee10b1d4",
+        "tk_9c1dbf94590f",
+        "tk_696310f92bba"
       ],
-      "active_take": "tk_b6e4ee10b1d4",
+      "active_take": "tk_696310f92bba",
       "source": "9b3de45240380e56"
     }
   ],
   "pages": [
     {
-      "id": "pg_f6ee9dbdcff7",
+      "id": "pg_0f1eb0c074df",
       "label": "Page 1",
-      "file": "pages/page-001.xcf"
-    },
-    {
-      "id": "pg_b10540a4eafd",
-      "label": "Page 2",
       "file": "pages/page-002.xcf"
     },
     {
-      "id": "pg_8245885c41a3",
-      "label": "Page 3",
-      "file": "pages/page-003.xcf"
+      "id": "pg_f6ee9dbdcff7",
+      "label": "Page 2",
+      "file": "pages/page-001.xcf"
     }
   ],
   "takes": {
@@ -634,6 +617,134 @@
         "width": 1280,
         "height": 896,
         "prompt": "manga panel, anime illustration, solo, male focus, wide shot, full body, sitting, against fence, knees up, bento, playground, day, outdoors, 1boy, charcoal-brown hair with blue tips, medium length swept to the left covering right eye, amber eyes, white dress shirt with undone collar button, loose red necktie, grey blazer, navy pleated trousers, silver wristwatch, brown satchel bag, small scar above left eyebrow, 17-year-old boy, relieved, calm"
+      }
+    },
+    "tk_b5f74ef8676d": {
+      "panel": "pnl_d4aeea541da8",
+      "file": "takes/pnl_d4aeea541da8-tk_b5f74ef8676d.png",
+      "width": 1216,
+      "height": 832,
+      "kind": "render",
+      "parent": null,
+      "origin": "tk_b5f74ef8676d",
+      "created": "2026-10-09T07:13:26+11:00",
+      "engine": {
+        "seed": 1367062868,
+        "width": 1216,
+        "height": 832,
+        "prompt": "manga panel, anime illustration, solo, male focus, close-up, portrait, standing, head snapped back, rooftop, late afternoon, outdoors, 1boy, charcoal-brown hair with blue tips, medium length swept to the left covering right eye, amber eyes, white dress shirt with undone collar button, loose red necktie, grey blazer, navy pleated trousers, silver wristwatch, brown satchel bag, small scar above left eyebrow, 17-year-old boy, startled, eyes wide"
+      }
+    },
+    "tk_3afd1819ab32": {
+      "panel": "pnl_622a14042ddb",
+      "file": "takes/pnl_622a14042ddb-tk_3afd1819ab32.png",
+      "width": 1408,
+      "height": 768,
+      "kind": "render",
+      "parent": null,
+      "origin": "tk_3afd1819ab32",
+      "created": "2026-10-09T07:16:35+11:00",
+      "engine": {
+        "seed": 2038620984,
+        "width": 1408,
+        "height": 768,
+        "prompt": "manga panel, anime illustration, 1boy, 1girl, cowboy shot, rooftop, outdoors"
+      }
+    },
+    "tk_7b923be88cf8": {
+      "panel": "pnl_622a14042ddb",
+      "file": "takes/pnl_622a14042ddb-tk_7b923be88cf8.png",
+      "width": 1024,
+      "height": 1024,
+      "kind": "render",
+      "parent": null,
+      "origin": "tk_7b923be88cf8",
+      "created": "2026-10-09T07:24:58+11:00",
+      "engine": {
+        "seed": 3526679115,
+        "width": 1024,
+        "height": 1024,
+        "prompt": "manga panel, anime illustration, 1boy, 1girl, cowboy shot, rooftop, outdoors, white hair with pink tips, two pigtails tied with red bows with loose strands flying free, amber eyes, navy sailor-collar school uniform top with red necktie and navy pleated skirt, silver hair barrettes, snowflake pin on lapel, white wristwatch, 15-year-old, wide grin, standing, hands on own hips, charcoal-brown hair with blue tips, medium length swept to the left covering right eye, amber eyes, white dress shirt with undone collar button, loose red necktie, grey blazer, navy pleated trousers, silver wristwatch, brown satchel bag, small scar above left eyebrow, 17-year-old boy, weary, sitting, looking up"
+      }
+    },
+    "tk_3fd24483142a": {
+      "panel": "pnl_60ddf7e6c584",
+      "file": "takes/pnl_60ddf7e6c584-tk_3fd24483142a.png",
+      "width": 960,
+      "height": 1024,
+      "kind": "render",
+      "parent": null,
+      "origin": "tk_3fd24483142a",
+      "created": "2026-10-09T07:25:52+11:00",
+      "engine": {
+        "seed": 3139376962,
+        "width": 960,
+        "height": 1024,
+        "prompt": "manga panel, anime illustration, solo, male focus, upper body, standing, shoulders slumped, rooftop, outdoors, 1boy, charcoal-brown hair with blue tips, medium length swept to the left covering right eye, amber eyes, white dress shirt with undone collar button, loose red necktie, grey blazer, navy pleated trousers, silver wristwatch, brown satchel bag, small scar above left eyebrow, 17-year-old boy, sighing, half-closed eyes"
+      }
+    },
+    "tk_9c1dbf94590f": {
+      "panel": "pnl_824568b3d439",
+      "file": "takes/pnl_824568b3d439-tk_9c1dbf94590f.png",
+      "width": 1536,
+      "height": 704,
+      "kind": "render",
+      "parent": null,
+      "origin": "tk_9c1dbf94590f",
+      "created": "2026-10-09T07:27:25+11:00",
+      "engine": {
+        "seed": 2770888131,
+        "width": 1536,
+        "height": 704,
+        "prompt": "manga panel, anime illustration, 1boy, 1girl, cowboy shot, stairs, stairwell, indoors"
+      }
+    },
+    "tk_9b6ca07e6ff5": {
+      "panel": "pnl_622a14042ddb",
+      "file": "takes/pnl_622a14042ddb-tk_9b6ca07e6ff5.png",
+      "width": 1024,
+      "height": 1024,
+      "kind": "render",
+      "parent": null,
+      "origin": "tk_9b6ca07e6ff5",
+      "created": "2026-10-09T07:44:22+11:00",
+      "engine": {
+        "seed": 1163275621,
+        "width": 1024,
+        "height": 1024,
+        "prompt": "A full-colour anime illustration for a single manga panel, clean line art and cel shading, showing exactly two people: a girl and a boy. No text, no speech bubbles, no panel borders. Two-shot: both characters framed together from the thighs up. Setting: School rooftop. Yuki is a girl (take only the face, hair and outfit from <image1>; draw a new pose, expression and framing as this panel describes): white hair with pink tips, two pigtails tied with red bows with loose strands flying free, amber eyes, navy sailor-collar school uniform top with red necktie and navy pleated skirt, silver hair barrettes, snowflake pin on lapel, white wristwatch, 15-year-old. Yuki's expression: wide grin. Akira is a boy (take only the face, hair and outfit from <image2>; draw a new pose, expression and framing as this panel describes): charcoal-brown hair with blue tips, medium length swept to the left covering right eye, amber eyes, white dress shirt with undone collar button, loose red necktie, grey blazer, navy pleated trousers, silver wristwatch, brown satchel bag, small scar above left eyebrow, 17-year-old boy. Akira's expression: weary. What happens: Yuki stands over him, hands on her hips, grinning."
+      }
+    },
+    "tk_696310f92bba": {
+      "panel": "pnl_824568b3d439",
+      "file": "takes/pnl_824568b3d439-tk_696310f92bba.png",
+      "width": 1536,
+      "height": 704,
+      "kind": "render",
+      "parent": null,
+      "origin": "tk_696310f92bba",
+      "created": "2026-10-09T07:46:47+11:00",
+      "engine": {
+        "seed": 1397614404,
+        "width": 1536,
+        "height": 704,
+        "prompt": "A full-colour anime illustration for a single manga panel, clean line art and cel shading, showing exactly two people: a girl and a boy. No text, no speech bubbles, no panel borders. Medium shot: framed from the waist up. Setting: the stairwell, exactly the place shown in <image3> (keep its layout, materials, colours and light; frame it as this panel's shot describes). Yuki is a girl (take only the face, hair and outfit from <image1>; draw a new pose, expression and framing as this panel describes): white hair with pink tips, two pigtails tied with red bows with loose strands flying free, amber eyes, navy sailor-collar school uniform top with red necktie and navy pleated skirt, silver hair barrettes, snowflake pin on lapel, white wristwatch, 15-year-old. Yuki's expression: excited grin. Akira is a boy (take only the face, hair and outfit from <image2>; draw a new pose, expression and framing as this panel describes): charcoal-brown hair with blue tips, medium length swept to the left covering right eye, amber eyes, white dress shirt with undone collar button, loose red necktie, grey blazer, navy pleated trousers, silver wristwatch, brown satchel bag, small scar above left eyebrow, 17-year-old boy. Akira's expression: reluctant. What happens: Yuki drags Akira by the wrist down the stairs."
+      }
+    },
+    "tk_2066e341d109": {
+      "panel": "pnl_d3e0995e608d",
+      "file": "takes/pnl_d3e0995e608d-tk_2066e341d109.png",
+      "width": 1280,
+      "height": 896,
+      "kind": "render",
+      "parent": null,
+      "origin": "tk_2066e341d109",
+      "created": "2026-10-09T08:05:14+11:00",
+      "engine": {
+        "seed": 1290845599,
+        "width": 1280,
+        "height": 896,
+        "prompt": "A full-colour anime illustration for a single manga panel, clean line art and cel shading, showing exactly one person: a boy. No text, no speech bubbles, no panel borders. Wide shot: whole figures, small in the frame, with the surroundings around them. Setting: playground, exactly the place shown in <image2> (keep its layout, materials, colours and light; frame it as this panel's shot describes). Akira is a boy (take only the face, hair and outfit from <image1>; draw a new pose, expression and framing as this panel describes): charcoal-brown hair with blue tips, medium length swept to the left covering right eye, amber eyes, white dress shirt with undone collar button, loose red necktie, grey blazer, navy pleated trousers, silver wristwatch, brown satchel bag, small scar above left eyebrow, 17-year-old boy. Akira's expression: relieved, calm. What happens: Akira sits alone against the chain-link fence, lunchbox on his knees."
       }
     }
   },
