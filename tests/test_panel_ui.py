@@ -307,3 +307,18 @@ def test_add_panel_menus_sit_on_the_heading_pages_and_panels():
     other = next(l for l in project if l.startswith(manifest["panels"][1]["id"] + "\t"))
     assert "Delete panel" not in other
     assert "# Script panels" in build_docks(manifest)["project"].splitlines()
+
+
+def test_add_cover_is_offered_until_there_is_a_cover_and_the_cover_takes_no_panels():
+    manifest = copy.deepcopy(EXAMPLE)
+    for panel in manifest["panels"]:
+        panel.pop("cover", None)
+    heading = lambda m: next(l for l in build_docks(
+        m, add_panel_action="add", add_cover_action="cov")["project"].splitlines()
+        if l.startswith("# Script panels"))
+    assert heading(manifest) == "# Script panels\t!add:Add panel…|cov:Add cover…"
+    manifest["panels"][0]["cover"] = True
+    assert heading(manifest) == "# Script panels\t!add:Add panel…"
+    row = next(l for l in build_docks(manifest, add_panel_action="add")["project"].splitlines()
+               if l.startswith(manifest["panels"][0]["id"] + "\t"))
+    assert "Add panel" not in row

@@ -756,6 +756,15 @@ def reparse_script(document: dict[str, Any], parsed: dict[str, Any], *, script_f
             removed.append(panel["id"])
 
     for panel in manual:  # hand-added panels are not in the script: they stay put
+        if panel.get("cover") and any(p.get("cover") for p in panels):
+            if _has_work(panel):  # the script has a cover of its own now
+                panel["status"] = "orphaned"
+                panel.pop("manual")
+                orphans.append(panel)
+                orphaned.append(panel["id"])
+            else:
+                removed.append(panel["id"])
+            continue
         panels.insert(_page_end(panels, panel["label"]["page"]), panel)
     document["panels"] = panels + orphans
     document["cast"] = _merge_cast(document.get("cast", []), parsed, panels)
@@ -891,13 +900,15 @@ def _page_end(panels: list[dict[str, Any]], page_number: int) -> int:
 def script_page_number(document: dict[str, Any], page_id: str) -> int:
     """The script page number a project page stands for: its "Page N" label, else the
     page its placed panels are labelled with, else its position counting from the
-    first numbered page."""
+    first numbered page. The cover page is 0."""
     pages = document["pages"]
     page = next((p for p in pages if p["id"] == page_id), None)
     if page is None:
         raise ProjectFileError("that page is no longer in the project")
     if match := _DEFAULT_PAGE_LABEL.match(page.get("label", "")):
         return int(match.group(1))
+    if page.get("cover") or page.get("label", "").strip().casefold() == "cover":
+        return 0
     numbers = [p["label"]["page"] for p in document["panels"]
                if (p.get("placement") or {}).get("page") == page_id
                and p["label"]["page"] > 0]
@@ -916,7 +927,8 @@ def add_panel(document: dict[str, Any], page_number: int, *, action: str,
     if not action:
         raise ProjectFileError("a panel needs an action")
     if page_number < 1:
-        raise ProjectFileError("a panel needs a page number of 1 or more")
+        raise ProjectFileError("a panel needs a page number of 1 or more; "
+                               "the cover is added with Add cover")
     live = [p for p in document["panels"] if p.get("status") != "orphaned"]
     same_page = [p["label"]["panel"] for p in live if p["label"]["page"] == page_number]
     panel = _panel_from_item({
@@ -924,8 +936,32 @@ def add_panel(document: dict[str, Any], page_number: int, *, action: str,
         "location": " ".join(location.split()), "action": action,
         "camera": " ".join(camera.split()),
         "characters": _names(", ".join(characters or []))})
+    return _insert_manual(document, live, panel)
+
+
+def add_cover(document: dict[str, Any], *, action: str, location: str = "",
+              characters: list[str] | None = None, camera: str = "") -> dict[str, Any]:
+    """Add a hand-written cover picture (label page 0), first in reading order (the
+    caller saves). A project has one cover. Like the script's COVER it has no
+    dialogue or sound effects."""
+    action = " ".join(action.split())
+    if not action:
+        raise ProjectFileError("the cover needs an action: what its picture shows")
+    live = [p for p in document["panels"] if p.get("status") != "orphaned"]
+    if any(p.get("cover") for p in live):
+        raise ProjectFileError("this project already has a cover")
+    panel = _panel_from_item({
+        "page": 0, "panel": 1, "cover": True,
+        "location": " ".join(location.split()), "action": action,
+        "camera": " ".join(camera.split()),
+        "characters": _names(", ".join(characters or []))})
+    return _insert_manual(document, live, panel)
+
+
+def _insert_manual(document: dict[str, Any], live: list[dict[str, Any]],
+                   panel: dict[str, Any]) -> dict[str, Any]:
     panel["manual"] = True
-    live.insert(_page_end(live, page_number), panel)
+    live.insert(_page_end(live, panel["label"]["page"]), panel)
     document["panels"] = live + [p for p in document["panels"]
                                  if p.get("status") == "orphaned"]
     known = {c["name"].casefold() for c in document["cast"]}

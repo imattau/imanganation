@@ -406,3 +406,26 @@ def test_an_added_panel_needs_an_action_and_a_page(tmp_path):
         add_panel(document, 1, action="  ")
     with pytest.raises(ProjectFileError):
         add_panel(document, 0, action="x")
+
+
+def test_a_hand_added_cover_is_first_single_and_survives_reload():
+    from gimp.imanganation.project_store import add_cover, add_panel, script_page_number
+
+    document = _script_project()
+    cover = add_cover(document, action="Yuki on the roof at dusk", characters=["Yuki"])
+    assert cover["cover"] and cover["manual"] and cover["label"] == {"page": 0, "panel": 1}
+    assert document["panels"][0] is cover
+    with pytest.raises(ProjectFileError):
+        add_cover(document, action="another")
+    with pytest.raises(ProjectFileError):
+        add_panel(document, 0, action="x")
+    document["pages"].append({"id": "pg_cover01", "label": "Cover", "file": "pages/cover.xcf"})
+    assert script_page_number(document, "pg_cover01") == 0
+
+    _reparse(document, _SCRIPT)
+    assert document["panels"][0] is cover
+
+    # a script that gains its own COVER replaces an unworked manual one
+    summary = _reparse(document, "COVER\n[ACTION]\nThe title art.\n\n" + _SCRIPT)
+    assert cover["id"] in summary["removed"]
+    assert sum(1 for p in document["panels"] if p.get("cover")) == 1

@@ -75,6 +75,7 @@ try:
     )
     from project_store import (
         ProjectFileError,
+        add_cover,
         add_panel,
         adopt_script_fingerprints,
         apply_field_edit,
@@ -209,6 +210,7 @@ DOCK_REORDER_PAGES = "plug-in-imanganation-dock-reorder-pages"
 # Project tree: right-click Add panel… (heading, page or panel row) / Delete panel…
 DOCK_ADD_PANEL = "plug-in-imanganation-dock-add-panel"
 DOCK_DELETE_PANEL = "plug-in-imanganation-dock-delete-panel"
+DOCK_ADD_COVER = "plug-in-imanganation-dock-add-cover"
 DOCK_GENERATE_LAYOUT = "plug-in-imanganation-dock-generate-page-layout"
 # Speech bubbles: a script line's Bubble… (item "<panel id>:<line>"), a page's free
 # Bubble…, a Bubbles dock tile (item: template id), Fit bubble to text
@@ -4604,8 +4606,10 @@ def _dock_page_menu(procedure, config, data):
 
 
 def _choose_new_panel(page_number, locations, cast):
-    """Add Panel dialog -> (action, location, characters, camera) or None."""
-    dialog = Gtk.Dialog(title=f"Add Panel to Page {page_number}", flags=Gtk.DialogFlags.MODAL)
+    """Add Panel dialog (page 0: the cover) -> (action, location, characters, camera) or
+    None."""
+    dialog = Gtk.Dialog(title=(f"Add Panel to Page {page_number}" if page_number
+                               else "Add Cover"), flags=Gtk.DialogFlags.MODAL)
     dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
                        "Add", Gtk.ResponseType.OK)
     dialog.set_default_response(Gtk.ResponseType.OK)
@@ -4638,7 +4642,8 @@ def _choose_new_panel(page_number, locations, cast):
             if text:
                 return (text, location.get_active_text() or "", characters.get_text(),
                         camera.get_text())
-            Gimp.message("Describe what happens in the panel.")
+            Gimp.message("Describe what the picture shows." if not page_number
+                         else "Describe what happens in the panel.")
         return None
     finally:
         dialog.destroy()
@@ -4651,23 +4656,26 @@ def _add_panel_target_page(manifest, item):
     panels = {panel["id"]: panel for panel in manifest["panels"]}
     for key in (item, _DOCK_CONTEXT.get("selected_id")):
         if key in pages:
-            return script_page_number(manifest, key)
+            if script_page_number(manifest, key) > 0:
+                return script_page_number(manifest, key)
+            continue
         panel = panels.get(key)
         if panel is not None and panel["label"]["page"] > 0:
             return panel["label"]["page"]
     image = Gimp.context_get_image()
     page_id = _project_page_id_for_image(image, manifest) if image is not None else None
-    if page_id is None and manifest["pages"]:
-        page_id = manifest["pages"][-1]["id"]
-    if page_id is not None:
+    if page_id is not None and script_page_number(manifest, page_id) > 0:
         return script_page_number(manifest, page_id)
+    story = [p["id"] for p in manifest["pages"] if script_page_number(manifest, p["id"]) > 0]
+    if story:
+        return script_page_number(manifest, story[-1])
     numbers = [p["label"]["page"] for p in manifest["panels"] if p["label"]["page"] > 0]
     return max(numbers, default=1)
 
 
 def _dock_panel_menu(procedure, config, data):
     """Project tree right-click: Add panel… (Script panels heading, a page or a panel:
-    it goes at the end of that page) or Delete panel… (a panel added by hand)."""
+    it goes at the end of that page), Add cover… (the heading) or Delete panel… (a panel added by hand)."""
     try:
         root = _DOCK_CONTEXT["root"]
         item = config.get_property("item") or ""
@@ -4684,15 +4692,16 @@ def _dock_panel_menu(procedure, config, data):
             if _DOCK_CONTEXT.get("selected_id") == item:
                 _DOCK_CONTEXT["selected_id"] = None
         else:
-            number = _add_panel_target_page(manifest, item)
+            number = 0 if data == "cover" else _add_panel_target_page(manifest, item)
             chosen = _choose_new_panel(
                 number, [loc["name"] for loc in manifest.get("locations", [])],
                 [c["name"] for c in manifest.get("cast", [])])
             if chosen is None:
                 return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
             action, place, names, camera = chosen
-            panel = add_panel(manifest, number, action=action, location=place,
-                              characters=[names], camera=camera)
+            fields = dict(action=action, location=place, characters=[names], camera=camera)
+            panel = (add_cover(manifest, **fields) if data == "cover"
+                     else add_panel(manifest, number, **fields))
             save_project(root, manifest)
             _DOCK_CONTEXT["selected_id"] = panel["id"]
         _refresh_project_docks()
@@ -5503,6 +5512,7 @@ def _dock_actions(root, manifest):
             "delete_page_action": DOCK_DELETE_PAGE,
             "add_panel_action": DOCK_ADD_PANEL,
             "delete_panel_action": DOCK_DELETE_PANEL,
+            "add_cover_action": DOCK_ADD_COVER,
             "reorder_pages_action": DOCK_REORDER_PAGES,
             "bubble_line_action": DOCK_BUBBLE_LINE, "bubbled": frozenset(bubbled),
             "new_bubble_action": DOCK_NEW_BUBBLE,
@@ -5833,6 +5843,7 @@ def _add_dock_callbacks(plugin):
         (DOCK_DELETE_PAGE, _dock_page_menu, "delete", True),
         (DOCK_ADD_PANEL, _dock_panel_menu, "add", True),
         (DOCK_DELETE_PANEL, _dock_panel_menu, "delete", True),
+        (DOCK_ADD_COVER, _dock_panel_menu, "cover", True),
         (DOCK_REORDER_PAGES, _dock_page_menu, "reorder", True),
         (DOCK_BUBBLE_LINE, _dock_bubble, "line", True),
         (DOCK_BUBBLE_ITEM, _dock_bubble, "template", True),

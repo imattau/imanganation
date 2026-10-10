@@ -119,7 +119,8 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
                 reload_script_action: str = "",
                 load_script_action: str = "",
                 add_panel_action: str = "",
-                delete_panel_action: str = "") -> dict[str, str]:
+                delete_panel_action: str = "",
+                add_cover_action: str = "") -> dict[str, str]:
     """Build generic host content and stable selections from a project manifest.
 
     The Context (inspector) rows are editable fields; ``open_page_action``, a dock
@@ -145,7 +146,9 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
     Script dock is a plain list: no menus). ``add_panel_action`` puts "Add panel…" on the
     Script panels heading and "Add panel to this page…" on pages and panels (the
     dock procedure takes ``<page or panel id>``, or nothing from the heading), and
-    ``delete_panel_action`` "Delete panel…" on panels added by hand."""
+    ``delete_panel_action`` "Delete panel…" on panels added by hand. ``add_cover_action``
+    adds "Add cover…" there while the project has no cover (and the cover, a single
+    picture, gets no "Add panel")."""
     panels = manifest.get("panels", [])
     pages = manifest.get("pages", [])
     page_by_id = {page["id"]: page for page in pages}
@@ -208,16 +211,22 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
     project_rows.append("# Pages")
     for page in pages:
         page_label = _label(page.get("label")) or "Page"
+        is_cover = page.get("cover") or page_label.strip().casefold() == "cover"
         project_rows.append(f"{page['id']}\t{page_label} · {page_progress(page)}"
-                            + _menu((add_panel_action, "Add panel to this page…"),
+                            + _menu(("" if is_cover else add_panel_action,
+                                     "Add panel to this page…"),
                                     (delete_page_action, "Delete page…")))
-    project_rows.append("# Script panels" + _menu((add_panel_action, "Add panel…")))
+    has_cover = any(p.get("cover") and p.get("status") != "orphaned" for p in panels)
+    project_rows.append("# Script panels"
+                        + _menu((add_panel_action, "Add panel…"),
+                                ("" if has_cover else add_cover_action, "Add cover…")))
     for panel in panels:
         if panel.get("status") == "orphaned":
             continue
         project_rows.append(
             f"{panel['id']}\t{_panel_label(panel)}"
-            + _menu((add_panel_action, "Add panel to this page…"),
+            + _menu(("" if panel.get("cover") else add_panel_action,
+                     "Add panel to this page…"),
                     (delete_panel_action if panel.get("manual") else "",
                      "Delete panel…")))
     orphaned = [panel for panel in panels if panel.get("status") == "orphaned"]
