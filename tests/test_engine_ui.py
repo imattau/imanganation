@@ -81,3 +81,22 @@ def test_a_projects_look_travels_with_its_jobs_and_designs():
     assert "style" not in project["render"]  # the default look is no look of its own
     assert engine_ui.style_note({"summary": "Soft.", "measured": "shows in 9/10"}) == (
         "Soft. Measured: shows in 9/10")
+
+
+def test_the_adult_content_flag_is_stored_and_sent_without_choosing_an_engine():
+    schema = json.loads((REPO_ROOT / "docs/project-container.schema.json").read_text())
+    project = {"id": "prj_abc123", "title": "t", "reading_order": "rtl",
+               "created": "2026-10-07T00:00:00Z", "modified": "2026-10-07T00:00:00Z"}
+    manifest = {"project": project}
+    engine_ui.set_project_nsfw(manifest, False)
+    assert "render" not in project and engine_ui.job_options(manifest) == {}
+    engine_ui.set_project_nsfw(manifest, True)
+    style = {"preset": "default", "text": "", "nsfw": True}
+    assert project["render"] == {"style": style}
+    assert engine_ui.job_options(manifest) == {"style": style}
+    assert engine_ui.design_options(manifest) == {"style": style}
+    jsonschema.validate(project, schema["properties"]["project"])
+    engine_ui.set_project_render(manifest, "z_anime", False, engine_ui.project_style(manifest))
+    assert project["render"]["style"] == style  # the engine dialog keeps the flag
+    engine_ui.set_project_nsfw(manifest, False)
+    assert "nsfw" not in project["render"].get("style", {})

@@ -85,3 +85,14 @@ def test_a_looks_negative_reaches_character_designs(tmp_path):
     negatives = [n["inputs"].get("text", "") for n in graph.values()
                  if n.get("class_type") == "CLIPTextEncode"]
     assert any("tentacles" in text for text in negatives)
+
+
+def test_nsfw_is_in_every_negative_unless_the_author_allows_it():
+    for options in (None, {}, {"preset": "retro_90s"}, {"preset": "default", "nsfw": False}):
+        style = load_style(options)
+        assert "nsfw" in style["negative"].split(", ") and style["nsfw"] is False
+        assert "nsfw" in style["extra_negative"].split(", ")  # character designs too
+    allowed = load_style({"preset": "retro_90s", "nsfw": True})
+    assert "nsfw" not in allowed["negative"] and allowed["nsfw"] is True
+    assert "nsfw" not in allowed["extra_negative"]
+    assert "nsfw" not in allowed["prompt_prefix"]  # allowed, never requested

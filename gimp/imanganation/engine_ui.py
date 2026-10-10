@@ -32,15 +32,20 @@ def project_render(manifest: dict[str, Any] | None) -> dict[str, Any]:
     return {**DEFAULT, **{k: v for k, v in chosen.items() if k in DEFAULT}}
 
 
-def project_style(manifest: dict[str, Any] | None) -> dict[str, str]:
-    """The project's look: ``{"preset", "text"}`` (the default look when unset)."""
+def project_style(manifest: dict[str, Any] | None) -> dict[str, Any]:
+    """The project's look: ``{"preset", "text"}`` (the default look when unset), plus
+    ``"nsfw": True`` when the author allowed adult content (absent = not allowed)."""
     chosen = (((manifest or {}).get("project") or {}).get("render") or {}).get("style")
-    return {**DEFAULT_STYLE, **{k: str(v) for k, v in (chosen or {}).items()
-                                if k in DEFAULT_STYLE}}
+    style = {**DEFAULT_STYLE, **{k: str(v) for k, v in (chosen or {}).items()
+                                 if k in DEFAULT_STYLE}}
+    if (chosen or {}).get("nsfw") is True:
+        style["nsfw"] = True
+    return style
 
 
-def is_default_style(style: dict[str, str]) -> bool:
-    return style.get("preset", "default") == "default" and not style.get("text", "").strip()
+def is_default_style(style: dict[str, Any]) -> bool:
+    return (style.get("preset", "default") == "default" and not style.get("text", "").strip()
+            and not style.get("nsfw"))
 
 
 def set_project_render(manifest: dict[str, Any], engine: str, face_pass: bool,
@@ -48,10 +53,26 @@ def set_project_render(manifest: dict[str, Any], engine: str, face_pass: bool,
     render = {"engine": engine, "face_pass": bool(face_pass)}
     style = style if style is not None else project_style(manifest)
     style = {"preset": style.get("preset") or "default",
-             "text": " ".join(style.get("text", "").split())}
+             "text": " ".join(style.get("text", "").split()),
+             **({"nsfw": True} if style.get("nsfw") else {})}
     if not is_default_style(style):
         render["style"] = style
     manifest["project"]["render"] = render
+
+
+def set_project_nsfw(manifest: dict[str, Any], nsfw: bool) -> None:
+    """Record the adult-content flag on a new project without choosing an engine: its
+    renders keep the engine's own settings, but send the flag with the style."""
+    style = {**project_style(manifest), **({"nsfw": True} if nsfw else {})}
+    if not nsfw:
+        style.pop("nsfw", None)
+    render = manifest["project"].setdefault("render", {})
+    if is_default_style(style):
+        render.pop("style", None)
+        if not render:
+            del manifest["project"]["render"]
+    else:
+        render["style"] = style
 
 
 def style_options(manifest: dict[str, Any] | None) -> dict[str, Any]:
@@ -65,7 +86,7 @@ def design_options(manifest: dict[str, Any] | None) -> dict[str, Any]:
     """What a character or location design sends: the project's look, and its render
     engine when it chose one, so designs are drawn by the model the panels use."""
     chosen = ((manifest or {}).get("project") or {}).get("render")
-    engine = {"engine": project_render(manifest)["engine"]} if chosen else {}
+    engine = {"engine": project_render(manifest)["engine"]} if chosen and "engine" in chosen else {}
     return {**engine, **style_options(manifest)}
 
 
@@ -73,6 +94,8 @@ def job_options(manifest: dict[str, Any] | None) -> dict[str, Any]:
     """What a render job sends: nothing for a project that never chose (the engine's
     own settings apply), else its engine and face pass, and its look if it has one."""
     chosen = ((manifest or {}).get("project") or {}).get("render")
+    if chosen and "engine" not in chosen:  # only a look (e.g. the adult-content flag)
+        return style_options(manifest)
     return {**project_render(manifest), **style_options(manifest)} if chosen else {}
 
 

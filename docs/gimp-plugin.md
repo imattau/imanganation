@@ -248,15 +248,22 @@ page placement metadata are still being migrated. Image procedures are grouped u
   selection the take is pixel-identical. **Characters** (comma-separated, optional)
   names who is in the selection, so their faces stay on-model; with several, each
   covers their side of the patch in the project's reading order.
-- **Develop Panel in Stages…**: start with a rendered panel, select the panel (or its
-  group), then select the area to develop and describe one change. The engine repaints
-  that area from the latest complete take and returns both the full updated take and a
-  transparent patch. The patch is added above the previous work as an editable layer;
-  the previous layers stay visible. Repeat for each change, selecting the panel group
-  and a new area each time. Accepted prompts, masks, seeds, source takes, and outputs
-  are recorded on each layer and in project take history, so the XCF can be saved and
-  reopened mid-process. Use ordinary **Inpaint Selection…** when you want to replace
-  the visible take instead of keeping a staged layer.
+- **Develop Panel in Stages…**: start with a rendered panel, select the panel or its
+  group, then run this command for each development pass. Its guided dialog suggests
+  the next phase and explains what to focus on and select: **Panel composition →
+  Rough character blocking → Background and perspective → Acting, interaction, and
+  props → Linework and cleanup → Black shapes and shadow design → Effects and final
+  polish**. This follows the manga page from readable thumbnail and acting through
+  cleanup and finish. Choose a different phase to skip ahead or revisit an earlier one.
+  Make a selection around that phase's work, describe the change, and optionally name
+  the characters in the area to use their project references. Each result is added as
+  a separate editable patch layer above the prior artwork; the complete updated take
+  becomes the source for the next pass. Prompts, phases, masks, seeds, source takes,
+  and outputs are recorded on the layers and in project take history, so the XCF can
+  be saved and reopened mid-process. Use existing **Create Screentone…** and Bubble
+  tools for traditional tones and lettering after the visual stages. Use ordinary
+  **Inpaint Selection…** when you want to replace the visible take instead of keeping
+  a staged layer.
 - **Set Character Reference from Layer…**: select the layer that shows a character
   (optionally drag a selection around them) and type their name or alias. The region
   is grown to a square around its centre on white, with layer masks applied, capped at

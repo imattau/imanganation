@@ -31,6 +31,8 @@ class StyleOptions(BaseModel):
 
     preset: str = Field(default="default", max_length=40)
     text: str = Field(default="", max_length=300, description="The author's own words")
+    nsfw: bool = Field(default=False, description="The author allows adult content; "
+                       "unflagged, 'nsfw' is added to every negative prompt")
 
     @model_validator(mode="after")
     def _known(self) -> StyleOptions:

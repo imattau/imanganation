@@ -60,3 +60,17 @@ not measured: render a few panels before committing a chapter to it.
 - Measure a look: `manganation eval run config/eval/rooftop.yaml --style retro_90s`. The
   report's `summary.style` is the share of renders whose `check` tags the tagger saw,
   kept apart from the accuracy score. Change a preset only with a run like that.
+
+## Adult content (NSFW)
+
+An author opts in per project: both New Project dialogs (and the Render Engine dialog) have
+**Allow adult (NSFW) content in renders**. It is stored as `project.render.style.nsfw` and sent
+as `style.nsfw` with renders, inpaints, refines and character/location designs.
+
+- **Not flagged (the default):** `nsfw` is added to every negative prompt (`styles.apply`,
+  including `extra_negative` for character designs).
+- **Flagged:** the guard is dropped. Nothing adult is added to the positive prompt; the
+  story and style text still decide what is drawn. Illustrious and NoobAI render adult
+  content far better than Animagine, so pick the checkpoint with that in mind.
+- Prompts that bypass the style (location plates and some inpaint negatives) have their own
+  fixed negatives and are unchanged.

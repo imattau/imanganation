@@ -15,6 +15,7 @@ import yaml
 from manganation.config import CONFIG_DIR
 
 DEFAULT_PRESET = "default"
+NSFW_NEGATIVE = "nsfw"
 
 
 class StyleError(ValueError):
@@ -68,10 +69,14 @@ def apply(base: dict, options: dict | None) -> dict:
     style = dict(base)
     prefix = _join(base.get("prompt_prefix", ""), tags)
     style["prompt_prefix"] = f"{prefix}, " if prefix else ""
-    style["negative"] = _join(base.get("negative", ""), chosen.get("negative", ""))
+    # Adult content is the author's explicit choice per project: unflagged, "nsfw" is in
+    # every negative (panels, designs, refiner, inpaint); flagged, the style adds nothing.
+    guard = "" if options.get("nsfw") else NSFW_NEGATIVE
+    style["negative"] = _join(base.get("negative", ""), chosen.get("negative", ""), guard)
     style["prose"] = prose
     style["tags"] = [t.strip() for t in tags.split(",") if t.strip()]
-    style["extra_negative"] = _join(chosen.get("negative", ""))  # for character designs
+    style["extra_negative"] = _join(chosen.get("negative", ""), guard)  # for character designs
     style["id"] = chosen["id"]
     style["text"] = text
+    style["nsfw"] = bool(options.get("nsfw"))
     return style

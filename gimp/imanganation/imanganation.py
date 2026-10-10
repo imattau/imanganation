@@ -122,6 +122,30 @@ PROC_SETREF = "plug-in-imanganation-set-character-reference"
 PROC_SET_LOCATION_REF = "plug-in-imanganation-set-location-reference"
 PROC_INPAINT = "plug-in-imanganation-inpaint-selection"
 PROC_STAGE = "plug-in-imanganation-develop-panel-stage"
+DEVELOPMENT_PHASES = (
+    ("composition", "Panel composition",
+     "Thumbnail the read: camera, silhouette, gesture, and focal point. Select most "
+     "or all of the frame for a broad change; use a smaller selection for one pose."),
+    ("blocking", "Rough character blocking",
+     "Establish who stands where, their scale, pose, and eyeline before polishing detail. "
+     "Select the character's area. Name them to use their project reference."),
+    ("setting", "Background and perspective",
+     "Build the location around the action: foreground, midground, background, depth, "
+     "time of day, and atmosphere. Select the background area to work on."),
+    ("action", "Acting, interaction, and props",
+     "Clarify the beat with gestures, contact, overlapping poses, hands, and shared props. "
+     "Select the whole interaction and name everyone involved."),
+    ("linework", "Linework and cleanup",
+     "Tighten the focal contours, face, hands, costume edges, or important prop. Keep "
+     "the selection focused on the shape to clean up and describe the line quality."),
+    ("shadows", "Black shapes and shadow design",
+     "Clarify form and mood with cast shadows, dark masses, rim light, or reflected light. "
+     "Select the surfaces to adjust and name the light source."),
+    ("effects", "Effects and final polish",
+     "Add weather, impact, motion, or atmosphere where it helps the story beat. Keep "
+     "effects on their own focused passes. After this, use GIMP's screentone and bubble "
+     "tools for tones and lettering."),
+)
 PROC_STATUS = "plug-in-imanganation-engine-status"
 PROC_PROJECT_DOCKS = "plug-in-imanganation-project-docks"
 PROC_CLOSE_PROJECT = "plug-in-imanganation-close-project"
@@ -284,6 +308,119 @@ def _dialog(procedure, config, name):
     ok = dialog.run()
     dialog.destroy()
     return ok
+
+
+def _suggested_development_phase(meta):
+    """Advance through manga panel development, holding at the last phase."""
+    history = meta.get("stage_history") or []
+    previous = (history[-1].get("phase") if history else
+                (meta.get("stage") or {}).get("phase"))
+    ids = [phase[0] for phase in DEVELOPMENT_PHASES]
+    if previous not in ids:
+        return ids[0]
+    return ids[min(ids.index(previous) + 1, len(ids) - 1)]
+
+
+def _development_stage_dialog(meta):
+    """A guided phase chooser with concrete drawing/selection advice per stage."""
+    dialog = Gtk.Dialog(title="Develop Panel in Stages", flags=Gtk.DialogFlags.MODAL)
+    dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+                       "Generate Stage…", Gtk.ResponseType.OK)
+    dialog.set_default_size(560, 500)
+    content = dialog.get_content_area()
+    content.set_spacing(8)
+    content.set_margin_top(12)
+    content.set_margin_bottom(12)
+    content.set_margin_start(12)
+    content.set_margin_end(12)
+
+    chooser = Gtk.ComboBoxText()
+    for ident, title, _guide in DEVELOPMENT_PHASES:
+        chooser.append(ident, title)
+    chooser.set_active_id(_suggested_development_phase(meta))
+    completed = {item.get("phase") for item in (meta.get("stage_history") or [])}
+    if not completed and meta.get("stage"):
+        completed.add(meta["stage"].get("phase"))
+    completed_names = [title for ident, title, _hint in DEVELOPMENT_PHASES
+                       if ident in completed]
+    progress = Gtk.Label(label=("Completed: " + " → ".join(completed_names)
+                                if completed_names else
+                                "Start from the rendered panel. Phases can be skipped "
+                                "or repeated."))
+    progress.set_xalign(0)
+    progress.set_line_wrap(True)
+    guide = Gtk.Label()
+    guide.set_xalign(0)
+    guide.set_line_wrap(True)
+    guide.set_max_width_chars(78)
+
+    prompt = Gtk.TextView()
+    prompt.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+    prompt.set_size_request(-1, 110)
+    prompt.get_buffer().set_text("")
+    prompt_scroll = Gtk.ScrolledWindow()
+    prompt_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+    prompt_scroll.set_min_content_height(110)
+    prompt_scroll.add(prompt)
+
+    existing = meta.get("characters") or []
+    if isinstance(existing, str):
+        character_names = _name_list(existing)
+    else:
+        character_names = [c.get("name", "") if isinstance(c, dict) else str(c)
+                           for c in existing]
+    characters = Gtk.Entry()
+    characters.set_placeholder_text("Character names for reference guidance; blank = none")
+
+    strength = Gtk.SpinButton.new_with_range(0.1, 1.0, 0.05)
+    strength.set_value(0.85)
+    grow = Gtk.SpinButton.new_with_range(0, 256, 1)
+    grow.set_value(8)
+
+    grid = Gtk.Grid(column_spacing=12, row_spacing=8)
+    grid.attach(progress, 0, 0, 2, 1)
+    grid.attach(Gtk.Label(label="Development phase"), 0, 1, 1, 1)
+    grid.attach(chooser, 1, 1, 1, 1)
+    grid.attach(Gtk.Label(label="Focus"), 0, 2, 1, 1)
+    grid.attach(guide, 1, 2, 1, 1)
+    grid.attach(Gtk.Label(label="What should change?"), 0, 3, 1, 1)
+    grid.attach(prompt_scroll, 1, 3, 1, 1)
+    grid.attach(Gtk.Label(label="Characters in the selected area"), 0, 4, 1, 1)
+    grid.attach(characters, 1, 4, 1, 1)
+    grid.attach(Gtk.Label(label="Change strength"), 0, 5, 1, 1)
+    grid.attach(strength, 1, 5, 1, 1)
+    grid.attach(Gtk.Label(label="Mask blend (px)"), 0, 6, 1, 1)
+    grid.attach(grow, 1, 6, 1, 1)
+    content.add(grid)
+
+    def update_guide(_combo):
+        selected = chooser.get_active_id()
+        phase = next((item for item in DEVELOPMENT_PHASES if item[0] == selected),
+                     DEVELOPMENT_PHASES[0])
+        guide.set_text(phase[2])
+        # Character staging and interaction benefit from identity references by default;
+        # the artist can clear or edit the list for any phase.
+        if selected in {"blocking", "action", "linework"} and character_names:
+            if not characters.get_text().strip():
+                characters.set_text(", ".join(character_names))
+
+    chooser.connect("changed", update_guide)
+    update_guide(chooser)
+    dialog.show_all()
+    response = dialog.run()
+    if response != Gtk.ResponseType.OK:
+        dialog.destroy()
+        return None
+    start, end = prompt.get_buffer().get_bounds()
+    values = {
+        "phase": chooser.get_active_id() or DEVELOPMENT_PHASES[0][0],
+        "prompt": prompt.get_buffer().get_text(start, end, True).strip(),
+        "characters": characters.get_text().strip(),
+        "denoise": strength.get_value(),
+        "grow": grow.get_value_as_int(),
+    }
+    dialog.destroy()
+    return values
 
 
 def _find_template(image):
@@ -1235,8 +1372,18 @@ def inpaint_selection(procedure, run_mode, image, drawables, config, data, *, st
     if not source.is_file():
         return _error(procedure, f"This take's file is missing: {source}")
 
-    if run_mode == Gimp.RunMode.INTERACTIVE and not _dialog(
-            procedure, config, PROC_STAGE if staged else PROC_INPAINT):
+    stage_phase = _suggested_development_phase(meta) if staged else None
+    if run_mode == Gimp.RunMode.INTERACTIVE and staged:
+        guided = _development_stage_dialog(meta)
+        if guided is None:
+            return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
+        stage_phase = guided["phase"]
+        config.set_property("prompt", guided["prompt"])
+        config.set_property("characters", guided["characters"])
+        config.set_property("denoise", guided["denoise"])
+        config.set_property("grow", guided["grow"])
+    elif run_mode == Gimp.RunMode.INTERACTIVE and not _dialog(
+            procedure, config, PROC_INPAINT):
         return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
     prompt = (config.get_property("prompt") or "").strip()
     if not prompt:
@@ -1290,14 +1437,21 @@ def inpaint_selection(procedure, run_mode, image, drawables, config, data, *, st
         stage_number = int((meta.get("stage") or {}).get("step", 0)) + 1
         stage_meta = {
             "step": stage_number, "prompt": prompt,
+            "phase": stage_phase,
             "source": str(source), "take": str(path),
             "mask": mask_ref, "seed": result.get("seed"),
             "denoise": result.get("denoise"),
             "grow_mask_by": result.get("grow_mask_by"),
             "overlay": str(overlay_path),
         }
+        stage_history = list(meta.get("stage_history") or [])
+        if not stage_history and meta.get("stage"):
+            previous = meta["stage"]
+            stage_history.append({k: previous.get(k) for k in ("step", "phase", "prompt")})
+        stage_history.append({"step": stage_number, "phase": stage_phase,
+                              "prompt": prompt})
         stored = dict(meta, file=str(overlay_path), stage_source=str(path),
-                      stage=stage_meta,
+                      stage=stage_meta, stage_history=stage_history,
                       inpainted={k: result.get(k) for k in
                                  ("prompt", "source", "mask", "denoise",
                                   "grow_mask_by", "seed")})
@@ -1339,8 +1493,14 @@ def inpaint_selection(procedure, run_mode, image, drawables, config, data, *, st
         new = _swap_in(image, layer, str(path), stored, f"{_base_name(layer)} inpaint",
                        fit="layer", take_ref=take_ref)
     if staged:
-        Gimp.message(f"Added stage {stage_number} to panel {seq:03d}. The accepted edit "
-                     "is a separate layer; the full result is the source for the next stage.")
+        current_title = next((title for ident, title, _hint in DEVELOPMENT_PHASES
+                              if ident == stage_phase), "Development")
+        next_phase = _suggested_development_phase({"stage": {"phase": stage_phase}})
+        next_title = next((title for ident, title, _hint in DEVELOPMENT_PHASES
+                           if ident == next_phase), current_title)
+        Gimp.message(f"Added stage {stage_number} · {current_title} to panel {seq:03d}. "
+                     f"The edit is a separate layer. Suggested next: {next_title}. "
+                     "You can choose another phase or repeat a phase any time.")
     else:
         Gimp.message(f"Inpainted panel {seq:03d} ({Path(result['path']).name}); outside the "
                      f"selection the take is unchanged. Previous take kept, hidden.")
@@ -3391,6 +3551,8 @@ def _choose_new_project():
     size.pack_start(Gtk.Label(label="×"), False, False, 0)
     size.pack_start(height, False, False, 0)
     design = Gtk.CheckButton(label="Design the cast now (uses the engine)", active=True)
+    nsfw = Gtk.CheckButton(label="Allow adult (NSFW) content in renders", active=False)
+    nsfw.set_tooltip_text("Off: 'nsfw' is added to every negative prompt so renders stay safe for work. On: the model may draw adult content when the story asks.")
     hint = Gtk.Label(label="The renders need the project inside the projects folder.",
                      xalign=0.0)
     hint.get_style_context().add_class("dim-label")
@@ -3407,6 +3569,7 @@ def _choose_new_project():
         grid.attach(widget, 1, row, 1, 1)
     grid.attach(hint, 1, 4, 1, 1)
     grid.attach(design, 1, 5, 1, 1)
+    grid.attach(nsfw, 1, 6, 1, 1)
     dialog.get_content_area().add(grid)
     dialog.show_all()
     try:
@@ -3415,7 +3578,7 @@ def _choose_new_project():
                        "title": title.get_text().strip(),
                        "parent": Path(folder.get_filename() or Path.home()),
                        "page_size": (width.get_value_as_int(), height.get_value_as_int()),
-                       "design": design.get_active()}
+                       "design": design.get_active(), "nsfw": nsfw.get_active()}
             problem = (None if options["script_path"].is_file() else "Choose a script file.")
             problem = problem or (None if options["title"] else "Give the project a title.")
             target = options["parent"] / f"{_slug(options['title'])}.imanga"
@@ -3448,6 +3611,8 @@ def _choose_manual_project():
         projects.mkdir(parents=True, exist_ok=True)
     folder.set_current_folder(str(projects if projects.is_dir() else Path.home()))
 
+    nsfw = Gtk.CheckButton(label="Allow adult (NSFW) content in renders", active=False)
+    nsfw.set_tooltip_text("Off: 'nsfw' is added to every negative prompt so renders stay safe for work. On: the model may draw adult content when the story asks.")
     reading_order = Gtk.ComboBoxText()
     reading_order.append("rtl", "Right to left (manga)")
     reading_order.append("ltr", "Left to right")
@@ -3554,7 +3719,8 @@ def _choose_manual_project():
             ("Chapter", chapter), ("Reading order", reading_order),
             ("Default color", color_mode), ("Panels to start", panel_count),
             ("", create_page), ("Page format", page_format),
-            ("First page size", size_row), ("Resolution", resolution_row))
+            ("First page size", size_row), ("Resolution", resolution_row),
+            ("", nsfw))
     for row, (label, widget) in enumerate(rows):
         if label:
             grid.attach(Gtk.Label(label=label, xalign=0.0), 0, row, 1, 1)
@@ -3577,6 +3743,7 @@ def _choose_manual_project():
                 "page_size": (width.get_value_as_int(), height.get_value_as_int()),
                 "resolution": resolution.get_value_as_int(),
                 "page_format": page_format.get_active_id() or "custom",
+                "nsfw": nsfw.get_active(),
             }
             parent = options["parent"]
             problem = None if options["title"] else "Enter a project title."
@@ -3598,7 +3765,7 @@ def _choose_manual_project():
 
 def _create_manual_project(title, parent, chapter, reading_order,
                            default_color_mode, starter_panels, create_page, page_size,
-                           resolution, page_format, preset):
+                           resolution, page_format, preset, nsfw=False):
     """Write a schema-shaped manual project, optionally with a ready-to-draw page."""
     if new_project_document is None:
         raise RuntimeError("The plug-in install is missing project_store.py")
@@ -3610,6 +3777,8 @@ def _create_manual_project(title, parent, chapter, reading_order,
             default_color_mode=default_color_mode, chapter=chapter,
             starter_panels=starter_panels, page_size=page_size,
             resolution=resolution, page_format=page_format, preset=preset)
+        if nsfw and engine_ui is not None:
+            engine_ui.set_project_nsfw(manifest, True)
         save_project(root, manifest)
         first_page = (_create_project_page(root, manifest, *page_size,
                                            resolution=resolution)
@@ -3780,7 +3949,7 @@ def _reload_script(root, choose=False):
     return True
 
 
-def _create_project_from_script(script_path, title, parent, page_size, design):
+def _create_project_from_script(script_path, title, parent, page_size, design, nsfw=False):
     """Build a project from a script: panels, cast (with the script's descriptions),
     locations and one page document per script page; open it, then queue a design
     sheet for each described character."""
@@ -3797,6 +3966,8 @@ def _create_project_from_script(script_path, title, parent, page_size, design):
         manifest = project_from_script(parsed, title=title,
                                        script_file=f"script/script{suffix}",
                                        script_text=text, script_format=script_format)
+        if nsfw and engine_ui is not None:
+            engine_ui.set_project_nsfw(manifest, True)
         save_project(root, manifest)
         for number in dict.fromkeys(p["label"]["page"] for p in manifest["panels"]):
             _create_project_page(root, manifest, *page_size, number=number or None,
@@ -4566,6 +4737,9 @@ def _show_engine_dialog():
     style_grid.attach(style_combo, 1, 0, 1, 1)
     style_grid.attach(Gtk.Label(label="Also", xalign=0.0), 0, 1, 1, 1)
     style_grid.attach(style_text, 1, 1, 1, 1)
+    style_nsfw = Gtk.CheckButton(label="Allow adult (NSFW) content in renders", active=bool(current_style.get("nsfw")))
+    style_nsfw.set_tooltip_text("Off: 'nsfw' is added to every negative prompt so renders stay safe for work. On: the model may draw adult content when the story asks.")
+    style_grid.attach(style_nsfw, 1, 2, 1, 1)
     box.pack_start(style_grid, False, False, 0)
     style_note = Gtk.Label(xalign=0.0, wrap=True, max_width_chars=76)
     style_note.get_style_context().add_class("dim-label")
@@ -4590,7 +4764,8 @@ def _show_engine_dialog():
         face_on = engine_ui.FACE_PASS in rows and rows[engine_ui.FACE_PASS]["button"].get_active()
         return {"engine": engine, "face_pass": face_on,
                 "style": {"preset": style_combo.get_active_id() or "default",
-                          "text": " ".join(style_text.get_text().split())}}
+                          "text": " ".join(style_text.get_text().split()),
+                          **({"nsfw": True} if style_nsfw.get_active() else {})}}
 
     def update_warning():
         now = _ENGINE_DIALOG.get("report") or report
@@ -6087,10 +6262,11 @@ class Imanganation(Gimp.PlugIn):
                 proc.set_menu_label("Develop Panel in _Stages...")
                 proc.set_documentation(
                     "Add a manual AI development stage to the selected panel",
-                    "Use the current selection and prompt to repaint part of the latest "
-                    "panel take. Add the accepted patch as a separate editable layer; "
-                    "select the panel group and run again to continue. Start with "
-                    "Render Panel into Frame. The selection remains unchanged.", name)
+                    "Follow the suggested manga-development phases from composition "
+                    "and rough character blocking through background, acting, linework, "
+                    "shadows, and effects. Select the area, describe the change, and add "
+                    "the result as a separate editable layer. Choose another phase to "
+                    "skip or revisit. Start with Render Panel into Frame.", name)
             else:
                 proc.set_menu_label("_Inpaint Selection...")
                 proc.set_documentation(
