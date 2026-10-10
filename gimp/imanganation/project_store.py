@@ -406,12 +406,12 @@ def format_expressions(expressions: dict[str, str]) -> str:
 
 
 def apply_field_edit(document: dict[str, Any], key: str, value: str,
-                     character_id=None, location_id=None) -> str:
+                     character_id=None, location_id=None, prop_id=None) -> str:
     """Apply one edited Context field to the loaded manifest (the caller saves it).
 
     ``key`` is ``<panel/page/character/location row id>.<field>``; ``value`` is the
     field's text, collapsed to one line. ``character_id`` maps a cast name to its row
-    id, ``location_id`` a location's. Returns the id of the edited row. Raises
+    id, ``location_id`` a location's and ``prop_id`` a prop's. Returns the id of the edited row. Raises
     ProjectFileError on a bad key or value.
     """
     row_id, _, field = key.rpartition(".")
@@ -431,6 +431,23 @@ def apply_field_edit(document: dict[str, Any], key: str, value: str,
                     cast.append({"name": name})
                     known[name.lower()] = name
             panel["characters"] = [{"name": n, "version": versions.get(n)} for n in names]
+        elif field == "props":
+            known = {prop_key(p["name"]): p["name"] for p in document.get("props", [])}
+            names = []
+            for part in value.split(","):
+                part = part.strip()
+                if not part:
+                    continue
+                name = known.get(prop_key(part), part)
+                if name not in names:
+                    names.append(name)
+                if prop_key(name) not in known:  # new to the story: add to its props
+                    document.setdefault("props", []).append({"name": name})
+                    known[prop_key(name)] = name
+            if names:
+                panel["props"] = names
+            else:
+                panel.pop("props", None)
         elif field == "expressions":
             expressions = {}
             for part in value.split(";"):
@@ -520,7 +537,65 @@ def apply_field_edit(document: dict[str, Any], key: str, value: str,
         else:
             location.pop("notes", None)
         return row_id
+    prop = next((p for p in document.get("props", [])
+                 if prop_id is not None and prop_id(p["name"]) == row_id), None)
+    if prop is not None:
+        if field != "notes":
+            raise ProjectFileError(f"props have no editable field {field!r}")
+        if value:
+            prop["notes"] = value
+        else:
+            prop.pop("notes", None)
+        return row_id
     raise ProjectFileError(f"{row_id} is no longer in the project")
+
+
+def prop_key(name: str) -> str:
+    """The engine's key for a prop (manganation/props.py): lower case, no leading
+    article. "The Red umbrella" -> "red umbrella"."""
+    return re.sub(r"^(?:the|a|an)\s+", "", " ".join(name.split()),
+                  flags=re.IGNORECASE).lower()
+
+
+def find_prop(document: dict[str, Any], name: str) -> dict[str, Any] | None:
+    key = prop_key(name)
+    return next((p for p in document.get("props", [])
+                 if prop_key(p.get("name", "")) == key), None)
+
+
+def panels_with_prop(document: dict[str, Any], name: str) -> list[dict[str, Any]]:
+    key = prop_key(name)
+    return [p for p in document["panels"]
+            if any(prop_key(n) == key for n in p.get("props", []))]
+
+
+def add_prop(document: dict[str, Any], name: str, notes: str = "") -> dict[str, Any]:
+    """Add a prop to the project's assets (the caller saves)."""
+    name = " ".join(name.split())
+    if not any(ch.isalnum() for ch in name):
+        raise ProjectFileError("a prop needs a name")
+    existing = find_prop(document, name)
+    if existing is not None:
+        raise ProjectFileError(f"{existing['name']} is already a prop")
+    prop = {"name": name, **({"notes": " ".join(notes.split())} if notes.strip() else {})}
+    document.setdefault("props", []).append(prop)
+    return prop
+
+
+def delete_prop(document: dict[str, Any], name: str) -> tuple[dict[str, Any], list[str]]:
+    """Remove a prop from the assets and from every panel that lists it. Returns the
+    removed entry and the ids of the panels that changed."""
+    prop = find_prop(document, name)
+    if prop is None:
+        raise ProjectFileError(f"{name} is not one of this project's props")
+    changed = []
+    for panel in panels_with_prop(document, name):
+        panel["props"] = [n for n in panel["props"] if prop_key(n) != prop_key(name)]
+        if not panel["props"]:
+            panel.pop("props")
+        changed.append(panel["id"])
+    document["props"].remove(prop)
+    return prop, changed
 
 
 _CONTINUED = re.compile(r"\s*[-—–:,]?\s*\(?\b(?:cont(?:'d|inued)?|contd)\.?\)?\s*$",
@@ -646,6 +721,7 @@ def _panel_from_item(item: dict[str, Any]) -> dict[str, Any]:
         "location": item.get("location", ""),
         "characters": [{"name": name, "version": None}
                        for name in item.get("characters", [])],
+        **({"props": list(item["props"])} if item.get("props") else {}),
         "action": item.get("action", ""),
         "camera": item.get("camera", ""),
         "expressions": dict(item.get("expressions") or {}),

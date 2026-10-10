@@ -11,10 +11,12 @@ from urllib.parse import quote
 try:  # Installed plug-in imports siblings as top-level modules.
     from layouts import page_layout_availability
     from project_store import _location_name, format_dialogue
+    from project_store import prop_key
     from project_store import location_key as _location_key
 except ImportError:  # Package import in tests and external tooling.
     from .layouts import page_layout_availability
     from .project_store import _location_name, format_dialogue
+    from .project_store import prop_key
     from .project_store import location_key as _location_key
 
 
@@ -83,6 +85,11 @@ def location_row_id(name: str) -> str:
     return "location:" + quote(name, safe="")
 
 
+def prop_row_id(name: str) -> str:
+    """A prop's row key; the engine finds its image by the object's name."""
+    return "prop:" + quote(name, safe="")
+
+
 def rgb_png(width: int, height: int, pixels: bytes) -> bytes | None:
     """Encode packed RGB8 pixels as a small standards-compliant PNG."""
     if width < 1 or height < 1 or len(pixels) != width * height * 3:
@@ -134,7 +141,10 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
                 design_variant_menu: str = "",
                 add_cover_page_action: str = "",
                 take_action: str = "",
-                generate_page_action: str = "") -> dict[str, str]:
+                generate_page_action: str = "",
+                new_prop_action: str = "", design_prop_menu: str = "",
+                delete_prop_menu: str = "",
+                design_prop_action: str = "") -> dict[str, str]:
     """Build generic host content and stable selections from a project manifest.
 
     The Context (inspector) rows are editable fields; ``open_page_action``, a dock
@@ -172,7 +182,10 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
     "Make active" button in Context (item ``<panel id>:<take id>``).
     ``generate_page_action`` (a no-item dock procedure) adds "Generate all N waiting
     panels" to a page's Context, and to a placed panel's, while panels with a frame on
-    that page have no render yet."""
+    that page have no render yet. Props mirror locations: ``new_prop_action`` on the Props
+    heading, ``design_prop_menu`` and ``delete_prop_menu`` on each prop's row and
+    ``design_prop_action`` a "Design prop" button in its Context (its notes are the
+    description)."""
     panels = manifest.get("panels", [])
     pages = manifest.get("pages", [])
     page_by_id = {page["id"]: page for page in pages}
@@ -181,10 +194,11 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
     character_by_id = {character_row_id(c["name"]): c for c in cast}
     locations = manifest.get("locations", [])
     location_by_id = {location_row_id(loc["name"]): loc for loc in locations}
+    prop_by_id = {prop_row_id(p["name"]): p for p in manifest.get("props", [])}
 
     def known(row_id):
         return any(row_id in rows for rows in (panel_by_id, page_by_id, character_by_id,
-                                               location_by_id))
+                                               location_by_id, prop_by_id))
 
     if not known(selected_id):
         selected_id = manifest.get("cursor", {}).get("next_panel")
@@ -268,7 +282,8 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
             project_rows.append(
                 f"{panel['id']}\t{_panel_label(panel)} · {count} take{'s' if count != 1 else ''}")
     props = manifest.get("props", [])
-    if cast or locations or props or new_character_action or new_location_action:
+    if (cast or locations or props or new_character_action or new_location_action
+            or new_prop_action):
         project_rows.append("# Assets")
         if cast or new_character_action:
             heading_menu = (f"\t!{new_character_action}:New character…"
@@ -297,9 +312,14 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
                 f"\t\t{location_row_id(location['name'])}\t"
                 f"{summary(location, 'Location')}{row_menu}"
                 for location in locations)
-        if props:
-            project_rows.append("\t# Props")
-            project_rows.extend(f"\t\t# {summary(prop, 'Prop')}" for prop in props)
+        if props or new_prop_action:
+            heading_menu = (f"\t!{new_prop_action}:New prop…" if new_prop_action else "")
+            row_menu = _menu((design_prop_menu, "Design prop"),
+                             (delete_prop_menu, "Delete prop…"))
+            project_rows.append(f"\t# Props{heading_menu}")
+            project_rows.extend(
+                f"\t\t{prop_row_id(prop['name'])}\t{summary(prop, 'Prop')}{row_menu}"
+                for prop in props)
 
     previews = previews or {}
     page_menu = f"\t!{delete_page_action}:Delete page…" if delete_page_action else ""
@@ -423,6 +443,7 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
         inspector_rows.extend([
             "# Scene",
             _field(pid, "location", "Location", _place(panel)),
+            _field(pid, "props", "Props", ", ".join(_label(n) for n in panel.get("props", []))),
             _field(pid, "camera", "Shot", panel.get("camera")),
             _field(pid, "aspect_ratio", "Aspect ratio", panel.get("aspect_ratio")),
             _field(pid, "size", "Frame size", panel.get("size")),
@@ -597,6 +618,20 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
         ])
         if design_location_action:
             inspector_rows.append(f"!{design_location_action}\tDesign location")
+    elif selected_id in prop_by_id:
+        prop = prop_by_id[selected_id]
+        key = prop_key(prop.get("name", ""))
+        used = [p for p in panels if p.get("status") != "orphaned"
+                and any(prop_key(n) == key for n in p.get("props", []))]
+        inspector_rows.extend([
+            "# Prop",
+            f"Name\t{_label(prop.get('name'))}",
+            f"Panels showing it\t{len(used)}",
+            "# Description",
+            _field(selected_id, "notes", "Notes", prop.get("notes")),
+        ])
+        if design_prop_action:
+            inspector_rows.append(f"!{design_prop_action}\tDesign prop")
     else:
         inspector_rows.extend(["# Project", f"Title\t{title}",
                                f"Panels\t{len(panels)}", f"Pages\t{len(pages)}"])
@@ -658,7 +693,8 @@ def build_gallery(manifest: dict[str, Any], selected_id: str | None,
 
     ``references`` carries what only the engine knows: ``{"versions": {version: path},
     "default": version}`` for a character, ``{"image": path}`` for a location.
-    ``reference_menu`` is the right-click menu of a character's reference tiles, as
+    ``references`` for a prop is ``{"images": {file name: path}, "current": file name}``.
+    ``reference_menu`` is the right-click menu of a character's (or prop's) image tiles, as
     (dock procedure, label) pairs; each procedure gets the tile id ``ref:<version>``."""
     references = references or {}
     panel = next((p for p in manifest.get("panels", []) if p["id"] == selected_id), None)
@@ -703,4 +739,17 @@ def build_gallery(manifest: dict[str, Any], selected_id: str | None,
         else:
             rows.append("Not designed yet")
         return "\n".join(rows)
-    return "# Gallery\nSelect a panel, character or location to see its pictures"
+    prop = next((p for p in manifest.get("props", [])
+                 if prop_row_id(p["name"]) == selected_id), None)
+    if prop is not None:
+        rows = [f"# Images · {_label(prop['name'])}"
+                + (" (right-click for more)" if reference_menu else "")]
+        menu = _menu(*reference_menu)
+        current = references.get("current")
+        for name, path in (references.get("images") or {}).items():
+            rows.append(f"img:{name}\t{'✓ ' if name == current else ''}{_label(name)}"
+                        + (f"\t{path}" if path else "") + menu)
+        if len(rows) == 1:
+            rows.append("Not designed yet")
+        return "\n".join(rows)
+    return "# Gallery\nSelect a panel, character, location or prop to see its pictures"

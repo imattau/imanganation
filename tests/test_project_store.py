@@ -557,3 +557,55 @@ def test_panels_follow_a_renamed_or_deleted_reference_version():
     assert panel["characters"][0]["version"] == "beach"
     assert retarget_character_version(document, name, "beach", None) == [panel["id"]]
     assert panel["characters"][0]["version"] is None
+
+
+def _prop_row(name):
+    return "prop:" + name
+
+
+def test_props_are_added_edited_and_removed_with_their_panels():
+    from gimp.imanganation.project_store import (
+        add_prop,
+        apply_field_edit,
+        delete_prop,
+        find_prop,
+        panels_with_prop,
+    )
+
+    document = _script_project()
+    panel = document["panels"][0]
+    add_prop(document, "The Red Umbrella", " bright   red ")
+    assert find_prop(document, "red umbrella")["notes"] == "bright red"
+    with pytest.raises(ProjectFileError):
+        add_prop(document, "red UMBRELLA")
+    with pytest.raises(ProjectFileError):
+        add_prop(document, " — ")
+
+    # a panel's Props field: known names keep their spelling, new ones join the assets
+    apply_field_edit(document, f"{panel['id']}.props", "red umbrella, Katana, katana")
+    assert panel["props"] == ["The Red Umbrella", "Katana"]
+    assert find_prop(document, "katana") is not None
+    assert panels_with_prop(document, "THE red umbrella") == [panel]
+
+    edit = apply_field_edit(document, f"{_prop_row('Katana')}.notes", " old   blade ",
+                            None, None, _prop_row)
+    assert edit == "prop:Katana" and find_prop(document, "Katana")["notes"] == "old blade"
+    apply_field_edit(document, f"{_prop_row('Katana')}.notes", "", None, None, _prop_row)
+    assert "notes" not in find_prop(document, "Katana")
+
+    removed, changed = delete_prop(document, "the red umbrella")
+    assert removed["name"] == "The Red Umbrella" and changed == [panel["id"]]
+    assert panel["props"] == ["Katana"]
+    apply_field_edit(document, f"{panel['id']}.props", "")
+    assert "props" not in panel
+    with pytest.raises(ProjectFileError):
+        delete_prop(document, "nothing")
+
+
+def test_duplicating_a_panel_keeps_its_props():
+    from gimp.imanganation.project_store import duplicate_panel
+
+    document = _script_project()
+    source = document["panels"][0]
+    source["props"] = ["Katana"]
+    assert duplicate_panel(document, source["id"])["props"] == ["Katana"]

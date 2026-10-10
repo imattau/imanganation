@@ -6,7 +6,13 @@ import copy
 import json
 from pathlib import Path
 
-from gimp.imanganation.panel_ui import build_docks, character_row_id, location_row_id, rgb_png
+from gimp.imanganation.panel_ui import (
+    build_docks,
+    character_row_id,
+    location_row_id,
+    prop_row_id,
+    rgb_png,
+)
 
 EXAMPLE = json.loads((Path(__file__).resolve().parents[1] /
                       "docs/project-container.example.json").read_text())
@@ -112,8 +118,8 @@ def test_project_tree_groups_story_assets_and_shows_notes():
     assert "# Assets\n\t# Characters" in project_tree
     assert (f"\t# Locations\n\t\t{rooftop}\tSchool rooftop · Chain-link fence, late "
             "afternoon light") in project_tree  # selectable, like a character
-    assert "\t# Props\n\t\t# Akira's lunchbox" in project_tree
-    assert "asset:prop" not in project_tree
+    assert (f"\t# Props\n\t\t{prop_row_id(manifest['props'][0]['name'])}\t"
+            "Akira's lunchbox") in project_tree  # selectable, like a location
 
 
 def test_locations_heading_and_rows_carry_right_click_menus():
@@ -497,3 +503,37 @@ def test_reference_tiles_carry_a_right_click_menu():
                          (("open", "Open"), ("def", "Make default")))
     assert "right-click" in rows.splitlines()[0]
     assert "ref:base\t✓ base\t/p/base.png\t!open:Open|def:Make default" in rows
+
+
+def test_props_have_menus_a_context_and_a_field_on_panels():
+    manifest = copy.deepcopy(EXAMPLE)
+    prop = manifest["props"][0]
+    row = prop_row_id(prop["name"])
+    docks = build_docks(manifest, row, new_prop_action="new", design_prop_menu="design",
+                        delete_prop_menu="del", design_prop_action="btn")
+    tree = docks["project"]
+    assert "\t# Props\t!new:New prop…" in tree
+    assert f"{row}\t" in tree and "!design:Design prop|del:Delete prop…" in tree
+    assert docks["project_selected"] == row
+    inspector = docks["inspector"]
+    assert "# Prop" in inspector and "Panels showing it\t0" in inspector
+    assert f"@{row}.notes\tNotes\t" in inspector and "!btn\tDesign prop" in inspector
+
+    panel = manifest["panels"][0]
+    panel["props"] = [prop["name"]]
+    context = build_docks(manifest, panel["id"])["inspector"]
+    assert f"@{panel['id']}.props\tProps\t{prop['name']}" in context
+    assert "Panels showing it\t1" in build_docks(manifest, row)["inspector"]
+
+
+def test_gallery_shows_a_props_images_with_the_current_one_ticked():
+    from gimp.imanganation.panel_ui import build_gallery
+
+    manifest = copy.deepcopy(EXAMPLE)
+    row = prop_row_id(manifest["props"][0]["name"])
+    rows = build_gallery(manifest, row, None,
+                         {"images": {"a.png": "/p/a.png", "a-2.png": "/p/a-2.png"},
+                          "current": "a-2.png"}, (("o", "Open"),))
+    assert "img:a-2.png\t✓ a-2.png\t/p/a-2.png\t!o:Open" in rows
+    assert "img:a.png\ta.png\t/p/a.png\t!o:Open" in rows
+    assert "Not designed yet" in build_gallery(manifest, row, None, {"images": {}})
