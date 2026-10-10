@@ -994,3 +994,17 @@ def delete_panel(document: dict[str, Any], panel_id: str) -> dict[str, Any]:
         cursor["next_panel"] = next((p["id"] for p in document["panels"]
                                      if p.get("status") != "orphaned"), None)
     return panel
+
+
+def set_character_version(document: dict[str, Any], panel_id: str, index: int,
+                          version: str | None) -> dict[str, Any]:
+    """Pin which reference image (version) the panel's ``index``-th character uses, or
+    ``None`` for the character's default (the caller saves). Returns that entry."""
+    panel = next((p for p in document["panels"] if p["id"] == panel_id), None)
+    if panel is None:
+        raise ProjectFileError("that panel is no longer in the project")
+    characters = panel.get("characters", [])
+    if not 0 <= index < len(characters):
+        raise ProjectFileError("that character is no longer in the panel")
+    characters[index]["version"] = version or None
+    return characters[index]

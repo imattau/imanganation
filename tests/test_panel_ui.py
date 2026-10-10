@@ -322,3 +322,24 @@ def test_add_cover_is_offered_until_there_is_a_cover_and_the_cover_takes_no_pane
     row = next(l for l in build_docks(manifest, add_panel_action="add")["project"].splitlines()
                if l.startswith(manifest["panels"][0]["id"] + "\t"))
     assert "Add panel" not in row
+
+
+def test_each_panel_character_gets_a_reference_button_in_context():
+    manifest = copy.deepcopy(EXAMPLE)
+    panel = next(p for p in manifest["panels"] if len(p.get("characters", [])) >= 1)
+    panel["characters"][0]["version"] = "summer"
+    pid, who = panel["id"], panel["characters"][0]["name"]
+    inspector = build_docks(manifest, pid, character_version_action="ver")["inspector"]
+    assert f"{who}\tsummer\t!ver:{pid}:0:Reference…" in inspector
+    if len(panel["characters"]) > 1:
+        assert f"\tDefault reference\t!ver:{pid}:1:Reference…" in inspector
+    plain = build_docks(manifest, pid)["inspector"]
+    assert f"{who}\tsummer" in plain and "Reference…" not in plain
+
+
+def test_characters_offer_designing_another_reference():
+    docks = build_docks(copy.deepcopy(EXAMPLE), design_character_menu="d",
+                        design_variant_menu="v", delete_character_menu="x")
+    who = character_row_id("Yuki")
+    assert (f"\t\t{who}\tYuki\t!d:Design character|v:Design another reference…|"
+            "x:Delete character…") in docks["project"]

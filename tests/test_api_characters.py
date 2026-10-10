@@ -112,3 +112,20 @@ def test_delete_character_sets_their_designs_aside(tmp_path):
 def test_delete_character_needs_one_project_form(tmp_path):
     response = _client(tmp_path).delete("/characters", params={"name": "Yuki"})
     assert response.status_code == 422
+
+
+def test_an_extra_reference_keeps_the_default_and_can_be_named(tmp_path):
+    project = _project(tmp_path)
+    client = _client(tmp_path)
+    body = {"project_dir": str(project), "name": "yuki", "image_path": str(_export(project)),
+            "make_default": False, "version_id": "summer"}
+
+    extra = client.post("/characters/reference", json=body).json()
+    assert extra["version"] == "summer" and extra["previous"] == "base"
+
+    reg = CharacterRegistry.from_path(project)
+    assert [v.id for v in reg.get("Yuki").versions] == ["base", "summer"]
+    assert reg.get("Yuki").default_version == "base"  # not replaced
+    assert reg.reference_path("Yuki", "summer") == project / "characters/yuki/summer.png"
+    listed = client.get("/characters", params={"project_dir": str(project)}).json()
+    assert listed[0]["versions"] == ["base", "summer"]

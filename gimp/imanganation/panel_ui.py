@@ -120,7 +120,9 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
                 load_script_action: str = "",
                 add_panel_action: str = "",
                 delete_panel_action: str = "",
-                add_cover_action: str = "") -> dict[str, str]:
+                add_cover_action: str = "",
+                character_version_action: str = "",
+                design_variant_menu: str = "") -> dict[str, str]:
     """Build generic host content and stable selections from a project manifest.
 
     The Context (inspector) rows are editable fields; ``open_page_action``, a dock
@@ -148,7 +150,10 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
     dock procedure takes ``<page or panel id>``, or nothing from the heading), and
     ``delete_panel_action`` "Delete panel…" on panels added by hand. ``add_cover_action``
     adds "Add cover…" there while the project has no cover (and the cover, a single
-    picture, gets no "Add panel")."""
+    picture, gets no "Add panel"). ``character_version_action`` gives each of a panel's
+    characters a "Reference…" button in Context (item ``<panel id>:<index>``) that
+    picks which of their reference images the panel uses, and ``design_variant_menu``
+    puts "Design another reference…" on each character's right-click menu."""
     panels = manifest.get("panels", [])
     pages = manifest.get("pages", [])
     page_by_id = {page["id"]: page for page in pages}
@@ -243,6 +248,7 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
             heading_menu = (f"\t!{new_character_action}:New character…"
                             if new_character_action else "")
             row_menu = _menu((design_character_menu, "Design character"),
+                             (design_variant_menu, "Design another reference…"),
                              (delete_character_menu, "Delete character…"))
             project_rows.append(f"\t# Characters{heading_menu}")
             project_rows.extend(
@@ -376,9 +382,13 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
             _field(pid, "expressions", "Expressions", _expressions(
                 panel.get("expressions") or {})),
         ])
-        inspector_rows.extend(  # a pinned reference version (outfit) per character
-            f"{_label(c.get('name'))}\t{_label(c.get('version'))}"
-            for c in characters if c.get("version"))
+        for index, c in enumerate(characters):  # which reference image (outfit) each uses
+            if c.get("version") or character_version_action:
+                button = (f"\t!{character_version_action}:{pid}:{index}:Reference…"
+                          if character_version_action else "")
+                inspector_rows.append(f"{_label(c.get('name'))}\t"
+                                      f"{_label(c.get('version')) or 'Default reference'}"
+                                      f"{button}")
         inspector_rows.extend([
             "# Scene",
             _field(pid, "location", "Location", _place(panel)),

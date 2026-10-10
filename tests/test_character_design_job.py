@@ -41,6 +41,10 @@ class FakeComfy:
     def is_up(self):
         return True
 
+    def upload_image(self, path, subfolder="", overwrite=True):
+        self.uploads = [*getattr(self, "uploads", []), path]
+        return {"name": "uploaded.png"}
+
     def run(self, graph):
         assert self.llm.unloaded or not self.llm.messages, \
             "diffusion must wait for the LLM to release the GPU"
@@ -156,3 +160,60 @@ def test_design_character_renders_with_the_chosen_engine(tmp_path, engine):
     assert "exactly one person and nobody else" in result.prompt
     assert any(n["class_type"] in ("TextEncodeQwenImage21", "CLIPTextEncode")
                for n in comfy.graphs[-1].values())
+
+
+def test_another_reference_adds_a_variant_and_leaves_the_default_and_traits(tmp_path):
+    reg = CharacterRegistry.from_path(tmp_path)
+    llm = FakeLLM()
+    design_character(reg, "Rin", "girl", seed=7, llm=llm, comfy=FakeComfy(llm))
+    llm2, comfy2 = FakeLLM(), None
+    comfy2 = FakeComfy(llm2)
+    result = design_character(reg, "Rin", "ignored", llm=llm2, comfy=comfy2,
+                              variant={"id": "summer", "description": "white sundress, straw hat"})
+    assert llm2.messages == []  # traits are not re-derived
+    assert result.version_id == "summer" and result.seed == 7  # the default's seed
+    assert "white sundress, straw hat" in comfy2.graphs[0]["2"]["inputs"]["text"]
+    # the default reference steers it: same person, not a lookalike
+    assert comfy2.uploads == [str(tmp_path / "characters/rin/base.png")]
+    graph = comfy2.graphs[0]
+    assert graph["8"]["inputs"]["image"] == "uploaded.png"
+    assert graph["11"]["class_type"] == "IPAdapterAdvanced"
+    assert graph["5"]["inputs"]["model"] == ["11", 0]
+    rin = CharacterRegistry.from_path(tmp_path).get("Rin")
+    assert rin.default_version == "base" and rin.notes == "girl"
+    assert [v.id for v in rin.versions] == ["base", "summer"]
+    assert rin.version("summer").kind == "variant"
+    with pytest.raises(ValueError):  # a name is used once
+        design_character(reg, "Rin", "", llm=llm2, comfy=comfy2,
+                         variant={"id": "summer", "description": "again"})
+    with pytest.raises(ValueError):  # needs a first design
+        design_character(reg, "Nobody", "", llm=llm2, comfy=comfy2,
+                         variant={"id": "x", "description": "y"})
+
+
+def test_api_variant_reference_rules(tmp_path):
+    from manganation.script.schema import PanelSpec, Script
+
+    projects = tmp_path / "projects"
+    (projects / "p").mkdir(parents=True)
+    (projects / "p" / "panels.json").write_text(
+        Script(panels=[PanelSpec(page=1, panel=1, characters=["Rin"])]).to_json())
+    reg = CharacterRegistry.from_path(projects / "p")
+    reg.ensure("Rin")
+    client = TestClient(create_app(root=projects, outputs=tmp_path / "out",
+                                   design_character=lambda *a, **k: None))
+    body = {"project_dir": str(projects / "p"), "name": "Rin", "variant_id": "summer",
+            "variant_description": "sundress"}
+    assert client.post("/characters", json=body).status_code == 409  # no design yet
+    assert client.post("/characters", json={**body, "variant_description": ""}).status_code == 422
+
+
+def test_qwen_variant_prompt_points_at_the_existing_design():
+    from manganation.characters.design import build_prose_design_prompt
+    from manganation.characters.schema import AppearanceSpec
+
+    plain = build_prose_design_prompt(AppearanceSpec(), variation="a sundress")
+    assert "<image1>" not in plain.positive and "For this image: a sundress." in plain.positive
+    tied = build_prose_design_prompt(AppearanceSpec(), variation="a sundress",
+                                     has_reference=True)
+    assert "same character as in <image1>" in tied.positive

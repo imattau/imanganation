@@ -429,3 +429,18 @@ def test_a_hand_added_cover_is_first_single_and_survives_reload():
     summary = _reparse(document, "COVER\n[ACTION]\nThe title art.\n\n" + _SCRIPT)
     assert cover["id"] in summary["removed"]
     assert sum(1 for p in document["panels"] if p.get("cover")) == 1
+
+
+def test_a_panel_can_pin_one_of_a_characters_reference_images():
+    from gimp.imanganation.project_store import set_character_version
+
+    document = _script_project()
+    panel = next(p for p in document["panels"] if p["characters"])
+    entry = set_character_version(document, panel["id"], 0, "summer")
+    assert entry["version"] == "summer" and panel["characters"][0]["version"] == "summer"
+    set_character_version(document, panel["id"], 0, "")  # back to the default
+    assert panel["characters"][0]["version"] is None
+    with pytest.raises(ProjectFileError):
+        set_character_version(document, panel["id"], 99, "x")
+    with pytest.raises(ProjectFileError):
+        set_character_version(document, "pnl_gone00", 0, "x")

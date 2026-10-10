@@ -144,8 +144,11 @@ class CharacterRegistry:
         self.save()
         return character
 
-    def add_user_reference(self, name: str, image_path: str, version_id: str = "base") -> Character:
-        """Register a user-supplied reference image (no generation needed)."""
+    def add_user_reference(self, name: str, image_path: str, version_id: str = "base",
+                           *, make_default: bool = True) -> Character:
+        """Register a user-supplied reference image (no generation needed). With
+        ``make_default`` False it is kept as an extra version (an outfit, an angle) for
+        panels to pick, and the default reference stays as it was."""
         character = self.ensure(name)
         d = self.ensure_dir(name)
         dest = d / f"{version_id}.png"
@@ -157,7 +160,7 @@ class CharacterRegistry:
         return self.add_version(
             name,
             CharacterVersion(id=version_id, image=rel, note="user-supplied reference"),
-            make_default=True,
+            make_default=make_default or character.default_version is None,
         )
 
     def reference_path(self, name: str, version_id: str | None = None) -> Path | None:

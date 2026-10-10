@@ -135,14 +135,22 @@ def build_prose_design_prompt(
     appearance: AppearanceSpec,
     *,
     style: str = "clean line art and cel shading",
+    variation: str = "",
+    has_reference: bool = False,
 ) -> DesignPrompt:
-    """The single-figure reference as plain English, for Qwen-Image and Z-Anime."""
+    """The single-figure reference as plain English, for Qwen-Image and Z-Anime.
+    ``variation`` (an outfit, a season, an age) is said last and wins over the traits.
+    ``has_reference``: the character's existing design is <image1>, to be drawn again
+    (Qwen-Image only; the other engine can't see images)."""
     tags = [t.strip() for t in appearance.prompt_tags() if t and t.strip()]
     kind = _KINDS.get(tags[0], "a person") if tags else "a person"
     looks = ", ".join(t for t in tags if not _COUNT_TAG.match(t))
     positive = (
         f"A full-colour anime character reference illustration, {style}, showing exactly "
         f"one person and nobody else: {kind}" + (f", {looks}" if looks else "") + ". "
+        + ("The same character as in <image1>: keep exactly their face, hair, eyes and "
+           "build, and do not add anyone else. " if has_reference else "")
+        + (f"For this image: {variation}. " if variation else "") +
         "Pose: standing straight, facing the viewer, looking at the viewer, arms relaxed "
         "at the sides, framed from the thighs up with the whole head in frame. "
         "Background: plain flat white, nothing else in the picture. "

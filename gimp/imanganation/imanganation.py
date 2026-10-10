@@ -95,6 +95,7 @@ try:
         reparse_script,
         save_project,
         script_page_number,
+        set_character_version,
     )
     from script_canonical import looks_canonical as script_looks_canonical
     from script_canonical import parse as parse_script_text
@@ -211,6 +212,9 @@ DOCK_REORDER_PAGES = "plug-in-imanganation-dock-reorder-pages"
 DOCK_ADD_PANEL = "plug-in-imanganation-dock-add-panel"
 DOCK_DELETE_PANEL = "plug-in-imanganation-dock-delete-panel"
 DOCK_ADD_COVER = "plug-in-imanganation-dock-add-cover"
+DOCK_DESIGN_VARIANT = "plug-in-imanganation-dock-design-variant"
+# Context: a panel character's "Reference…" (item "<panel id>:<index>")
+DOCK_CHARACTER_VERSION = "plug-in-imanganation-dock-character-version"
 DOCK_GENERATE_LAYOUT = "plug-in-imanganation-dock-generate-page-layout"
 # Speech bubbles: a script line's Bubble… (item "<panel id>:<line>"), a page's free
 # Bubble…, a Bubbles dock tile (item: template id), Fit bubble to text
@@ -1627,14 +1631,24 @@ def set_character_reference(procedure, run_mode, image, drawables, config, data)
         slug = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_") or "character"
         path = root / "tmp" / f"gimp_ref_{slug}_{time.strftime('%Y%m%d-%H%M%S')}.png"
         side = _export_reference(image, layers[0], path)
-        result = _http("POST", f"{engine}/characters/reference",
-                       {**engine_project, "name": name, "image_path": str(path)})
+        request = {**engine_project, "name": name, "image_path": str(path),
+                   "make_default": bool(config.get_property("make-default"))}
+        label = re.sub(r"[^A-Za-z0-9_-]+", "-",
+                       (config.get_property("reference-name") or "").strip()).strip("-")[:40]
+        if label:
+            request["version_id"] = label
+        result = _http("POST", f"{engine}/characters/reference", request)
     except (EngineError, ValueError) as exc:
         return _error(procedure, str(exc))
 
-    Gimp.message(f"{result['name']}'s reference is now {result['version']} ({side}px square; "
-                 f"was {result['previous']}). New renders of {result['name']} use it; earlier "
-                 f"versions are kept in characters/{slug}/.")
+    if request["make_default"]:
+        Gimp.message(f"{result['name']}'s reference is now {result['version']} ({side}px "
+                     f"square; was {result['previous']}). New renders of {result['name']} "
+                     f"use it; earlier versions are kept in characters/{slug}/.")
+    else:
+        Gimp.message(f"Saved {result['version']} as an extra reference for "
+                     f"{result['name']} ({side}px square). Pick it per panel in Context "
+                     f"-> Reference…; the default is still {result['previous']}.")
     _notify_project_docks(root)
     return _success(procedure, layers[0])
 
@@ -4071,6 +4085,85 @@ def _design_selected_character():
     _refresh_project_docks()
 
 
+def _choose_variant_reference(name, taken):
+    """Another reference dialog -> (reference name, what is different) or None."""
+    dialog = Gtk.Dialog(title=f"Design Another Reference for {name}", flags=Gtk.DialogFlags.MODAL)
+    dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+                       "Design", Gtk.ResponseType.OK)
+    dialog.set_default_response(Gtk.ResponseType.OK)
+    grid = Gtk.Grid(column_spacing=12, row_spacing=8, margin=12)
+    label = Gtk.Entry(activates_default=True, hexpand=True,
+                      placeholder_text="e.g. summer, school-uniform")
+    description = Gtk.TextView(wrap_mode=Gtk.WrapMode.WORD_CHAR, accepts_tab=False,
+                               left_margin=4, right_margin=4, top_margin=4, bottom_margin=4)
+    scrolled = Gtk.ScrolledWindow(hexpand=True, vexpand=True)
+    scrolled.set_size_request(380, 100)
+    scrolled.set_shadow_type(Gtk.ShadowType.IN)
+    scrolled.add(description)
+    hint = Gtk.Label(label=f"What is different: an outfit, a season, an age. {name}'s "
+                           "traits and default reference stay as they are; panels choose "
+                           "this one in Context -> Reference…. About a minute.",
+                     xalign=0.0, wrap=True, max_width_chars=48)
+    hint.get_style_context().add_class("dim-label")
+    for row, (caption, widget) in enumerate((("Name", label), ("Look", scrolled))):
+        grid.attach(Gtk.Label(label=caption, xalign=0.0, valign=Gtk.Align.START),
+                    0, row, 1, 1)
+        grid.attach(widget, 1, row, 1, 1)
+    grid.attach(hint, 1, 2, 1, 1)
+    dialog.get_content_area().add(grid)
+    dialog.show_all()
+    try:
+        while dialog.run() == Gtk.ResponseType.OK:
+            buffer = description.get_buffer()
+            text = " ".join(buffer.get_text(buffer.get_start_iter(),
+                                            buffer.get_end_iter(), False).split())
+            ident = re.sub(r"[^A-Za-z0-9_-]+", "-", label.get_text().strip()).strip("-")[:40]
+            if not ident or not text:
+                Gimp.message("Give the reference a name and describe the look.")
+            elif ident.casefold() in taken:
+                Gimp.message(f"{name} already has a reference called {ident}.")
+            else:
+                return ident, text
+        return None
+    finally:
+        dialog.destroy()
+
+
+def _design_another_reference():
+    """Design another reference…: a new look for a designed character, kept beside the
+    default. -> False if cancelled."""
+    root = _DOCK_CONTEXT["root"]
+    manifest = load_project(root)
+    character = next((c for c in manifest["cast"]
+                      if character_row_id(c["name"]) == _DOCK_CONTEXT.get("selected_id")),
+                     None)
+    if character is None:
+        raise ValueError("Select a character first")
+    if character["name"] in _DESIGN_JOBS.values():
+        raise ValueError(f"{character['name']} is already being designed")
+    query = urllib.parse.urlencode(_engine_project(root, manifest))
+    known = _http("GET", f"{ENGINE_URL}/characters?{query}", timeout=3)
+    record = next((c for c in known
+                   if c.get("name", "").casefold() == character["name"].casefold()), None)
+    if record is None or not record.get("default_version"):
+        raise ValueError(f"Design {character['name']} first; another reference builds on "
+                         "the first one")
+    chosen = _choose_variant_reference(character["name"],
+                                       {v.casefold() for v in record["versions"]})
+    if chosen is None:
+        return False
+    ident, text = chosen
+    job = _http("POST", f"{ENGINE_URL}/characters",
+                {**_engine_project(root, manifest), "name": character["name"],
+                 "variant_id": ident, "variant_description": text,
+                 **_style_options(manifest)})
+    if not _DESIGN_JOBS:
+        GLib.timeout_add_seconds(3, _exclusive(_poll_design_jobs))
+    _DESIGN_JOBS[job["id"]] = character["name"]
+    _refresh_project_docks()
+    return True
+
+
 def _choose_new_character():
     """New Character dialog -> (name, aliases, description, design now) or None."""
     dialog = Gtk.Dialog(title="New Character", flags=Gtk.DialogFlags.MODAL)
@@ -4123,6 +4216,11 @@ def _dock_character_menu(procedure, config, data):
         if data == "design":
             _DOCK_CONTEXT["selected_id"] = config.get_property("item")
             _design_selected_character()
+            return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+        if data == "variant":
+            _DOCK_CONTEXT["selected_id"] = config.get_property("item")
+            if not _design_another_reference():
+                return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
             return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
         if data == "delete":
             if not _delete_character(root, config.get_property("item")):
@@ -4704,6 +4802,61 @@ def _dock_panel_menu(procedure, config, data):
                      else add_panel(manifest, number, **fields))
             save_project(root, manifest)
             _DOCK_CONTEXT["selected_id"] = panel["id"]
+        _refresh_project_docks()
+    except Exception as exc:
+        return _error(procedure, str(exc))
+    return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+
+
+def _choose_character_version(name, versions, default, current):
+    """Reference dialog -> a version id, "" for the character's default, or None."""
+    dialog = Gtk.Dialog(title=f"Reference for {name}", flags=Gtk.DialogFlags.MODAL)
+    dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+                       "Use", Gtk.ResponseType.OK)
+    dialog.set_default_response(Gtk.ResponseType.OK)
+    box = dialog.get_content_area()
+    box.set_spacing(8)
+    box.set_border_width(12)
+    box.add(Gtk.Label(label=f"Which reference image of {name} should this panel use?",
+                      xalign=0.0))
+    combo = Gtk.ComboBoxText()
+    combo.append("", f"Default ({default})" if default else "Default")
+    for version in versions:
+        combo.append(version, version)
+    combo.set_active_id(current if current in versions else "")
+    box.add(combo)
+    dialog.show_all()
+    try:
+        return combo.get_active_id() if dialog.run() == Gtk.ResponseType.OK else None
+    finally:
+        dialog.destroy()
+
+
+def _dock_character_version(procedure, config, data):
+    """Context: a panel character's Reference… -> pick which of their reference images
+    (versions the engine holds) this panel uses. Item "<panel id>:<index>"."""
+    try:
+        root = _DOCK_CONTEXT["root"]
+        panel_id, _, index = (config.get_property("item") or "").rpartition(":")
+        manifest = load_project(root)
+        panel = next((p for p in manifest["panels"] if p["id"] == panel_id), None)
+        if panel is None or not index.isdigit() or int(index) >= len(panel["characters"]):
+            raise ValueError("That character is no longer in the panel")
+        entry = panel["characters"][int(index)]
+        query = urllib.parse.urlencode(_engine_project(root, manifest))
+        known = _http("GET", f"{ENGINE_URL}/characters?{query}", timeout=3)
+        record = next((c for c in known
+                       if c.get("name", "").casefold() == entry["name"].casefold()), None)
+        if record is None or not record.get("versions"):
+            raise ValueError(f"{entry['name']} has no reference images yet; design them "
+                             "or use Set Character Reference from Layer first")
+        chosen = _choose_character_version(entry["name"], record["versions"],
+                                           record.get("default_version"),
+                                           entry.get("version"))
+        if chosen is None:
+            return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
+        set_character_version(manifest, panel_id, int(index), chosen)
+        save_project(root, manifest)
         _refresh_project_docks()
     except Exception as exc:
         return _error(procedure, str(exc))
@@ -5513,6 +5666,8 @@ def _dock_actions(root, manifest):
             "add_panel_action": DOCK_ADD_PANEL,
             "delete_panel_action": DOCK_DELETE_PANEL,
             "add_cover_action": DOCK_ADD_COVER,
+            "character_version_action": DOCK_CHARACTER_VERSION,
+            "design_variant_menu": DOCK_DESIGN_VARIANT,
             "reorder_pages_action": DOCK_REORDER_PAGES,
             "bubble_line_action": DOCK_BUBBLE_LINE, "bubbled": frozenset(bubbled),
             "new_bubble_action": DOCK_NEW_BUBBLE,
@@ -5844,6 +5999,8 @@ def _add_dock_callbacks(plugin):
         (DOCK_ADD_PANEL, _dock_panel_menu, "add", True),
         (DOCK_DELETE_PANEL, _dock_panel_menu, "delete", True),
         (DOCK_ADD_COVER, _dock_panel_menu, "cover", True),
+        (DOCK_CHARACTER_VERSION, _dock_character_version, "pick", True),
+        (DOCK_DESIGN_VARIANT, _dock_character_menu, "variant", True),
         (DOCK_REORDER_PAGES, _dock_page_menu, "reorder", True),
         (DOCK_BUBBLE_LINE, _dock_bubble, "line", True),
         (DOCK_BUBBLE_ITEM, _dock_bubble, "template", True),
@@ -6423,6 +6580,15 @@ class Imanganation(Gimp.PlugIn):
             proc.add_string_argument(
                 "character", "_Character", "Character name (or alias) in the project",
                 "", GObject.ParamFlags.READWRITE)
+            proc.add_string_argument(
+                "reference-name", "Reference _name", "What to call this image, e.g. "
+                "summer or school-uniform (letters, digits, - and _). Panels pick a "
+                "reference by name. Blank = gimp-01, gimp-02, ...",
+                "", GObject.ParamFlags.READWRITE)
+            proc.add_boolean_argument(
+                "make-default", "Use for _all panels", "On: this becomes the character's "
+                "default reference. Off: keep it as an extra reference that panels can "
+                "choose (Context -> Reference...)", True, GObject.ParamFlags.READWRITE)
             proc.add_file_argument(
                 "project-dir", "_Project folder", "Only needed if no placed panel is in "
                 "this image", Gimp.FileChooserAction.SELECT_FOLDER, True, None,

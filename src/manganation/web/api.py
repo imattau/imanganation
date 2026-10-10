@@ -126,6 +126,9 @@ class ReferenceRequest(BaseModel):
     name: str = Field(min_length=1, description="An existing character (name or alias)")
     image_path: str = Field(description="PNG inside the project, e.g. exported by GIMP")
     version_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{1,40}$")
+    make_default: bool = Field(
+        default=True, description="False keeps it as an extra reference for panels to "
+        "pick, leaving the default one in place")
 
     @model_validator(mode="after")
     def _one_form(self):
@@ -189,6 +192,11 @@ class CharacterRequest(BaseModel):
     # A character that has a design: re-derive traits from the description (empty
     # keeps them) and add a new design version as the active reference
     redesign: bool = False
+    # Another reference for a designed character (an outfit, a season): the traits stay,
+    # ``variant_description`` is added to this one image, it is saved as ``variant_id``
+    # and the default reference is left alone. Panels pick it per character.
+    variant_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{1,40}$")
+    variant_description: str = Field(default="", max_length=1000)
     style: StyleOptions | None = None  # the project's look: the design is drawn in it
     engine: Literal["sdxl", "qwen_image_21", "z_anime"] | None = None  # the project's render engine
 
@@ -196,6 +204,10 @@ class CharacterRequest(BaseModel):
     def _one_form(self):
         if (self.project is None) == (self.project_dir is None):
             raise ValueError("send either project (container id) or project_dir")
+        if self.variant_id is not None and not self.variant_description.strip():
+            raise ValueError("describe what is different about this reference")
+        if self.variant_id is not None and self.redesign:
+            raise ValueError("a new reference and a redesign are separate requests")
         return self
 
 
@@ -841,7 +853,7 @@ def create_app(
     @app.post("/characters/reference")
     def set_reference(req: ReferenceRequest) -> dict:
         """Register an image as a character's new active reference (a new version;
-        earlier versions are kept). Synchronous: a file copy, no GPU."""
+        earlier versions are kept), or with ``make_default`` false as an extra one. Synchronous: a file copy, no GPU."""
         from PIL import Image, UnidentifiedImageError
 
         if req.project is not None:
@@ -873,7 +885,8 @@ def create_app(
             version_id = f"gimp-{n:02d}"
         elif character.version(version_id) is not None:
             raise HTTPException(409, f"{character.name} already has version {version_id!r}")
-        reg.add_user_reference(character.name, str(image), version_id)
+        reg.add_user_reference(character.name, str(image), version_id,
+                               make_default=req.make_default)
         return {"name": character.name, "version": version_id, "previous": previous,
                 "reference": str(reg.reference_path(character.name))}
 
@@ -902,16 +915,26 @@ def create_app(
 
         reg = _registry(req.project_dir, req.project)
         existing = reg.get(req.name)
-        if existing is not None and existing.default_version is not None and not req.redesign:
+        if req.variant_id is not None:
+            if existing is None or existing.default_version is None:
+                raise HTTPException(409, f"design {req.name} first; another reference "
+                                         "builds on the first one")
+            if existing.version(req.variant_id) is not None:
+                raise HTTPException(409, f"{existing.name} already has a reference "
+                                         f"called {req.variant_id!r}")
+        elif existing is not None and existing.default_version is not None and not req.redesign:
             raise HTTPException(409, f"{existing.name} already has a design; send redesign "
                                      "to make a new one")
-        if not req.description.strip() and (
+        if req.variant_id is None and not req.description.strip() and (
                 existing is None or not existing.appearance.appearance_tags()):
             raise HTTPException(422, f"describe {req.name} first")
         design = design_character or default_design
         return submit_job("character", req.model_dump(), lambda: design(
             reg, req.name, req.description, aliases=req.aliases, seed=req.seed,
             redesign=req.redesign,
+            **({"variant": {"id": req.variant_id,
+                            "description": req.variant_description}}
+               if req.variant_id else {}),
             **({"style": req.style.model_dump()} if req.style else {}),
             **({"engine": req.engine} if req.engine else {})))
 
