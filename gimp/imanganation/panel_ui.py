@@ -174,7 +174,8 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
                 generate_page_action: str = "",
                 new_prop_action: str = "", design_prop_menu: str = "",
                 delete_prop_menu: str = "",
-                design_prop_action: str = "") -> dict[str, str]:
+                design_prop_action: str = "",
+                choose_action: str = "") -> dict[str, str]:
     """Build generic host content and stable selections from a project manifest.
 
     The Context (inspector) rows are editable fields; ``open_page_action``, a dock
@@ -215,7 +216,9 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
     that page have no render yet. Props mirror locations: ``new_prop_action`` on the Props
     heading, ``design_prop_menu`` and ``delete_prop_menu`` on each prop's row and
     ``design_prop_action`` a "Design prop" button in its Context (its notes are the
-    description)."""
+    description). ``choose_action`` (a dock procedure taking ``<panel id>:<field>``) turns a
+    panel's Characters, Props, Location, Shot, Aspect ratio and Frame size from typed
+    fields into a value with a "Choose…" button that picks from the project's own lists."""
     panels = manifest.get("panels", [])
     pages = manifest.get("pages", [])
     page_by_id = {page["id"]: page for page in pages}
@@ -457,9 +460,16 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
         ])
         pid = panel["id"]
         characters = panel.get("characters", [])
+
+        def pick(field, title, value):
+            """A value picked from a list (Choose…), else the typed field."""
+            if not choose_action:
+                return _field(pid, field, title, value)
+            return f"{title}\t{_label(value) or '—'}\t!{choose_action}:{pid}:{field}:Choose…"
+
         inspector_rows.extend([
-            _field(pid, "characters", "Characters",
-                   ", ".join(_label(c.get("name")) for c in characters)),
+            pick("characters", "Characters",
+                 ", ".join(_label(c.get("name")) for c in characters)),
             _field(pid, "expressions", "Expressions", _expressions(
                 panel.get("expressions") or {})),
         ])
@@ -472,11 +482,11 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
                                       f"{button}")
         inspector_rows.extend([
             "# Scene",
-            _field(pid, "location", "Location", _place(panel)),
-            _field(pid, "props", "Props", ", ".join(_label(n) for n in panel.get("props", []))),
-            _field(pid, "camera", "Shot", panel.get("camera")),
-            _field(pid, "aspect_ratio", "Aspect ratio", panel.get("aspect_ratio")),
-            _field(pid, "size", "Frame size", panel.get("size")),
+            pick("location", "Location", _place(panel)),
+            pick("props", "Props", ", ".join(_label(n) for n in panel.get("props", []))),
+            pick("camera", "Shot", panel.get("camera")),
+            pick("aspect_ratio", "Aspect ratio", panel.get("aspect_ratio")),
+            pick("size", "Frame size", panel.get("size")),
             _field(pid, "seed", "Seed (blank: random)", panel.get("seed")),
             "# Action",
             _field(pid, "action", "Action", panel.get("action")),

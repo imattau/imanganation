@@ -609,3 +609,35 @@ def test_duplicating_a_panel_keeps_its_props():
     source = document["panels"][0]
     source["props"] = ["Katana"]
     assert duplicate_panel(document, source["id"])["props"] == ["Katana"]
+
+
+def test_field_choices_come_from_the_project_and_keep_what_the_panel_has():
+    import pytest as _pytest
+
+    from gimp.imanganation.project_store import add_prop, field_choices
+
+    document = _script_project()
+    panel = next(p for p in document["panels"] if p["characters"])
+    add_prop(document, "Katana")
+    panel["props"] = ["Odd thing"]
+    names = [c["name"] for c in document["cast"]]
+
+    who = field_choices(document, panel["id"], "characters")
+    assert who["mode"] == "many" and who["current"] == [c["name"] for c in panel["characters"]]
+    assert who["options"][: len(who["current"])] == who["current"]  # the panel's own order
+    assert set(who["options"]) == set(names)
+
+    props = field_choices(document, panel["id"], "props")
+    assert props["options"] == ["Odd thing", "Katana"] and props["current"] == ["Odd thing"]
+
+    place = field_choices(document, panel["id"], "location")
+    assert place["mode"] == "one" and isinstance(place["current"], str)
+    assert set(place["options"]) >= {loc["name"] for loc in document["locations"]}
+    assert "close-up" in field_choices(document, panel["id"], "camera")["options"]
+    assert "splash" in field_choices(document, panel["id"], "size")["options"]
+    panel["camera"] = "tilted pan"  # typed before: still offered, and selected
+    assert field_choices(document, panel["id"], "camera")["options"][0] == "tilted pan"
+    with _pytest.raises(ProjectFileError):
+        field_choices(document, panel["id"], "action")
+    with _pytest.raises(ProjectFileError):
+        field_choices(document, "pnl_gone00", "props")

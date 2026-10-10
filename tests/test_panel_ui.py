@@ -568,3 +568,17 @@ def test_job_status_text_shows_the_queue_or_the_comfyui_step():
     assert job_fraction(running) == 0.25
     second = {"status": "running", "progress": {"pass": 2, "step": 10, "steps": 10}}
     assert "10/10 · pass 2 · 9s" in job_status_text(second, 9) and job_fraction(second) == 1.0
+
+
+def test_list_fields_become_choose_buttons_when_an_action_is_given():
+    manifest = copy.deepcopy(EXAMPLE)
+    panel = manifest["panels"][0]
+    typed = build_docks(manifest, panel["id"])["inspector"]
+    assert f"@{panel['id']}.camera\tShot" in typed and "Choose…" not in typed
+
+    picked = build_docks(manifest, panel["id"], choose_action="pick")["inspector"]
+    for field in ("characters", "props", "location", "camera", "aspect_ratio", "size"):
+        assert f"!pick:{panel['id']}:{field}:Choose…" in picked
+        assert f"@{panel['id']}.{field}\t" not in picked
+    assert f"@{panel['id']}.action\t" in picked  # free text stays free text
+    assert "Props\t—\t!pick:" in picked  # nothing chosen yet

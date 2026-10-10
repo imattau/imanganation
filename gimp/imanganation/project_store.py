@@ -393,6 +393,54 @@ PANEL_SIZES = ("small", "large", "splash")
 FRAME_SHAPES = {"wide": "2:1", "tall": "1:2", "square": "1:1"}
 
 
+SHOT_CHOICES = ("extreme close-up", "close-up", "reaction shot", "medium shot", "two-shot",
+                "full shot", "wide shot", "establishing shot", "over-the-shoulder",
+                "low angle", "high angle", "bird's-eye", "worm's-eye", "dutch angle", "pov")
+ASPECT_CHOICES = ("wide", "tall", "square", "16:9", "3:2", "4:3", "1:1", "2:3", "3:4", "9:16")
+# Context fields picked from a list (a Choose… button) rather than typed: field -> how
+FIELD_CHOICES = {"characters": "many", "props": "many", "location": "one", "camera": "one",
+                 "aspect_ratio": "one", "size": "one"}
+
+
+def field_choices(document: dict[str, Any], panel_id: str, field: str) -> dict[str, Any]:
+    """What a panel field can be picked from, for its Choose… dialog:
+    ``{"mode": "many" | "one", "options": [...], "current": [...] | str, "label": …}``.
+
+    The options come from the project (its cast, props and locations) or are the fixed
+    choices (shots, shapes, sizes); whatever the panel has now is always among them, so
+    a value typed before is never lost. ``many`` keeps the panel's own order first (a
+    character's place in the frame follows it). Raises ProjectFileError for a field that
+    isn't picked from a list."""
+    panel = next((p for p in document["panels"] if p["id"] == panel_id), None)
+    if panel is None:
+        raise ProjectFileError("that panel is no longer in the project")
+    mode = FIELD_CHOICES.get(field)
+    if mode is None:
+        raise ProjectFileError(f"{field!r} is typed, not picked from a list")
+    if field == "characters":
+        current = [c["name"] for c in panel.get("characters", [])]
+        options = [c["name"] for c in document.get("cast", [])]
+        label = "Characters"
+    elif field == "props":
+        current = list(panel.get("props", []))
+        options = [p["name"] for p in document.get("props", [])]
+        label = "Props"
+    else:
+        value = panel.get(field) or ""
+        if field == "location" and not value:
+            value = _location_name(panel.get("scene_heading") or "")
+        current = value
+        label, options = {
+            "location": ("Location", [loc["name"] for loc in document.get("locations", [])]),
+            "camera": ("Shot", list(SHOT_CHOICES)),
+            "aspect_ratio": ("Aspect ratio", list(ASPECT_CHOICES)),
+            "size": ("Frame size", list(PANEL_SIZES)),
+        }[field]
+    held = current if isinstance(current, list) else ([current] if current else [])
+    options = [*held, *(o for o in options if o not in held)]
+    return {"mode": mode, "options": options, "current": current, "label": label}
+
+
 def _names(text: str) -> list[str]:
     seen: dict[str, str] = {}
     for name in (part.strip() for part in text.split(",")):
