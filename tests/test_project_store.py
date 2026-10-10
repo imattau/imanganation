@@ -641,3 +641,28 @@ def test_field_choices_come_from_the_project_and_keep_what_the_panel_has():
         field_choices(document, panel["id"], "action")
     with _pytest.raises(ProjectFileError):
         field_choices(document, "pnl_gone00", "props")
+
+
+def test_renaming_a_character_updates_their_panels_and_keeps_the_old_name_as_an_alias():
+    from gimp.imanganation.project_store import find_cast_member, rename_character
+
+    document = _script_project()
+    panel = next(p for p in document["panels"] if p["characters"])
+    old = panel["characters"][0]["name"]
+    panel["expressions"] = {old.upper(): "smiling"}
+    member, changed = rename_character(document, old.lower(), "  Brand   New ")
+    assert member["name"] == "Brand New" and old in member["aliases"]
+    assert panel["id"] in changed
+    assert panel["characters"][0]["name"] == "Brand New"
+    assert panel["expressions"] == {"Brand New": "smiling"}
+    assert find_cast_member(document, old) is member  # the script's name still finds them
+    # back to the old spelling: the alias is dropped, the name restored
+    rename_character(document, "Brand New", old)
+    assert member["name"] == old and "Brand New" in member["aliases"]
+    document["cast"].append({"name": "Mika"})
+    with pytest.raises(ProjectFileError):
+        rename_character(document, old, "mika")
+    with pytest.raises(ProjectFileError):
+        rename_character(document, old, "  ")
+    with pytest.raises(ProjectFileError):
+        rename_character(document, "ghost", "x")

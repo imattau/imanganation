@@ -193,3 +193,41 @@ def test_delete_a_reference_version_sets_it_aside_and_keeps_one(tmp_path):
     last = client.post("/characters/versions/delete", json={**base, "version": "base"})
     assert last.status_code == 409
     assert (project / "characters/yuki/base.png").is_file()
+
+
+def test_rename_a_character_moves_their_folder_and_keeps_the_old_name_as_an_alias(tmp_path):
+    project, client = _two_versions(tmp_path)
+    base = {"project_dir": str(project), "name": "Yuki"}
+    out = client.post("/characters/rename", json={**base, "new_name": "  Yuki   Tanaka "})
+    assert out.status_code == 200, out.text
+    assert out.json() == {"name": "Yuki Tanaka", "aliases": ["Yuki"],
+                          "versions": ["base", "gimp-01"]}
+    assert (project / "characters/yuki_tanaka/base.png").is_file()
+    assert not (project / "characters/yuki").exists()
+    reg = CharacterRegistry.from_path(project)
+    assert reg.reference_path("Yuki") == project / "characters/yuki_tanaka/base.png"
+    assert reg.get("yuki tanaka").name == "Yuki Tanaka"
+    # a new reference lands in the moved folder, not a stale one
+    new = client.post("/characters/reference", json={
+        "project_dir": str(project), "name": "Yuki", "image_path": str(_export(project))})
+    assert new.status_code == 200
+    assert (project / "characters/yuki_tanaka/gimp-02.png").is_file()
+    assert client.post("/characters/rename",
+                       json={**base, "new_name": "Nobody"}).status_code == 200  # alias still finds her
+    assert client.post("/characters/rename",
+                       json={"project_dir": str(project), "name": "ghost",
+                             "new_name": "x"}).status_code == 404
+
+
+def test_rename_refuses_another_characters_name(tmp_path):
+    project, client = _two_versions(tmp_path)
+    reg = CharacterRegistry.from_path(project)
+    Image.new("RGB", (8, 8)).save(project / "akira_src.png")
+    reg.add_user_reference("Akira", str(project / "akira_src.png"), "base")
+    out = client.post("/characters/rename", json={"project_dir": str(project),
+                                                  "name": "Yuki", "new_name": "akira"})
+    assert out.status_code == 409
+    assert (project / "characters/yuki/base.png").is_file()  # nothing moved
+    case = client.post("/characters/rename", json={"project_dir": str(project),
+                                                   "name": "Yuki", "new_name": "YUKI"})
+    assert case.status_code == 200 and case.json()["aliases"] == []

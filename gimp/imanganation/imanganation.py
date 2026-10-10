@@ -91,6 +91,7 @@ try:
         duplicate_panel,
         add_prop,
         delete_prop,
+        rename_character,
         find_location,
         find_prop,
         load_project,
@@ -256,6 +257,14 @@ DOCK_MENU_LABELS = {
     DOCK_CHARACTERS: "_Character Bible", DOCK_PANEL: "P_anel",
 }
 DOCK_GALLERY_ITEM = "plug-in-imanganation-dock-gallery-item"
+# Context buttons for the selected character / prop / location (the same actions as the
+# Project tree's right-click menus), and a reference row's Manage… (item: its version)
+DOCK_RENAME_CHARACTER_BUTTON = "plug-in-imanganation-dock-rename-character-button"
+DOCK_DELETE_CHARACTER_BUTTON = "plug-in-imanganation-dock-delete-character-button"
+DOCK_VARIANT_BUTTON = "plug-in-imanganation-dock-another-reference-button"
+DOCK_DELETE_PROP_BUTTON = "plug-in-imanganation-dock-delete-prop-button"
+DOCK_DELETE_LOCATION_BUTTON = "plug-in-imanganation-dock-delete-location-button"
+DOCK_MANAGE_REFERENCE = "plug-in-imanganation-dock-manage-reference"
 # Props, like locations: Context's Design prop, the tree's right-click menus, and a prop's
 # image tiles in the Gallery (item "img:<file name>")
 DOCK_DESIGN_PROP = "plug-in-imanganation-dock-design-prop"
@@ -3099,7 +3108,7 @@ def _engine_character_rows(root, character_name, open_buttons=False):
     if open_buttons:  # each reference image opens on its own, not just the default
         images = character.get("version_images") or {}
         rows += [f"{version}\t{'Default' if version == character.get('default_version') else 'Extra'}"
-                 f"\t!{DOCK_OPEN_CHARACTER_VERSION}:{version}:Open"
+                 f"\t!{DOCK_MANAGE_REFERENCE}:{version}:Manage…"
                  for version in versions if images.get(version)]
     return rows
 
@@ -3873,6 +3882,21 @@ def _dock_action(procedure, config, data):
             _open_selected_location_image()
         elif data == "design-prop":
             _design_selected_prop()
+        elif data == "rename-character":
+            if not _rename_selected_character():
+                return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
+        elif data == "delete-character":
+            if not _delete_character(_DOCK_CONTEXT["root"], _DOCK_CONTEXT.get("selected_id")):
+                return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
+        elif data == "another-reference":
+            if _design_another_reference() is False:
+                return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
+        elif data == "delete-prop":
+            if not _delete_prop(_DOCK_CONTEXT["root"], _DOCK_CONTEXT.get("selected_id")):
+                return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
+        elif data == "delete-location":
+            if not _delete_location(_DOCK_CONTEXT["root"], _DOCK_CONTEXT.get("selected_id")):
+                return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
         elif data == "open-prop-image":
             _open_selected_prop_image()
         elif data == "open-character-image":
@@ -5475,51 +5499,125 @@ def _ask_text(title, label, value="", action="OK"):
         dialog.destroy()
 
 
+def _reference_action(action, version):
+    """Make default / Rename… / Delete… on the selected character's reference ``version``,
+    or Open it. -> False if cancelled. The engine holds the images; panels that pinned a
+    renamed or deleted reference follow it (a deleted one falls back to the default)."""
+    root = _DOCK_CONTEXT["root"]
+    manifest = load_project(root)
+    character = next((c for c in manifest["cast"]
+                      if character_row_id(c["name"]) == _DOCK_CONTEXT.get("selected_id")),
+                     None)
+    if character is None or not version:
+        raise ValueError("Select a character first")
+    name = character["name"]
+    if action == "open":
+        _open_selected_character_image(version)
+        return True
+    body = {**_engine_project(root, manifest), "name": name, "version": version}
+    if action == "default":
+        _http("POST", f"{ENGINE_URL}/characters/versions/default", body, timeout=10)
+    elif action == "rename":
+        new = _ask_text(f"Rename {name}'s reference", "New name (letters, digits, - _):",
+                        version, "Rename")
+        if new is None or new == version:
+            return False
+        _http("POST", f"{ENGINE_URL}/characters/versions/rename",
+              {**body, "new_version": new}, timeout=10)
+        retarget_character_version(manifest, name, version, new)
+        save_project(root, manifest)
+    else:
+        pinned = sum(1 for p in manifest["panels"] for c in p.get("characters", [])
+                     if c.get("name", "").casefold() == name.casefold()
+                     and c.get("version") == version)
+        detail = (f"{name}'s reference “{version}” is set aside in the engine's "
+                  "characters folder (.deleted-versions), where it can be restored by "
+                  "hand.")
+        if pinned:
+            detail += (f" {pinned} panel{'s' if pinned != 1 else ''} using it will use "
+                       "the default reference instead.")
+        if not _confirm(f"Delete reference “{version}”?", detail, "Delete"):
+            return False
+        _http("POST", f"{ENGINE_URL}/characters/versions/delete", body, timeout=10)
+        retarget_character_version(manifest, name, version, None)
+        save_project(root, manifest)
+    _refresh_project_docks()
+    return True
+
+
 def _dock_reference_menu(procedure, config, data):
     """Gallery > right-click a character's reference: Make default, Rename… or
-    Delete… (item "ref:<version>"). The engine holds the images; panels that pinned a
-    renamed or deleted reference follow it (a deleted one falls back to the default)."""
+    Delete… (item "ref:<version>")."""
     try:
-        root = _DOCK_CONTEXT["root"]
         version = (config.get_property("item") or "").partition(":")[2]
-        manifest = load_project(root)
-        character = next((c for c in manifest["cast"]
-                          if character_row_id(c["name"]) == _DOCK_CONTEXT.get("selected_id")),
-                         None)
-        if character is None or not version:
-            raise ValueError("Select a character first")
-        name = character["name"]
-        body = {**_engine_project(root, manifest), "name": name, "version": version}
-        if data == "default":
-            _http("POST", f"{ENGINE_URL}/characters/versions/default", body, timeout=10)
-        elif data == "rename":
-            new = _ask_text(f"Rename {name}'s reference", "New name (letters, digits, - _):",
-                            version, "Rename")
-            if new is None or new == version:
-                return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
-            _http("POST", f"{ENGINE_URL}/characters/versions/rename",
-                  {**body, "new_version": new}, timeout=10)
-            retarget_character_version(manifest, name, version, new)
-            save_project(root, manifest)
-        else:
-            pinned = sum(1 for p in manifest["panels"] for c in p.get("characters", [])
-                         if c.get("name", "").casefold() == name.casefold()
-                         and c.get("version") == version)
-            detail = (f"{name}'s reference “{version}” is set aside in the engine's "
-                      "characters folder (.deleted-versions), where it can be restored by "
-                      "hand.")
-            if pinned:
-                detail += (f" {pinned} panel{'s' if pinned != 1 else ''} using it will use "
-                           "the default reference instead.")
-            if not _confirm(f"Delete reference “{version}”?", detail, "Delete"):
-                return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
-            _http("POST", f"{ENGINE_URL}/characters/versions/delete", body, timeout=10)
-            retarget_character_version(manifest, name, version, None)
-            save_project(root, manifest)
-        _refresh_project_docks()
+        if not _reference_action(data, version):
+            return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
     except Exception as exc:
         return _error(procedure, str(exc))
     return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+
+
+def _manage_reference_dialog(name, version):
+    """What to do with a reference: a dialog of buttons -> "open", "default", "rename",
+    "delete" or None."""
+    dialog = Gtk.Dialog(title=f"{name} · {version}", flags=Gtk.DialogFlags.MODAL)
+    dialog.add_buttons("Open in GIMP", 1, "Make default", 2, "Rename…", 3, "Delete…", 4,
+                       Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL)
+    box = dialog.get_content_area()
+    box.set_border_width(12)
+    box.add(Gtk.Label(label=f"What do you want to do with {name}'s reference “{version}”?",
+                      xalign=0.0))
+    dialog.show_all()
+    try:
+        return {1: "open", 2: "default", 3: "rename", 4: "delete"}.get(dialog.run())
+    finally:
+        dialog.destroy()
+
+
+def _dock_manage_reference(procedure, config, data):
+    """Context: Manage… on one of a character's reference images (item: its version)."""
+    try:
+        manifest = load_project(_DOCK_CONTEXT["root"])
+        character = next((c for c in manifest["cast"] if character_row_id(c["name"])
+                          == _DOCK_CONTEXT.get("selected_id")), None)
+        version = config.get_property("item") or ""
+        action = _manage_reference_dialog(character["name"] if character else "Character",
+                                          version)
+        if action is None or not _reference_action(action, version):
+            return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
+    except Exception as exc:
+        return _error(procedure, str(exc))
+    return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+
+
+def _rename_selected_character():
+    """Context: Rename character… -> False if cancelled. The old name stays as an alias;
+    the engine's record (folder, references) follows if it has one."""
+    root = _DOCK_CONTEXT["root"]
+    manifest = load_project(root)
+    character = next((c for c in manifest["cast"]
+                      if character_row_id(c["name"]) == _DOCK_CONTEXT.get("selected_id")),
+                     None)
+    if character is None:
+        raise ValueError("Select a character first")
+    old = character["name"]
+    if old in _DESIGN_JOBS.values():
+        raise ValueError(f"{old} is being designed; rename them when the design finishes")
+    new = _ask_text(f"Rename {old}", "New name (the old one stays as an alias):", old,
+                    "Rename")
+    if new is None or new == old:
+        return False
+    rename_character(manifest, old, new)  # checks the name before the engine is asked
+    try:
+        _http("POST", f"{ENGINE_URL}/characters/rename",
+              {**_engine_project(root, manifest), "name": old, "new_name": new}, timeout=10)
+    except EngineError as exc:
+        if "no character" not in str(exc):  # a character the engine never designed is fine
+            raise
+    save_project(root, manifest)
+    _DOCK_CONTEXT["selected_id"] = character_row_id(new)
+    _refresh_project_docks()
+    return True
 
 
 def _setup_models_run(procedure, config, data):
@@ -6567,6 +6665,11 @@ def _dock_actions(root, manifest):
             "generate_page_action": DOCK_GENERATE_PAGE,
             "design_prop_action": DOCK_DESIGN_PROP,
             "inline_choices": True,
+            "character_buttons": ((DOCK_VARIANT_BUTTON, "Design another reference…"),
+                                  (DOCK_RENAME_CHARACTER_BUTTON, "Rename character…"),
+                                  (DOCK_DELETE_CHARACTER_BUTTON, "Delete character…")),
+            "delete_prop_action": DOCK_DELETE_PROP_BUTTON,
+            "delete_location_action": DOCK_DELETE_LOCATION_BUTTON,
             "new_prop_action": DOCK_NEW_PROP,
             "design_prop_menu": DOCK_DESIGN_PROP_ITEM,
             "delete_prop_menu": DOCK_DELETE_PROP,
@@ -6914,6 +7017,12 @@ def _add_dock_callbacks(plugin):
         (DOCK_ACTIVATE_TAKE, _dock_activate_take, "take", True),
         (DOCK_GALLERY_ITEM, _dock_gallery_item, "gallery", True),
         (DOCK_CANCEL_JOB, _dock_cancel_job, "cancel", True),
+        (DOCK_RENAME_CHARACTER_BUTTON, _dock_action, "rename-character", False),
+        (DOCK_DELETE_CHARACTER_BUTTON, _dock_action, "delete-character", False),
+        (DOCK_VARIANT_BUTTON, _dock_action, "another-reference", False),
+        (DOCK_DELETE_PROP_BUTTON, _dock_action, "delete-prop", False),
+        (DOCK_DELETE_LOCATION_BUTTON, _dock_action, "delete-location", False),
+        (DOCK_MANAGE_REFERENCE, _dock_manage_reference, "manage", True),
         (DOCK_DESIGN_PROP, _dock_action, "design-prop", False),
         (DOCK_OPEN_PROP_IMAGE, _dock_action, "open-prop-image", False),
         (DOCK_NEW_PROP, _dock_prop_menu, "new", True),

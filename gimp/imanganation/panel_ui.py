@@ -175,7 +175,9 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
                 new_prop_action: str = "", design_prop_menu: str = "",
                 delete_prop_menu: str = "",
                 design_prop_action: str = "",
-                inline_choices: bool = False) -> dict[str, str]:
+                inline_choices: bool = False,
+                character_buttons: tuple[tuple[str, str], ...] = (),
+                delete_prop_action: str = "", delete_location_action: str = "") -> dict[str, str]:
     """Build generic host content and stable selections from a project manifest.
 
     The Context (inspector) rows are editable fields; ``open_page_action``, a dock
@@ -220,7 +222,10 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
     Frame size from typed fields into choice rows the host draws as a drop-down (one
     value, typing allowed) or a check list (several, in order), built from the project's
     own lists (``field_choices``). A choice commits like a field: ``<panel id>.<field>``
-    and the new text."""
+    and the new text. ``character_buttons`` are (dock procedure, label) buttons for a
+    selected character's Context (rename, delete, another reference…), and
+    ``delete_prop_action`` / ``delete_location_action`` a Delete button in a prop's or
+    location's; the same actions stay on the Project tree's right-click menus."""
     panels = manifest.get("panels", [])
     pages = manifest.get("pages", [])
     page_by_id = {page["id"]: page for page in pages}
@@ -649,6 +654,7 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
         ])
         if design_action:
             inspector_rows.append(f"!{design_action}\tDesign character")
+        inspector_rows.extend(f"!{proc}\t{label}" for proc, label in character_buttons if proc)
     elif selected_id in location_by_id:
         location = location_by_id[selected_id]
         key = _location_key(location.get("name", ""))
@@ -663,6 +669,8 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
         ])
         if design_location_action:
             inspector_rows.append(f"!{design_location_action}\tDesign location")
+        if delete_location_action:
+            inspector_rows.append(f"!{delete_location_action}\tDelete location…")
     elif selected_id in prop_by_id:
         prop = prop_by_id[selected_id]
         key = prop_key(prop.get("name", ""))
@@ -677,6 +685,8 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
         ])
         if design_prop_action:
             inspector_rows.append(f"!{design_prop_action}\tDesign prop")
+        if delete_prop_action:
+            inspector_rows.append(f"!{delete_prop_action}\tDelete prop…")
     else:
         inspector_rows.extend(["# Project", f"Title\t{title}",
                                f"Panels\t{len(panels)}", f"Pages\t{len(pages)}"])

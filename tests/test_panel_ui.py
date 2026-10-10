@@ -600,3 +600,21 @@ def test_choice_options_cannot_break_the_row_format():
                                       inline_choices=True)["inspector"].splitlines()
                if r.startswith("+") and ".props\t" in r)
     assert len(row.split("\t")) == 4 and "Odd/prop name" in row.split("\t")[3].split("|")
+
+
+def test_character_prop_and_location_contexts_have_visible_delete_and_rename_buttons():
+    manifest = copy.deepcopy(EXAMPLE)
+    buttons = (("var", "Design another reference…"), ("ren", "Rename character…"),
+               ("del", "Delete character…"))
+    who = build_docks(manifest, character_row_id(manifest["cast"][0]["name"]),
+                      design_action="design", character_buttons=buttons)["inspector"]
+    assert ("!design\tDesign character\n!var\tDesign another reference…\n"
+            "!ren\tRename character…\n!del\tDelete character…") in who
+    assert "Rename" not in build_docks(manifest, character_row_id(
+        manifest["cast"][0]["name"]))["inspector"]  # no actions given: no buttons
+    prop = build_docks(manifest, prop_row_id(manifest["props"][0]["name"]),
+                       delete_prop_action="dp")["inspector"]
+    assert "!dp\tDelete prop…" in prop
+    place = build_docks(manifest, location_row_id("School rooftop"),
+                        delete_location_action="dl")["inspector"]
+    assert "!dl\tDelete location…" in place

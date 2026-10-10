@@ -1005,6 +1005,48 @@ def find_cast_member(document: dict[str, Any], name: str) -> dict[str, Any] | No
                 None)
 
 
+def rename_character(document: dict[str, Any], old: str,
+                     new: str) -> tuple[dict[str, Any], list[str]]:
+    """Give a cast member a new name (the caller saves). The old name stays as an alias, so
+    the script's text still finds them; panels that list them, and their expressions, take
+    the new name. Dialogue speakers are script text and stay. Returns the cast entry and
+    the ids of the panels that changed."""
+    member = find_cast_member(document, old)
+    if member is None:
+        raise ProjectFileError(f"{old} is not in this project's cast")
+    new = " ".join(new.split())
+    if not new:
+        raise ProjectFileError("a character needs a name")
+    other = find_cast_member(document, new)
+    if other is not None and other is not member:
+        raise ProjectFileError(f"{new} is already {other['name']}'s name or alias")
+    spellings = {n.casefold() for n in (member["name"], *member.get("aliases", []))}
+    previous = member["name"]
+    changed = []
+    for panel in document["panels"]:
+        touched = False
+        for entry in panel.get("characters", []):
+            if entry.get("name", "").casefold() in spellings:
+                entry["name"], touched = new, True
+        expressions = panel.get("expressions") or {}
+        if any(who.casefold() in spellings for who in expressions):
+            panel["expressions"] = {(new if who.casefold() in spellings else who): what
+                                    for who, what in expressions.items()}
+            touched = True
+        if touched:
+            changed.append(panel["id"])
+    aliases = [a for a in member.get("aliases", []) if a.casefold() != new.casefold()]
+    if previous.casefold() != new.casefold() and previous.casefold() not in {
+            a.casefold() for a in aliases}:
+        aliases.append(previous)
+    member["name"] = new
+    if aliases:
+        member["aliases"] = aliases
+    else:
+        member.pop("aliases", None)
+    return member, changed
+
+
 def panels_with_character(document: dict[str, Any], name: str) -> list[dict[str, Any]]:
     """Panels that list this cast member (by name or alias) among their characters."""
     member = find_cast_member(document, name)

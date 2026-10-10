@@ -136,6 +136,19 @@ class VersionRequest(BaseModel):
         return self
 
 
+class CharacterRenameRequest(BaseModel):
+    project_dir: str | None = None
+    project: str | None = Field(default=None, pattern=r"^prj_[a-z0-9]{6,}$")
+    name: str = Field(min_length=1)
+    new_name: str = Field(min_length=1, max_length=120)
+
+    @model_validator(mode="after")
+    def _one_form(self):
+        if (self.project is None) == (self.project_dir is None):
+            raise ValueError("send either project (container id) or project_dir")
+        return self
+
+
 class ReferenceRequest(BaseModel):
     project_dir: str | None = None
     project: str | None = Field(default=None, pattern=r"^prj_[a-z0-9]{6,}$")
@@ -1047,6 +1060,21 @@ def create_app(
             raise HTTPException(404, f"{character.name} has no reference {req.version!r} "
                                      f"(has: {have})")
         return reg, character
+
+    @app.post("/characters/rename")
+    def rename_character(req: CharacterRenameRequest) -> dict:
+        """Give a character a new name (their folder and reference paths follow; the old
+        name stays as an alias). Synchronous."""
+        reg = _registry(req.project_dir, req.project)
+        try:
+            character = reg.rename(req.name, req.new_name)
+        except KeyError as exc:
+            known = ", ".join(c.name for c in reg.cast.characters) or "none"
+            raise HTTPException(404, f"no character {req.name!r} (known: {known})") from exc
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return {"name": character.name, "aliases": character.aliases,
+                "versions": [v.id for v in character.versions]}
 
     @app.post("/characters/versions/default")
     def make_version_default(req: VersionRequest) -> dict:

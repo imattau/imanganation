@@ -254,6 +254,7 @@ references in all), other engines its name, and its description when there is on
 | `POST /refine`, `POST /inpaint` | Above |
 | `GET /characters` | The cast, by `project` or legacy `project_dir` |
 | `POST /characters/reference` | Register an image as a character's new active reference version |
+| `POST /characters/rename` | Rename a character (folder and reference paths follow; the old name becomes an alias) |
 | `POST /characters/versions/default\|rename\|delete` | Make a character's reference version the default, rename it, or set it aside |
 | `DELETE /characters` | Remove a character; their designs move to `characters/.deleted/` |
 | `GET /setup`, `POST /setup/download\|link\|cancel` | Model files: state, download, link existing, pause |

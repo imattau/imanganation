@@ -296,6 +296,14 @@ page placement metadata are still being migrated. Image procedures are grouped u
   are the fork's new `?` (drop-down) and `+` (check list) rows of a properties dock
   (`gimpextensionpanel.c`; `scripts/test-choice-widgets.sh` builds and runs them without
   compiling GIMP). A host without them shows the rows as plain text.
+- **Buttons in Context.** A selected character's Context has **Design character**,
+  **Design another reference…**, **Rename character…** and **Delete character…**, and each
+  reference image row has **Manage…** (Open in GIMP, Make default, Rename…, Delete…); a
+  prop's and a location's Context has **Delete prop…** / **Delete location…**. These are
+  the same actions as the Project tree's right-click menus and the Gallery's. Renaming a
+  character keeps the old name as an alias (so the script's text still finds them), moves
+  their folder in the engine, and renames them in every panel and expression; dialogue
+  speakers are script text and stay as written (`POST /characters/rename`).
 - **Regenerate Panel…**: select a placed panel (its layer or group). It is re-rendered
   from the **current** `panels.json`, so script edits apply, at its frame's size. The
   new take (`003_take02.png`…) goes into the same group, cover-fitted to the frame

@@ -115,6 +115,39 @@ class CharacterRegistry:
         self.save()
         return character, moved
 
+    def rename(self, name: str, new_name: str) -> Character:
+        """Give a character a new name. Their folder moves with it and their reference
+        images' paths follow; the old name stays as an alias, so scripts and panels that
+        still say it find them. KeyError: no such character; ValueError: the new name is
+        empty or another character's."""
+        character = self.cast.get(name)
+        if character is None:
+            raise KeyError(f"no such character: {name}")
+        new_name = " ".join(new_name.split())
+        if not new_name:
+            raise ValueError("a character needs a name")
+        other = self.cast.get(new_name)
+        if other is not None and other is not character:
+            raise ValueError(f"{new_name} is already {other.name}'s name or alias")
+        old_dir, new_dir = self.character_dir(character.name), self.character_dir(new_name)
+        if old_dir != new_dir:
+            if new_dir.exists():
+                raise ValueError(f"the folder {new_dir.name} already exists")
+            if old_dir.is_dir():
+                old_dir.rename(new_dir)
+            before, after = f"{old_dir.relative_to(self.root)}/", f"{new_dir.relative_to(self.root)}/"
+            for version in character.versions:
+                if version.image.startswith(before):
+                    version.image = after + version.image[len(before):]
+        old = character.name
+        if old.casefold() != new_name.casefold() and not any(
+                a.casefold() == old.casefold() for a in character.aliases):
+            character.aliases.append(old)
+        character.aliases = [a for a in character.aliases if a.casefold() != new_name.casefold()]
+        character.name = new_name
+        self.save()
+        return character
+
     # --- versions -----------------------------------------------------------
 
     def add_version(
