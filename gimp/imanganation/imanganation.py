@@ -243,6 +243,7 @@ DOCK_ACTIVATE_TAKE = "plug-in-imanganation-dock-activate-take"
 # Context (a page, or a panel on one): render every panel waiting on that page
 DOCK_GENERATE_PAGE = "plug-in-imanganation-dock-generate-page"
 DOCK_GENERATE_LAYOUT = "plug-in-imanganation-dock-generate-page-layout"
+DOCK_STORYBOARD = "plug-in-imanganation-dock-storyboard-review"
 # Speech bubbles: a script line's Bubble… (item "<panel id>:<line>"), a page's free
 # Bubble…, a Bubbles dock tile (item: template id), Fit bubble to text
 DOCK_BUBBLE_LINE = "plug-in-imanganation-dock-bubble-line"
@@ -3330,7 +3331,8 @@ def _refresh_project_docks(sync_canvas=False):
         selected_id = _selected_canvas_panel_id(manifest) or selected_id
     contents = build_docks(
         manifest, selected_id, root, _project_page_thumbnails(root, manifest),
-        DOCK_OPEN_PAGE, DOCK_GENERATE_LAYOUT, **_dock_actions(root, manifest))
+        DOCK_OPEN_PAGE, DOCK_GENERATE_LAYOUT, storyboard_action=DOCK_STORYBOARD,
+        **_dock_actions(root, manifest))
     _DOCK_CONTEXT["selected_id"] = contents["selected_id"]
     contents["gallery"] = _gallery_content(root, manifest, contents["selected_id"])
     canvas_rows = _canvas_take_rows(manifest)
@@ -3794,6 +3796,159 @@ def _generate_page_panels():
                         "; the rest still have no render."))
 
 
+def _storyboard_review(root, page_id):
+    """Review the current page image beside its script beats, without editing it."""
+    manifest = load_project(root)
+    page = next((item for item in manifest["pages"] if item["id"] == page_id), None)
+    if page is None:
+        raise ValueError("Select a project page first")
+    page_number = script_page_number(manifest, page_id)
+    panels = [panel for panel in manifest["panels"]
+              if panel.get("status") != "orphaned"
+              and (panel.get("label") or {}).get("page") == page_number]
+
+    title = page.get("label") or "Page"
+    dialog = Gtk.Dialog(title=f"Storyboard Review · {title}", flags=Gtk.DialogFlags.MODAL)
+    dialog.add_button(Gtk.STOCK_CLOSE, Gtk.ResponseType.CANCEL)
+    dialog.add_button("Open page", Gtk.ResponseType.OK)
+    dialog.add_button("Open selected panel", 1)
+    dialog.set_default_size(980, 680)
+    content = dialog.get_content_area()
+    content.set_spacing(10)
+    content.set_margin_top(12)
+    content.set_margin_bottom(12)
+    content.set_margin_start(12)
+    content.set_margin_end(12)
+
+    reading_order = ("right-to-left" if manifest["project"].get("reading_order") == "rtl"
+                     else "left-to-right")
+    intro = Gtk.Label(label=(f"{title} · {len(panels)} script panel"
+                             f"{'s' if len(panels) != 1 else ''} · "
+                             f"{reading_order} reading order"))
+    intro.set_xalign(0)
+    content.pack_start(intro, False, False, 0)
+
+    columns = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=14)
+    content.pack_start(columns, True, True, 0)
+
+    page_column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+    page_column.set_size_request(300, -1)
+    page_heading = Gtk.Label(label="Current page")
+    page_heading.set_xalign(0)
+    page_column.pack_start(page_heading, False, False, 0)
+    preview_frame = Gtk.Frame()
+    preview_frame.set_shadow_type(Gtk.ShadowType.IN)
+    page_file = _page_thumbnail(root, manifest, page)
+    if page_file:
+        try:
+            pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(page_file, 360, 520, True)
+            preview = Gtk.Image.new_from_pixbuf(pixbuf)
+            preview_frame.add(preview)
+        except Exception:
+            page_file = None
+    if not page_file:
+        empty = Gtk.Label(label=("Page preview unavailable\n"
+                                 "Open the page in GIMP to see its latest artwork."))
+        empty.set_line_wrap(True)
+        empty.set_justify(Gtk.Justification.CENTER)
+        empty.set_margin_top(28)
+        empty.set_margin_bottom(28)
+        empty.set_margin_start(18)
+        empty.set_margin_end(18)
+        preview_frame.add(empty)
+    page_column.pack_start(preview_frame, True, True, 0)
+    page_note = Gtk.Label(label="Artwork preview · script beats at right")
+    page_note.set_xalign(0)
+    page_note.set_line_wrap(True)
+    page_column.pack_start(page_note, False, False, 0)
+    columns.pack_start(page_column, False, False, 0)
+
+    beats_column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+    beats_heading = Gtk.Label(label="Story beats · script order")
+    beats_heading.set_xalign(0)
+    beats_column.pack_start(beats_heading, False, False, 0)
+    beat_list = Gtk.ListBox()
+    beat_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
+    beat_scroll = Gtk.ScrolledWindow()
+    beat_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+    beat_scroll.set_min_content_width(520)
+    beat_scroll.add(beat_list)
+    beats_column.pack_start(beat_scroll, True, True, 0)
+    columns.pack_start(beats_column, True, True, 0)
+
+    def add_text(parent, value, *, bold=False, dim=False):
+        label = Gtk.Label()
+        label.set_markup(GLib.markup_escape_text(value) if not bold else
+                         f"<b>{GLib.markup_escape_text(value)}</b>")
+        label.set_xalign(0)
+        label.set_line_wrap(True)
+        label.set_selectable(True)
+        if dim:
+            label.set_opacity(0.72)
+        parent.pack_start(label, False, False, 0)
+        return label
+
+    for panel in panels:
+        placement = panel.get("placement") or {}
+        if panel.get("takes"):
+            art_state = f"Art: {len(panel['takes'])} take{'s' if len(panel['takes']) != 1 else ''}"
+        else:
+            art_state = "Art: not rendered"
+        if placement.get("page") == page_id:
+            frame_state = "Frame: on this page"
+        elif placement.get("page"):
+            frame_state = "Frame: on another page"
+        else:
+            frame_state = "Frame: not placed"
+        number = (panel.get("label") or {}).get("panel", "—")
+        row = Gtk.ListBoxRow()
+        row.set_name(panel["id"])
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
+        card.set_border_width(9)
+        heading = Gtk.Label(label=f"Panel {number} · {art_state} · {frame_state}")
+        heading.set_xalign(0)
+        heading.set_line_wrap(True)
+        card.pack_start(heading, False, False, 0)
+        action = (panel.get("action") or "").strip() or "No action described."
+        add_text(card, action, bold=True)
+        dialogue = panel.get("dialogue") or []
+        for line in dialogue:
+            speaker = line.get("speaker") or "Unassigned"
+            kind = line.get("kind") or "speech"
+            kind_text = f" ({kind})" if kind != "speech" else ""
+            add_text(card, f"{speaker}{kind_text}: {line.get('text', '')}")
+        for sound in panel.get("sfx") or []:
+            add_text(card, f"SFX · {sound}")
+        if not dialogue and not panel.get("sfx"):
+            add_text(card, "No dialogue or sound effects.", dim=True)
+        row.add(card)
+        beat_list.add(row)
+
+    first = beat_list.get_row_at_index(0)
+    if first is not None:
+        beat_list.select_row(first)
+    else:
+        add_text(beats_column, "No script panels are assigned to this page.", dim=True)
+    open_panel_button = dialog.get_widget_for_response(1)
+    if open_panel_button is not None:
+        open_panel_button.set_sensitive(first is not None)
+    dialog.show_all()
+    response = dialog.run()
+    selected = beat_list.get_selected_row() if response == 1 else None
+    selected_panel_id = selected.get_name() if selected is not None else None
+    dialog.destroy()
+
+    if response in (Gtk.ResponseType.OK, 1):
+        image = _show_project_page(root, manifest, page_id)
+        if selected_panel_id:
+            _DOCK_CONTEXT["selected_id"] = selected_panel_id
+            group = _find_panel_group(
+                image, {"project": manifest["project"]["id"], "panel": selected_panel_id})
+            if group is not None:
+                image.set_selected_layers([group])
+        _refresh_project_docks()
+
+
 def _dock_action(procedure, config, data):
     try:
         if data == "open-project":
@@ -3848,6 +4003,14 @@ def _dock_action(procedure, config, data):
             if status not in (Gimp.PDBStatusType.SUCCESS, Gimp.PDBStatusType.CANCEL):
                 raise RuntimeError(error or "Generate layout failed")
             _refresh_project_docks()
+        elif data == "storyboard-review":
+            root = _DOCK_CONTEXT.get("root")
+            if root is None:
+                raise ValueError("Open a project first")
+            selected = _DOCK_CONTEXT.get("selected_id")
+            if not any(page["id"] == selected for page in load_project(root)["pages"]):
+                raise ValueError("Select a page in the Pages or Project dock first")
+            _storyboard_review(root, selected)
         elif data == "match-panel":
             _match_selected_panel()
             _refresh_project_docks()
@@ -7042,6 +7205,7 @@ def _add_dock_callbacks(plugin):
         (DOCK_NEW_BUBBLE, _dock_bubble, "new", False),
         (DOCK_FIT_BUBBLE, _dock_bubble, "fit", False),
         (DOCK_GENERATE_LAYOUT, _dock_action, "generate-layout", False),
+        (DOCK_STORYBOARD, _dock_action, "storyboard-review", False),
         (DOCK_GENERATE_PAGE, _dock_action, "generate-page", False),
         # Page strip: clicking a page opens it; the button adds one (as in Project)
         (DOCK_ACTIONS[DOCK_FILMSTRIP], _dock_action, "project-action", False),
@@ -7101,7 +7265,8 @@ def _register_project_docks(plugin):
         contents = build_docks(
             manifest, _DOCK_CONTEXT.get("selected_id"), root,
             _project_page_thumbnails(root, manifest), DOCK_OPEN_PAGE,
-            DOCK_GENERATE_LAYOUT, **_dock_actions(root, manifest))
+            DOCK_GENERATE_LAYOUT, storyboard_action=DOCK_STORYBOARD,
+            **_dock_actions(root, manifest))
         contents["gallery"] = _gallery_content(root, manifest, contents["selected_id"])
         rows = [
             (DOCK_PROJECT, "Project", "tree", contents["project"],

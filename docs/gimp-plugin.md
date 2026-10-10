@@ -246,6 +246,13 @@ page placement metadata are still being migrated. Image procedures are grouped u
   **Back Cover** offer colored safe-area, title, art, credits, blurb, issue-mark, or
   barcode guides instead. Cover guides do not create panels and should be hidden before
   export. All generated layers are editable and existing page artwork is preserved.
+- **Review storyboard…**: on a selected project page, opens a non-destructive review
+  with the current page preview on the left and its script beats in reading order on the
+  right. Each beat shows the action, dialogue, SFX, whether it has rendered art, and
+  whether its frame is on this page. Choose **Open page** to return to the page, or
+  select a beat and choose **Open selected panel** to open the page and select that
+  panel. The review uses the script page number and remains useful before frames or art
+  exist; it does not edit the page or duplicate dialogue into new layers.
 - **Cancel, queue and takes.** While any engine job runs, a small window shows the
   queue position or elapsed time and a **Cancel** button (`POST /jobs/{id}/cancel`: a
   queued job is dropped, a running one is interrupted in ComfyUI). Cancelling isn't an

@@ -172,6 +172,7 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
                 add_cover_page_action: str = "",
                 take_action: str = "",
                 generate_page_action: str = "",
+                storyboard_action: str = "",
                 new_prop_action: str = "", design_prop_menu: str = "",
                 delete_prop_menu: str = "",
                 design_prop_action: str = "",
@@ -589,6 +590,8 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
             f"Progress\t{page_progress(page)}",
             f"Placed panels\t{len(panels_on_page)}",
         ])
+        if storyboard_action:
+            inspector_rows.append(f"!{storyboard_action}\tReview storyboard…")
         availability = page_layout_availability(manifest, selected_id)
         inspector_rows.append("# Page layout")
         if not availability["available"]:
