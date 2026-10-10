@@ -226,6 +226,12 @@ page placement metadata are still being migrated. Image procedures are grouped u
   guides are omitted, and generated page
   frame/template layers are omitted by default; select **Include generated panel frame
   layers** to export those lines too.
+  **Vertical comic episode** stacks selected flattened pages in reading order and splits
+  the strip into numbered PNG or JPEG images. WEBTOON CANVAS, Tapas and Custom presets
+  provide editable width, slice-height and page-gap settings. Presets check per-image
+  and combined image sizes before writing; JPEG quality is adjustable. The output folder
+  includes `export-info.txt` with settings and the slice list. This stacks complete pages
+  and does not rearrange individual panels.
 
 - **Render Panel into Frame…** (the main flow): needs a selection, which is the target
   frame. It sends the next panel's `seq` and the frame's size to the engine, which

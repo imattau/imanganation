@@ -2546,11 +2546,12 @@ def _export_dialog(project_title, reading_order):
     dialog = Gtk.Dialog(title="Export Imanganation Project", flags=Gtk.DialogFlags.MODAL)
     dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
                        "Export…", Gtk.ResponseType.OK)
-    dialog.set_default_size(460, 300)
+    dialog.set_default_size(500, 430)
     grid = Gtk.Grid(column_spacing=12, row_spacing=10, margin=12)
     format_combo = Gtk.ComboBoxText()
     for ident, label in (("cbz", "CBZ comic archive"), ("pdf", "PDF volume"),
-                         ("images", "Page image folder")):
+                         ("images", "Page image folder"),
+                         ("vertical", "Vertical comic episode")):
         format_combo.append(ident, label)
     format_combo.set_active_id("cbz")
     image_combo = Gtk.ComboBoxText()
@@ -2593,6 +2594,23 @@ def _export_dialog(project_title, reading_order):
                                 "something like 1-4, 7")
     grid.attach(Gtk.Label(label="Pages"), 0, 8, 1, 1)
     grid.attach(page_range, 1, 8, 1, 1)
+    preset = Gtk.ComboBoxText()
+    for ident, label in (("webtoon", "WEBTOON CANVAS"), ("tapas", "Tapas"),
+                         ("custom", "Custom")):
+        preset.append(ident, label)
+    preset.set_active_id("webtoon")
+    vertical_width = Gtk.SpinButton.new_with_range(100, 10000, 10)
+    vertical_width.set_value(800)
+    slice_height = Gtk.SpinButton.new_with_range(100, 50000, 10)
+    slice_height.set_value(1280)
+    page_gap = Gtk.SpinButton.new_with_range(0, 2000, 4)
+    page_gap.set_value(48)
+    for row, label, widget in ((9, "Vertical preset", preset),
+                               (10, "Output width (px)", vertical_width),
+                               (11, "Maximum slice height (px)", slice_height),
+                               (12, "Gap between pages (px)", page_gap)):
+        grid.attach(Gtk.Label(label=label), 0, row, 1, 1)
+        grid.attach(widget, 1, row, 1, 1)
     dialog.get_content_area().add(grid)
 
     def image_format_changed(_combo):
@@ -2602,9 +2620,22 @@ def _export_dialog(project_title, reading_order):
 
     def export_format_changed(_combo):
         include_metadata.set_sensitive(format_combo.get_active_id() == "cbz")
+        vertical = format_combo.get_active_id() == "vertical"
+        preset.set_sensitive(vertical)
+        vertical_width.set_sensitive(vertical)
+        slice_height.set_sensitive(vertical)
+        page_gap.set_sensitive(vertical)
+
+    def preset_changed(_combo):
+        values = export_formats.VERTICAL_PRESETS.get(preset.get_active_id() or "webtoon")
+        if values:
+            vertical_width.set_value(values["width"])
+            slice_height.set_value(values["slice_height"])
 
     image_combo.connect("changed", image_format_changed)
     format_combo.connect("changed", export_format_changed)
+    preset.connect("changed", preset_changed)
+    preset_changed(preset)
     image_format_changed(image_combo)
     export_format_changed(format_combo)
     dialog.show_all()
@@ -2619,15 +2650,20 @@ def _export_dialog(project_title, reading_order):
                    "include_metadata": include_metadata.get_active(),
                    "reverse": reverse.get_active(),
                    "reading_order": direction_combo.get_active_id() or "rtl",
-                   "page_range": page_range.get_text()}
+                   "page_range": page_range.get_text(),
+                   "vertical_preset": preset.get_active_id() or "custom",
+                   "vertical_width": vertical_width.get_value_as_int(),
+                   "slice_height": slice_height.get_value_as_int(),
+                   "page_gap": page_gap.get_value_as_int()}
     dialog.destroy()
     return choices
 
 
 def _export_destination(project_title, export_format):
-    if export_format == "images":
+    if export_format in {"images", "vertical"}:
         action = Gtk.FileChooserAction.SELECT_FOLDER
-        title, accept = "Choose parent folder for page images", "Select"
+        title, accept = ("Choose parent folder for vertical episode" if export_format == "vertical"
+                         else "Choose parent folder for page images"), "Select"
     else:
         action = Gtk.FileChooserAction.SAVE
         title, accept = "Save Imanganation export", "Save"
@@ -2635,7 +2671,7 @@ def _export_destination(project_title, export_format):
     chooser.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
                         accept, Gtk.ResponseType.ACCEPT)
     chooser.set_do_overwrite_confirmation(True)
-    if export_format != "images":
+    if export_format not in {"images", "vertical"}:
         extension = ".cbz" if export_format == "cbz" else ".pdf"
         stem = re.sub(r"[^A-Za-z0-9._-]+", "-", project_title).strip(".-_") or "manga"
         chooser.set_current_name(stem + extension)
@@ -2748,13 +2784,17 @@ def export_project(procedure, run_mode, image, drawables, config, data):
                     raise ValueError("Save the open project page before exporting")
 
         suffix = ".jpg" if options["image_format"] == "jpeg" else ".png"
+        stem = re.sub(r"[^A-Za-z0-9._-]+", "-",
+                      manifest["project"].get("title", "manga")).strip(".-_") or "manga"
         if options["format"] == "images":
-            stem = re.sub(r"[^A-Za-z0-9._-]+", "-",
-                          manifest["project"].get("title", "manga")).strip(".-_") or "manga"
             destination = destination / f"{stem}-pages"
             if destination.exists():
                 raise ValueError(f"Export folder already exists: {destination}")
             destination.mkdir(parents=True)
+        elif options["format"] == "vertical":
+            destination = destination / f"{stem}-vertical"
+            if destination.exists():
+                raise ValueError(f"Export folder already exists: {destination}")
         temporary = root / "tmp" / f"export-{secrets.token_hex(6)}"
         temporary.mkdir(parents=True, exist_ok=False)
         page_files = []
@@ -2769,7 +2809,7 @@ def export_project(procedure, run_mode, image, drawables, config, data):
                     Gio.File.new_for_path(str(root / page["file"])))
                 close_after = current is None
                 try:
-                    ext = suffix
+                    ext = ".png" if options["format"] == "vertical" else suffix
                     filename = export_formats.safe_page_stem(page.get("label"), index) + ext
                     staged = temporary / filename
                     _save_project_export_page(loaded, staged, options["image_format"],
@@ -2793,13 +2833,61 @@ def export_project(procedure, run_mode, image, drawables, config, data):
                 destination = destination.with_suffix(".pdf")
                 export_formats.write_pdf(destination, pdf_pages,
                                          manifest["project"].get("title", ""))
-            else:
+            elif options["format"] == "images":
                 for filename, staged in page_files:
                     os.replace(staged, destination / filename)
+            else:
+                slice_dir = temporary / "slices"
+                preset = export_formats.VERTICAL_PRESETS.get(
+                    options.get("vertical_preset"), export_formats.VERTICAL_PRESETS["custom"])
+                slices = export_formats.write_vertical_slices(
+                    page_files, slice_dir, width=options["vertical_width"],
+                    slice_height=options["slice_height"], gap=options["page_gap"],
+                    prefix=stem)
+                if options["image_format"] == "jpeg":
+                    for slice_path in slices:
+                        loaded = Gimp.file_load(Gimp.RunMode.NONINTERACTIVE,
+                                                Gio.File.new_for_path(str(slice_path)))
+                        jpg_path = slice_path.with_suffix(".jpg")
+                        try:
+                            _save_project_export_page(loaded, jpg_path, "jpeg",
+                                                      options["quality"], True)
+                        finally:
+                            loaded.delete()
+                        slice_path.unlink()
+                    slices = sorted(slice_dir.glob("*.jpg"))
+                total_bytes = sum(path.stat().st_size for path in slices)
+                max_file = preset["max_file_mb"] * 1024 * 1024
+                max_episode = preset["max_episode_mb"] * 1024 * 1024
+                too_large = [path.name for path in slices
+                             if max_file and path.stat().st_size > max_file]
+                if too_large or (max_episode and total_bytes > max_episode):
+                    reasons = []
+                    if too_large:
+                        reasons.append("over per-image limit: " + ", ".join(too_large))
+                    if max_episode and total_bytes > max_episode:
+                        reasons.append(f"episode is {total_bytes / 1048576:.1f} MB, above "
+                                       f"the {preset['max_episode_mb']} MB limit")
+                    raise ValueError("Vertical export exceeds the preset limits (" +
+                                     "; ".join(reasons) +"). Lower JPEG quality or output "
+                                     "width, or choose Custom to export without platform limits.")
+                destination.mkdir(parents=True)
+                for path in slices:
+                    os.replace(path, destination / path.name)
+                (destination / "export-info.txt").write_text(
+                    f"Preset: {preset['label']}\nWidth: {options['vertical_width']} px\n"
+                    f"Maximum slice height: {options['slice_height']} px\n"
+                    f"Page gap: {options['page_gap']} px\nFormat: {options['image_format']}\n"
+                    f"Total: {total_bytes} bytes\n\n"
+                    + "\n".join(path.name for path in slices) + "\n", encoding="utf-8")
         finally:
             import shutil
             shutil.rmtree(temporary, ignore_errors=True)
-        Gimp.message(f"Exported {len(pages)} pages to {destination}")
+        if options["format"] == "vertical":
+            Gimp.message(f"Exported {len(slices)} vertical slices ({total_bytes / 1048576:.1f} MB) "
+                         f"to {destination}")
+        else:
+            Gimp.message(f"Exported {len(pages)} pages to {destination}")
         return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
     except Exception as exc:
         return _error(procedure, str(exc))
@@ -8107,9 +8195,9 @@ class Imanganation(Gimp.PlugIn):
             proc.set_menu_label("Export _Project...")
             proc.set_documentation(
                 "Export an Imanganation project for comic distribution",
-                "Export the ordered project pages as a CBZ archive, PDF volume, or page "
-                "image folder. Choose reading direction, cover inclusion, image format, "
-                "and page order.", name)
+                "Export the ordered project pages as a CBZ archive, PDF volume, page "
+                "image folder, or sliced vertical comic episode. Choose reading direction, "
+                "cover inclusion, image format, page order, and vertical export dimensions.", name)
             return proc
 
         proc.add_layer_return_value(
