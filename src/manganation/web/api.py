@@ -830,6 +830,8 @@ def create_app(
         return [
             {"name": c.name, "aliases": c.aliases, "default_version": c.default_version,
              "versions": [v.id for v in c.versions],
+             "version_images": {v.id: str(reg.reference_path(c.name, v.id) or "")
+                                for v in c.versions},
              "reference": str(reg.reference_path(c.name) or "") or None}
             for c in reg.cast.characters
         ]

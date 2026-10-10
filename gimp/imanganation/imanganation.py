@@ -212,6 +212,7 @@ DOCK_REORDER_PAGES = "plug-in-imanganation-dock-reorder-pages"
 DOCK_ADD_PANEL = "plug-in-imanganation-dock-add-panel"
 DOCK_DELETE_PANEL = "plug-in-imanganation-dock-delete-panel"
 DOCK_ADD_COVER = "plug-in-imanganation-dock-add-cover"
+DOCK_OPEN_CHARACTER_VERSION = "plug-in-imanganation-dock-open-character-version"
 DOCK_DESIGN_VARIANT = "plug-in-imanganation-dock-design-variant"
 # Context: a panel character's "Reference…" (item "<panel id>:<index>")
 DOCK_CHARACTER_VERSION = "plug-in-imanganation-dock-character-version"
@@ -2802,7 +2803,7 @@ def _engine_reference_rows(root, manifest, selected_id):
     return rows
 
 
-def _engine_character_rows(root, character_name):
+def _engine_character_rows(root, character_name, open_buttons=False):
     query = urllib.parse.urlencode(_engine_project(root))
     try:
         characters = _http("GET", f"{ENGINE_URL}/characters?{query}", timeout=3)
@@ -2814,12 +2815,18 @@ def _engine_character_rows(root, character_name):
         return ["# Engine character record", "Status\tNot found in engine"]
     versions = character.get("versions", [])
     reference = "Available" if character.get("reference") else "Not set"
-    return [
+    rows = [
         "# Engine character record",
         f"Default version\t{character.get('default_version') or 'None'}",
         f"Versions\t{', '.join(versions) or 'None'}",
         f"Reference image\t{reference}",
     ]
+    if open_buttons:  # each reference image opens on its own, not just the default
+        images = character.get("version_images") or {}
+        rows += [f"{version}\t{'Default' if version == character.get('default_version') else 'Extra'}"
+                 f"\t!{DOCK_OPEN_CHARACTER_VERSION}:{version}:Open"
+                 for version in versions if images.get(version)]
+    return rows
 
 
 def _engine_location(root, manifest, name):
@@ -3073,6 +3080,10 @@ def _refresh_project_docks(sync_canvas=False):
         if character["name"] in _DESIGN_JOBS.values():
             engine_rows += "\nDesign\tIn progress…"
         contents["characters"] += "\n" + engine_rows
+        engine_rows = "\n".join(_engine_character_rows(
+            root, character["name"], open_buttons=True))
+        if character["name"] in _DESIGN_JOBS.values():
+            engine_rows += "\nDesign\tIn progress…"
         if "\nReference image\tAvailable" in engine_rows:
             engine_rows += (f"\n!{DOCK_OPEN_CHARACTER_IMAGE}\tOpen reference image"
                             "\nPaint over\tOpen it, edit, then Imanganation > Set "
@@ -5249,8 +5260,9 @@ def _open_selected_location_image():
     _open_reference_image(record["image"], LOCATION_PARASITE, root, location["name"])
 
 
-def _open_selected_character_image():
-    """Open the selected character's active reference image in GIMP."""
+def _open_selected_character_image(version=None):
+    """Open the selected character's reference image in GIMP: the active one, or the
+    named ``version`` (an extra reference)."""
     root = _DOCK_CONTEXT["root"]
     manifest = load_project(root)
     character = next((c for c in manifest["cast"]
@@ -5262,9 +5274,21 @@ def _open_selected_character_image():
     known = _http("GET", f"{ENGINE_URL}/characters?{query}", timeout=3)
     record = next((c for c in known
                    if c.get("name", "").casefold() == character["name"].casefold()), None)
-    if record is None or not record.get("reference"):
-        raise ValueError(f"{character['name']} has no reference image yet")
-    _open_reference_image(record["reference"], CHARACTER_PARASITE, root, record["name"])
+    path = ((record or {}).get("version_images") or {}).get(version) if version else \
+        (record or {}).get("reference")
+    if not path:
+        raise ValueError(f"{character['name']} has no reference image yet" if not version
+                         else f"{character['name']} has no reference called {version}")
+    _open_reference_image(path, CHARACTER_PARASITE, root, record["name"])
+
+
+def _dock_open_character_version(procedure, config, data):
+    """Context: Open on one of a character's reference images (item: its version)."""
+    try:
+        _open_selected_character_image(config.get_property("item") or None)
+    except Exception as exc:
+        return _error(procedure, str(exc))
+    return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
 
 
 def _choose_new_location():
@@ -6001,6 +6025,7 @@ def _add_dock_callbacks(plugin):
         (DOCK_ADD_COVER, _dock_panel_menu, "cover", True),
         (DOCK_CHARACTER_VERSION, _dock_character_version, "pick", True),
         (DOCK_DESIGN_VARIANT, _dock_character_menu, "variant", True),
+        (DOCK_OPEN_CHARACTER_VERSION, _dock_open_character_version, "open", True),
         (DOCK_REORDER_PAGES, _dock_page_menu, "reorder", True),
         (DOCK_BUBBLE_LINE, _dock_bubble, "line", True),
         (DOCK_BUBBLE_ITEM, _dock_bubble, "template", True),

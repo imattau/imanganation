@@ -129,3 +129,15 @@ def test_an_extra_reference_keeps_the_default_and_can_be_named(tmp_path):
     assert reg.reference_path("Yuki", "summer") == project / "characters/yuki/summer.png"
     listed = client.get("/characters", params={"project_dir": str(project)}).json()
     assert listed[0]["versions"] == ["base", "summer"]
+
+
+def test_characters_list_each_versions_image(tmp_path):
+    project = _project(tmp_path)
+    client = _client(tmp_path)
+    client.post("/characters/reference", json={
+        "project_dir": str(project), "name": "yuki", "image_path": str(_export(project)),
+        "make_default": False, "version_id": "summer"})
+    listed = client.get("/characters", params={"project_dir": str(project)}).json()[0]
+    assert listed["version_images"] == {
+        "base": str(project / "characters/yuki/base.png"),
+        "summer": str(project / "characters/yuki/summer.png")}
