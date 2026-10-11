@@ -567,8 +567,9 @@ def create_app(
             rgba.putalpha(figure.mask)
             path = folder / f"figure-{index:02d}.png"
             rgba.save(path)
-            results.append({"path": str(path), "box": [figure.box.x0, figure.box.y0,
-                           figure.box.x1, figure.box.y1], "score": figure.box.score})
+            results.append({"path": str(path), "score": float(figure.box.score),
+                            "box": [float(v) for v in (figure.box.x0, figure.box.y0,
+                                                       figure.box.x1, figure.box.y1)]})
         return {"width": image.width, "height": image.height, "figures": results}
 
     @app.post("/setup/download", status_code=202)

@@ -1928,6 +1928,8 @@ def create_character_masks(procedure, run_mode, image, drawables, config, data):
     finally:
         if source_path is not None:
             source_path.unlink(missing_ok=True)
+
+
 def set_character_reference(procedure, run_mode, image, drawables, config, data):
     layers = [d for d in drawables if isinstance(d, Gimp.Layer)]
     if not layers:
