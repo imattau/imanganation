@@ -583,7 +583,7 @@ function Workspace(props: WorkspaceProps) {
 
     {tab === 'people' && <section className="workspace-section">
       <div className="section-heading"><div><span className="eyebrow">CAST & REFERENCES</span><h2>Characters</h2></div><IonButton onClick={props.onAddCast}><Users size={17}/>&nbsp; Add</IonButton></div>
-      {saved.manifest.cast.length === 0 ? <Empty title="Build your cast" detail="Add character names, then attach reference art for your local generation workflow." action={props.onAddCast}/> : <IonList className="people-list">{saved.manifest.cast.map((person) => <IonItem key={person.name}><div className="avatar-mark">{person.name.slice(0, 1).toUpperCase()}</div><IonLabel><h3>{person.name}</h3><p>{person.notes || 'No character notes yet'}</p></IonLabel><span className="reference-pill">{Array.isArray(person.references) ? person.references.length : 0} refs</span><IonButton fill="clear" size="small" onClick={() => props.onAddReference(person.name)}>Add art</IonButton></IonItem>)}</IonList>}
+      {saved.manifest.cast.length === 0 ? <Empty title="Build your cast" detail="Add character names, then attach reference art for your local generation workflow." action={props.onAddCast}/> : <IonList className="people-list">{saved.manifest.cast.map((person) => <div className="person-entry" key={person.name}><IonItem><div className="avatar-mark">{person.name.slice(0, 1).toUpperCase()}</div><IonLabel><h3>{person.name}</h3><p>{person.notes || 'No character notes yet'}</p></IonLabel><span className="reference-pill">{Array.isArray(person.references) ? person.references.length : 0} refs</span><IonButton fill="clear" size="small" onClick={() => props.onAddReference(person.name)}>Add art</IonButton></IonItem>{Array.isArray(person.references) && person.references.length > 0 && <div className="reference-grid">{(person.references as string[]).map((path) => <ReferenceThumbnail key={path} projectId={saved.manifest.project.id} path={path}/>)}</div>}</div>)}</IonList>}
       <div className="secondary-library"><div className="library-heading"><h3>Locations & props</h3><div><IonButton fill="clear" size="small" onClick={() => props.onAddCollectionEntry('location')}>Add location</IonButton><IonButton fill="clear" size="small" onClick={() => props.onAddCollectionEntry('prop')}>Add prop</IonButton></div></div><p>{saved.manifest.locations?.length ?? 0} locations · {saved.manifest.props?.length ?? 0} props</p>{[...(saved.manifest.locations ?? []).map((item) => ({ ...item, kind: 'Location' })), ...(saved.manifest.props ?? []).map((item) => ({ ...item, kind: 'Prop' }))].map((item, index) => <div key={`${item.kind}-${item.name}-${index}`} className="object-row"><div><strong>{item.name}</strong><span>{item.kind}</span></div></div>)}</div>
     </section>}
 
@@ -647,6 +647,22 @@ function TakeThumbnail({ projectId, path }: { projectId: string; path: string })
     return () => { disposed = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
   }, [projectId, path]);
   return url ? <img className="take-thumbnail" src={url} alt="Imported panel artwork"/> : <div className="take-thumbnail empty">Artwork preview</div>;
+}
+
+function ReferenceThumbnail({ projectId, path }: { projectId: string; path: string }) {
+  const [url, setUrl] = useState('');
+  useEffect(() => {
+    let disposed = false;
+    let objectUrl = '';
+    void getProjectFile(projectId, path).then((bytes) => {
+      if (!bytes) return;
+      objectUrl = URL.createObjectURL(new Blob([Uint8Array.from(bytes).buffer as ArrayBuffer]));
+      if (disposed) URL.revokeObjectURL(objectUrl);
+      else setUrl(objectUrl);
+    }).catch(() => setUrl(''));
+    return () => { disposed = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [projectId, path]);
+  return url ? <img className="reference-thumbnail" src={url} alt="Character reference"/> : <div className="reference-thumbnail missing">Loading reference…</div>;
 }
 
 function chooseImageFile(onFile: (file: File) => void): void {

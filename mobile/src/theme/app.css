@@ -72,6 +72,10 @@ ion-content { --background: #f4f0e8; }
 .people-list ion-item p { color: #778295; font-size: 11px; }
 .avatar-mark { display: grid; place-items: center; flex: 0 0 38px; width: 38px; height: 38px; margin-right: 12px; border-radius: 14px; color: #fffaf1; background: #d96d45; font-weight: 850; }
 .reference-pill { font-size: 9px; padding: 6px 8px; }
+.person-entry { margin-bottom: 8px; }
+.reference-grid { display: flex; gap: 8px; overflow-x: auto; padding: 4px 12px 12px; }
+.reference-thumbnail { flex: 0 0 88px; width: 88px; height: 88px; object-fit: cover; border: 1px solid #e8e1d6; border-radius: 10px; background: #f4f1eb; }
+.reference-thumbnail.missing { display: grid; place-items: center; color: #738096; font-size: 10px; }
 .secondary-library { margin-top: 22px; padding: 16px; border-radius: 14px; background: #ebe6dd; }
 .secondary-library h3 { margin: 0 0 6px; color: #293a56; font: 700 17px Georgia,serif; }
 .secondary-library p { margin: 3px 0; color: #66758b; font-size: 12px; }
