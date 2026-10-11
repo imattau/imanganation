@@ -113,6 +113,9 @@ ion-content { --background: #f4f0e8; }
 .page-panel-handle span { pointer-events: none; }
 .page-card-caption { display: flex; justify-content: space-between; padding: 10px 3px 2px; font-size: 11px; color: #738096; }
 .page-card-caption strong { color: #293a56; }
+.page-order-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 1px solid #eee8df; color: #738096; font-size: 11px; }
+.page-order-actions div { display: flex; gap: 6px; }
+.page-order-actions ion-button { margin: 0; --padding-start: 9px; --padding-end: 9px; font-size: 11px; }
 .place-panel-list { margin-top: 12px; padding: 10px; background: #f4f0e8; border-radius: 10px; }
 .place-panel-list > strong { display: block; margin: 0 3px 6px; color: #738096; font-size: 10px; text-transform: uppercase; letter-spacing: .1em; }
 .place-panel-list button { display: flex; width: 100%; justify-content: space-between; align-items: center; padding: 10px 3px; border: 0; border-top: 1px solid #e5ded4; background: transparent; color: #293a56; text-align: left; font: 600 12px var(--ion-font-family); }

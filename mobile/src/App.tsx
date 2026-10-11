@@ -185,6 +185,17 @@ export default function App() {
     catch (error) { setNotice(message(error)); }
   };
 
+  const movePage = async (pageId: string, offset: -1 | 1) => {
+    if (!current) return;
+    const pages = [...current.manifest.pages];
+    const index = pages.findIndex((page) => page.id === pageId);
+    const target = index + offset;
+    if (index < 0 || target < 0 || target >= pages.length) return;
+    [pages[index], pages[target]] = [pages[target], pages[index]];
+    try { await persist({ ...current.manifest, pages }, current.script); setNotice('Page order updated.'); }
+    catch (error) { setNotice(message(error)); }
+  };
+
   const importPanelTake = async (panelId: string, file: File) => {
     if (!current) return;
     if (!/^image\/(png|jpeg|webp)$/.test(file.type)) { setNotice('Choose a PNG, JPEG or WebP image.'); return; }
@@ -381,6 +392,7 @@ export default function App() {
     saved={current} tab={tab} engineMessage={engineMessage} busy={busy}
     onTab={setTab} onScript={(script) => void persist(current.manifest, script)}
     onAddPanel={() => void addPanel()} onAddPage={() => void addPage()}
+    onMovePage={(pageId, offset) => void movePage(pageId, offset)}
     onParseScript={() => void parseScript()}
     onChangePanel={(id, patch) => void changePanel(id, patch)} onAddCast={() => void addCastMember()}
     onImportTake={(panelId, file) => void importPanelTake(panelId, file)}
@@ -462,6 +474,7 @@ interface WorkspaceProps {
   onScript: (script: string) => void;
   onAddPanel: () => void;
   onAddPage: () => void;
+  onMovePage: (pageId: string, offset: -1 | 1) => void;
   onParseScript: () => void;
   onChangePanel: (id: string, patch: Partial<MangaPanel>) => void;
   onImportTake: (panelId: string, file: File) => void;
@@ -545,7 +558,7 @@ function Workspace(props: WorkspaceProps) {
 
     {tab === 'pages' && <section className="workspace-section">
       <div className="section-heading"><div><span className="eyebrow">PAGE LAYOUT</span><h2>Pages</h2></div><IonButton onClick={props.onAddPage}><Layers3 size={17}/>&nbsp; New page</IonButton></div>
-      {saved.manifest.pages.length === 0 ? <Empty title="Your page canvas is ready" detail="Create a blank layered OpenRaster page, then arrange your panels." action={props.onAddPage}/> : <div className="page-grid">{saved.manifest.pages.map((page) => <article className="page-card" key={page.id}><div className="page-canvas-wrap">{page.file.toLowerCase().endsWith('.ora') ? <Suspense fallback={<div className="canvas-loading">Loading page preview…</div>}><PageCanvas projectId={saved.manifest.project.id} page={page} panels={saved.manifest.panels} onMoveObject={(objectId, x, y) => props.onMovePageObject(page.id, objectId, x, y)} onMovePanel={(panelId, x, y) => props.onMovePagePanel(page.id, panelId, x, y)}/></Suspense> : <div className="canvas-unavailable"><strong>{page.file.split('.').pop()?.toUpperCase() ?? 'Page'} page preserved</strong><span>Android can keep this source file, but cannot preview or edit it yet.</span></div>}</div><div className="page-card-caption"><strong>{page.label}</strong><span>{page.file.split('.').pop()?.toUpperCase()} · 1200 × 1800</span></div>
+      {saved.manifest.pages.length === 0 ? <Empty title="Your page canvas is ready" detail="Create a blank layered OpenRaster page, then arrange your panels." action={props.onAddPage}/> : <div className="page-grid">{saved.manifest.pages.map((page, pageIndex) => <article className="page-card" key={page.id}><div className="page-canvas-wrap">{page.file.toLowerCase().endsWith('.ora') ? <Suspense fallback={<div className="canvas-loading">Loading page preview…</div>}><PageCanvas projectId={saved.manifest.project.id} page={page} panels={saved.manifest.panels} onMoveObject={(objectId, x, y) => props.onMovePageObject(page.id, objectId, x, y)} onMovePanel={(panelId, x, y) => props.onMovePagePanel(page.id, panelId, x, y)}/></Suspense> : <div className="canvas-unavailable"><strong>{page.file.split('.').pop()?.toUpperCase() ?? 'Page'} page preserved</strong><span>Android can keep this source file, but cannot preview or edit it yet.</span></div>}</div><div className="page-card-caption"><strong>{page.label}</strong><span>{page.file.split('.').pop()?.toUpperCase()} · 1200 × 1800</span></div><div className="page-order-actions"><span>Export order · {pageIndex + 1}</span><div><IonButton fill="outline" size="small" disabled={pageIndex === 0} onClick={() => props.onMovePage(page.id, -1)}>Move up</IonButton><IonButton fill="outline" size="small" disabled={pageIndex === saved.manifest.pages.length - 1} onClick={() => props.onMovePage(page.id, 1)}>Move down</IonButton></div></div>
         {saved.manifest.panels.filter((panel) => !panel.placement?.page || panel.placement.page !== page.id).length > 0 && <div className="place-panel-list"><strong>Unplaced panels</strong>{saved.manifest.panels.filter((panel) => !panel.placement?.page || panel.placement.page !== page.id).map((panel) => <button key={panel.id} onClick={() => props.onPlacePanel(panel.id, page.id)}>Place panel {panel.label.page}.{panel.label.panel}<span>+</span></button>)}</div>}
       </article>)}</div>}
       <p className="helper-text">Page files use OpenRaster and can be opened in GIMP. Existing XCF page assets are left untouched.</p>
