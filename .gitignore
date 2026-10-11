@@ -61,6 +61,7 @@ engine.log
 packaging/flatpak/.build/
 .flatpak-builder/
 dist/
+**/node_modules/
 
 # Engine caches (e.g. LLM panel staging, render/staging.py)
 cache/

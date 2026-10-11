@@ -3,12 +3,13 @@ name: Android
 on:
   push:
     branches: [main, "codex/**"]
+    tags: ["imanganation-android-v*"]
     paths:
-      - "android/**"
+      - "mobile/**"
       - ".github/workflows/android.yml"
   pull_request:
     paths:
-      - "android/**"
+      - "mobile/**"
       - ".github/workflows/android.yml"
   workflow_dispatch:
 
@@ -25,10 +26,28 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install web dependencies
+        working-directory: mobile
+        run: npm ci
+
+      - name: Build the mobile UI
+        working-directory: mobile
+        run: npm run build
+
+      - name: Generate and sync the Capacitor Android project
+        working-directory: mobile
+        run: npx cap sync android
+
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: "21"
 
       - uses: android-actions/setup-android@v4
         with:
@@ -36,16 +55,52 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v6
         with:
-          gradle-version: "8.13"
           cache-provider: basic
 
       - name: Assemble debug APK
-        working-directory: android
-        run: gradle --no-daemon :app:assembleDebug
+        if: ${{ !startsWith(github.ref, 'refs/tags/imanganation-android-v') }}
+        working-directory: mobile/android
+        run: ./gradlew --no-daemon assembleDebug
 
       - uses: actions/upload-artifact@v6
+        if: ${{ !startsWith(github.ref, 'refs/tags/imanganation-android-v') }}
         with:
           name: imanganation-android-debug-${{ github.sha }}
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: mobile/android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
+
+      - name: Decode Android release keystore
+        if: startsWith(github.ref, 'refs/tags/imanganation-android-v')
+        env:
+          ANDROID_SIGNING_KEYSTORE_BASE64: ${{ secrets.ANDROID_SIGNING_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          for name in ANDROID_SIGNING_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            if [ -z "${!name}" ]; then echo "$name is required for Android release tags." >&2; exit 1; fi
+          done
+          echo "$ANDROID_SIGNING_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/imanganation-release.jks"
+
+      - name: Build signed release APK and bundle
+        if: startsWith(github.ref, 'refs/tags/imanganation-android-v')
+        working-directory: mobile/android
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/imanganation-release.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          version="${GITHUB_REF_NAME#imanganation-android-v}"
+          ./gradlew --no-daemon assembleRelease bundleRelease -PversionCode="$GITHUB_RUN_NUMBER" -PversionName="$version"
+
+      - uses: actions/upload-artifact@v6
+        if: startsWith(github.ref, 'refs/tags/imanganation-android-v')
+        with:
+          name: imanganation-android-release-${{ github.ref_name }}
+          path: |
+            mobile/android/app/build/outputs/apk/release/*.apk
+            mobile/android/app/build/outputs/bundle/release/*.aab
+          if-no-files-found: error
+          retention-days: 90
