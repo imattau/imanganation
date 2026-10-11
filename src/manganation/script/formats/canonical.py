@@ -558,7 +558,13 @@ def serialize(document: dict) -> str:
     for p in panels:
         label = p.get("label") or {}
         page = int(label.get("page", 1))
-        cover = p.get("cover") or page == 0
+        # Page 0 is a cover only when the panel is explicitly marked as one.
+        # Older/imported projects can contain ordinary beats with a zero page
+        # label; serializing those as COVER makes valid [FRAME] hints fail when
+        # the beat editor validates its save.
+        cover = bool(p.get("cover")) and page == 0
+        if page < 1 and not cover:
+            page = 1
         if cover:
             out.append("COVER")
         elif current_page != page:
