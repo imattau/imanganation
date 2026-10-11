@@ -268,7 +268,7 @@ public class ModelStorePlugin extends Plugin {
                 output.write(metadata.toString(2).getBytes(java.nio.charset.StandardCharsets.UTF_8));
                 output.getFD().sync();
             }
-            JSObject completed = new JSObject(new String(metadata.toString(), java.nio.charset.StandardCharsets.UTF_8));
+            JSObject completed = new JSObject(metadata.toString());
             notifyListeners("downloadComplete", completed);
             notifyListeners("downloadProgress", downloadEvent(key, name, copied, expectedSize, "complete"));
         } catch (Exception error) {
