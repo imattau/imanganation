@@ -50,7 +50,7 @@ def test_set_reference_adds_a_new_active_version_and_keeps_the_old(tmp_path):
 
     first = client.post("/characters/reference", json=body).json()
     assert first == {"name": "Yuki", "version": "gimp-01", "previous": "base",
-                     "reference": str(project / "characters/yuki/gimp-01.png")}
+                     "cleaned": False, "reference": str(project / "characters/yuki/gimp-01.png")}
     second = client.post("/characters/reference", json=body).json()
     assert second["version"] == "gimp-02" and second["previous"] == "gimp-01"
 

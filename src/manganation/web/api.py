@@ -158,6 +158,9 @@ class ReferenceRequest(BaseModel):
     make_default: bool = Field(
         default=True, description="False keeps it as an extra reference for panels to "
         "pick, leaving the default one in place")
+    clean_background: bool = Field(
+        default=False, description="Flatten the background to white (needs the optional "
+        "character mask models). The original is kept as an extra '<version>-original'.")
 
     @model_validator(mode="after")
     def _one_form(self):
@@ -534,15 +537,13 @@ def create_app(
                 mask_models[path] = load()
             return mask_models[path]
 
-    @app.post("/character-masks")
-    def create_character_masks(file: UploadFile = File(...)) -> dict:
-        """Detect and segment figures in an uploaded layer image; masks are output PNGs."""
-        from PIL import Image
+    def mask_pipeline():
+        """-> (detector, segmenter), loaded once; 409 while the optional models are
+        missing."""
         from manganation import models_setup
-        from manganation.config import load_models, load_settings, models_root, outputs_root
+        from manganation.config import load_models, load_settings, models_root
         from manganation.evaluate.detector import default_detector
         from manganation.evaluate.masks import AnimeSegmenter
-        from manganation.evaluate.masks import character_masks as segment_figures
 
         models = load_models()
         segmenter_model = models_setup.character_masks(models)[1]
@@ -551,6 +552,19 @@ def create_app(
         if (models_setup.state(segmenter_model, root_dir) != "present"
                 or models_setup.state(detector_model, root_dir) != "present"):
             raise HTTPException(409, "Character mask model is not installed. Use Set Up Models.")
+        segmenter_path = segmenter_model.path(root_dir)
+        return (cached_mask_model(detector_model.path(root_dir), default_detector),
+                cached_mask_model(segmenter_path, lambda: AnimeSegmenter(segmenter_path)))
+
+    @app.post("/character-masks")
+    def create_character_masks(file: UploadFile = File(...)) -> dict:
+        """Detect and segment figures in an uploaded layer image; masks are output PNGs."""
+        from PIL import Image
+
+        from manganation.config import outputs_root
+        from manganation.evaluate.masks import character_masks as segment_figures
+
+        detector, segmenter = mask_pipeline()
         try:
             raw = file.file.read(32 * 1024 * 1024 + 1)
             if len(raw) > 32 * 1024 * 1024:
@@ -565,11 +579,7 @@ def create_app(
         except Exception as exc:
             raise HTTPException(400, "upload must be a readable image") from exc
         try:
-            segmenter_path = segmenter_model.path(root_dir)
-            figures = segment_figures(
-                image,
-                cached_mask_model(detector_model.path(root_dir), default_detector),
-                cached_mask_model(segmenter_path, lambda: AnimeSegmenter(segmenter_path)))
+            figures = segment_figures(image, detector, segmenter)
         except Exception as exc:
             raise HTTPException(500, f"could not create character masks: {exc}") from exc
         output_root = Path(outputs) if outputs is not None else outputs_root()
@@ -1212,10 +1222,35 @@ def create_app(
             version_id = f"gimp-{n:02d}"
         elif character.version(version_id) is not None:
             raise HTTPException(409, f"{character.name} already has version {version_id!r}")
-        reg.add_user_reference(character.name, str(image), version_id,
-                               make_default=req.make_default)
+        cleaned = False
+        if req.clean_background:
+            from manganation.evaluate.masks import clean_reference
+
+            original_id = f"{version_id}-original"
+            if character.version(original_id) is not None:
+                raise HTTPException(409, f"{character.name} already has version {original_id!r}")
+            detector, segmenter = mask_pipeline()
+            try:
+                with Image.open(image) as opened:
+                    flat, found = clean_reference(opened.convert("RGB"), detector, segmenter)
+            except Exception as exc:
+                raise HTTPException(500, f"could not clean the background: {exc}") from exc
+            if found:
+                cleaned_file = image.with_name(f"{image.stem}-clean.png")
+                flat.save(cleaned_file)
+                try:
+                    reg.add_user_reference(character.name, str(image), original_id,
+                                           make_default=False)
+                    reg.add_user_reference(character.name, str(cleaned_file), version_id,
+                                           make_default=req.make_default)
+                finally:
+                    cleaned_file.unlink(missing_ok=True)
+                cleaned = True
+        if not cleaned:
+            reg.add_user_reference(character.name, str(image), version_id,
+                                   make_default=req.make_default)
         return {"name": character.name, "version": version_id, "previous": previous,
-                "reference": str(reg.reference_path(character.name))}
+                "cleaned": cleaned, "reference": str(reg.reference_path(character.name))}
 
     @app.post("/scripts/parse", status_code=202)
     def submit_parse(req: ScriptParseRequest) -> Job:

@@ -1966,7 +1966,8 @@ def set_character_reference(procedure, run_mode, image, drawables, config, data)
         path = root / "tmp" / f"gimp_ref_{slug}_{time.strftime('%Y%m%d-%H%M%S')}.png"
         side = _export_reference(image, layers[0], path)
         request = {**engine_project, "name": name, "image_path": str(path),
-                   "make_default": bool(config.get_property("make-default"))}
+                   "make_default": bool(config.get_property("make-default")),
+                   "clean_background": bool(config.get_property("clean-background"))}
         label = re.sub(r"[^A-Za-z0-9_-]+", "-",
                        (config.get_property("reference-name") or "").strip()).strip("-")[:40]
         if label:
@@ -1975,6 +1976,8 @@ def set_character_reference(procedure, run_mode, image, drawables, config, data)
     except (EngineError, ValueError) as exc:
         return _error(procedure, str(exc))
 
+    if request["clean_background"] and not result.get("cleaned"):
+        Gimp.message("No figure was found, so the background was left as it was.")
     if request["make_default"]:
         Gimp.message(f"{result['name']}'s reference is now {result['version']} ({side}px "
                      f"square; was {result['previous']}). New renders of {result['name']} "
@@ -8579,6 +8582,11 @@ class Imanganation(Gimp.PlugIn):
                 "make-default", "Use for _all panels", "On: this becomes the character's "
                 "default reference. Off: keep it as an extra reference that panels can "
                 "choose (Context -> Reference...)", True, GObject.ParamFlags.READWRITE)
+            proc.add_boolean_argument(
+                "clean-background", "Clean _background", "Flatten the background to white "
+                "around the figure (needs the optional character mask models from Set Up "
+                "Models). The original is kept as an extra '<name>-original' reference.",
+                False, GObject.ParamFlags.READWRITE)
             proc.add_file_argument(
                 "project-dir", "_Project folder", "Only needed if no placed panel is in "
                 "this image", Gimp.FileChooserAction.SELECT_FOLDER, True, None,

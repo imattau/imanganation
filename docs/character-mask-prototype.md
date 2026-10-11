@@ -42,3 +42,13 @@ layer with GIMP's alpha-to-selection or other normal mask tools.
 The detector proposes one crop per figure; touching or heavily overlapping figures may
 need manual cleanup. The masks do not identify characters by name. This command is a
 starting point for manual mask work rather than a guaranteed cutout.
+
+## Clean a character reference's background
+
+**Set Character Reference from Layer** has a **Clean background** option. It uses the
+same models to flatten everything outside the figure to white before the image is
+registered, which stops a tinted or shadowed backdrop riding into panels through
+IP-Adapter. The uncleaned image is kept as an extra `<name>-original` version. If no
+figure is detected the image is registered as it was. It removes backdrops, not held
+props: a bag the character carries stays. Try it on existing references first with
+`scripts/prototype_reference_cleanup.py`.

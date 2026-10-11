@@ -82,3 +82,23 @@ def character_masks(image: Image.Image, detector: Detector, segmenter: AnimeSegm
         full.paste(matte, (x0, y0))
         results.append(FigureMask(box, full))
     return results
+
+
+def clean_reference(image: Image.Image, detector: Detector, segmenter: AnimeSegmenter,
+                    *, background: tuple[int, int, int] = (255, 255, 255),
+                    padding: float = 0.08) -> tuple[Image.Image, int]:
+    """Composite a single-figure reference onto a flat background using the figure matte.
+
+    Drops tinted or shadowed backdrops that IP-Adapter would carry into panels. Several
+    detections are merged (a lower-body box can split one figure); with none, the image
+    is returned unchanged. Returns ``(image, figures_found)``.
+    """
+    image = image.convert("RGB")
+    figures = character_masks(image, detector, segmenter, padding=padding)
+    if not figures:
+        return image, 0
+    matte = figures[0].mask
+    for figure in figures[1:]:
+        matte = Image.fromarray(np.maximum(np.asarray(matte), np.asarray(figure.mask)), "L")
+    flat = Image.new("RGB", image.size, background)
+    return Image.composite(image, flat, matte), len(figures)
