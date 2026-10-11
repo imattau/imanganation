@@ -118,7 +118,7 @@ public class RendererPlugin extends Plugin {
         int width = call.getInt("width", 512);
         int height = call.getInt("height", 512);
         int steps = call.getInt("steps", 20);
-        float guidance = (float) call.getDouble("guidance", 7.0);
+        float guidance = call.getDouble("guidance", 7.0).floatValue();
         long seed = call.getLong("seed", -1L);
         if (prompt == null || prompt.trim().isEmpty() || prompt.length() > 4000) {
             call.reject("Enter a prompt of 1 to 4000 characters.");
