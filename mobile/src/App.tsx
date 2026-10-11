@@ -16,7 +16,8 @@ import { exportProjectArchive, importProjectArchive } from './domain/projectArch
 import { parseCanonicalScript } from './domain/canonicalScript';
 import { exportBook } from './domain/bookExport';
 import { Capacitor } from '@capacitor/core';
-import { formatBytes, modelStore, type LocalModel, type ModelImportProgress } from './domain/modelStore';
+import { formatBytes, modelStore, type LocalModel, type ModelDownloadProgress, type ModelImportProgress } from './domain/modelStore';
+import { CATALOG_MODELS, type CatalogModel } from './domain/modelCatalog';
 
 type WorkspaceTab = 'story' | 'panels' | 'pages' | 'people' | 'tools' | 'generate' | 'export';
 
@@ -40,6 +41,7 @@ export default function App() {
   const [models, setModels] = useState<LocalModel[]>([]);
   const [modelStorageFree, setModelStorageFree] = useState<number | null>(null);
   const [modelProgress, setModelProgress] = useState<ModelImportProgress | null>(null);
+  const [modelDownloadProgress, setModelDownloadProgress] = useState<ModelDownloadProgress | null>(null);
   const importInput = useRef<HTMLInputElement>(null);
 
   const reload = useCallback(async () => setProjects(await listProjects()), []);
@@ -48,15 +50,28 @@ export default function App() {
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
     let disposed = false;
-    let handle: { remove: () => Promise<void> } | undefined;
+    const handles: Array<{ remove: () => Promise<void> }> = [];
     void modelStore.listModels().then((result) => {
       if (!disposed) { setModels(result.models); setModelStorageFree(result.availableBytes); }
     }).catch(() => undefined);
     void modelStore.addListener('importProgress', (progress) => { if (!disposed) setModelProgress(progress); }).then((listener) => {
-      handle = listener;
+      handles.push(listener);
       if (disposed) void listener.remove();
     });
-    return () => { disposed = true; if (handle) void handle.remove(); };
+    void modelStore.addListener('downloadProgress', (progress) => { if (!disposed) setModelDownloadProgress(progress.state === 'complete' ? null : progress); }).then((listener) => {
+      handles.push(listener);
+      if (disposed) void listener.remove();
+    });
+    void modelStore.addListener('downloadComplete', () => {
+      if (disposed) return;
+      setModelDownloadProgress(null);
+      void modelStore.listModels().then((result) => { setModels(result.models); setModelStorageFree(result.availableBytes); });
+      setNotice('Model download checksum verified and stored. Android renderer compatibility remains unverified.');
+    }).then((listener) => {
+      handles.push(listener);
+      if (disposed) void listener.remove();
+    });
+    return () => { disposed = true; handles.forEach((handle) => void handle.remove()); };
   }, []);
 
   const refreshModels = async () => {
@@ -82,6 +97,22 @@ export default function App() {
   const deleteModel = async (model: LocalModel) => {
     if (!window.confirm(`Remove ${model.name} from this device?`)) return;
     try { await modelStore.deleteModel({ id: model.id }); await refreshModels(); }
+    catch (error) { setNotice(message(error)); }
+  };
+
+  const downloadModel = async (model: CatalogModel) => {
+    if (!Capacitor.isNativePlatform()) { setNotice('Model downloads are available in the Android app.'); return; }
+    if (modelStorageFree !== null && modelStorageFree < model.sizeBytes + 64 * 1024 * 1024) {
+      setNotice('There is not enough available device storage for this model.');
+      return;
+    }
+    setModelDownloadProgress({ id: model.key, downloadKey: model.key, name: model.name, bytes: 0, totalBytes: model.sizeBytes, state: 'downloading' });
+    try { await modelStore.downloadModel({ downloadKey: model.key, name: model.fileName, url: model.url, sizeBytes: model.sizeBytes, sha256: model.sha256, licenseName: model.license, licenseUrl: model.licenseUrl, sourceUrl: model.sourceUrl }); }
+    catch (error) { setModelDownloadProgress(null); setNotice(message(error)); }
+  };
+
+  const cancelModelDownload = async (key: string) => {
+    try { await modelStore.cancelDownload({ downloadKey: key }); }
     catch (error) { setNotice(message(error)); }
   };
 
@@ -448,7 +479,7 @@ export default function App() {
   };
 
   const workspace = useMemo(() => current && <Workspace
-    saved={current} tab={tab} engineMessage={engineMessage} busy={busy} models={models} modelStorageFree={modelStorageFree} modelProgress={modelProgress}
+    saved={current} tab={tab} engineMessage={engineMessage} busy={busy} models={models} modelStorageFree={modelStorageFree} modelProgress={modelProgress} modelDownloadProgress={modelDownloadProgress}
     onTab={setTab} onScript={(script) => void persist(current.manifest, script)}
     onAddPanel={() => void addPanel()} onAddPage={() => void addPage()}
     onMovePage={(pageId, offset) => void movePage(pageId, offset)}
@@ -489,6 +520,8 @@ export default function App() {
     }}
     onImportModel={() => void importModel()}
     onDeleteModel={(model) => void deleteModel(model)}
+    onDownloadModel={(model) => void downloadModel(model)}
+    onCancelModelDownload={(key) => void cancelModelDownload(key)}
   />, [current, tab, engineMessage, busy, persist]);
 
   return <IonApp>
@@ -535,8 +568,11 @@ interface WorkspaceProps {
   models: LocalModel[];
   modelStorageFree: number | null;
   modelProgress: ModelImportProgress | null;
+  modelDownloadProgress: ModelDownloadProgress | null;
   onImportModel: (expectedSha256?: string) => void;
   onDeleteModel: (model: LocalModel) => void;
+  onDownloadModel: (model: CatalogModel) => void;
+  onCancelModelDownload: (key: string) => void;
   onTab: (tab: WorkspaceTab) => void;
   onScript: (script: string) => void;
   onAddPanel: () => void;
@@ -653,7 +689,20 @@ function Workspace(props: WorkspaceProps) {
     {tab === 'generate' && <section className="workspace-section">
       <div className="section-heading"><div><span className="eyebrow">LOCAL IMAGE CREATION</span><h2>Generate artwork</h2></div><span className="offline-pill">ON DEVICE</span></div>
       <div className="renderer-card"><div className="renderer-mark"><WandSparkles/></div><div><strong>Local renderer</strong><p>{props.engineMessage}</p></div></div>
-      <div className="model-manager"><div className="section-heading"><div><span className="eyebrow">MODEL STORAGE</span><h3>On-device model files</h3></div></div><p className="helper-text">Imports are copied into private app storage and hashed as they copy. Files remain on this device; import does not mean the current renderer supports that model.</p><IonItem className="field-item"><IonInput label="Expected SHA-256 (optional)" labelPlacement="stacked" value={expectedModelSha256} placeholder="64 hexadecimal characters" onIonChange={(event) => setExpectedModelSha256(event.detail.value ?? '')}/></IonItem><IonButton fill="outline" size="small" disabled={!!props.modelProgress || (!!expectedModelSha256 && !/^[\da-f]{64}$/i.test(expectedModelSha256))} onClick={() => props.onImportModel(expectedModelSha256.trim() || undefined)}>Import model file</IonButton>{props.modelStorageFree !== null && <p className="storage-note">Available device storage: {formatBytes(props.modelStorageFree)}</p>}{props.modelProgress && <div className="model-progress"><strong>{props.modelProgress.name}</strong><span>{props.modelProgress.totalBytes > 0 ? `${formatBytes(props.modelProgress.bytes)} / ${formatBytes(props.modelProgress.totalBytes)}` : formatBytes(props.modelProgress.bytes)}</span><progress value={props.modelProgress.totalBytes > 0 ? props.modelProgress.bytes : undefined} max={props.modelProgress.totalBytes > 0 ? props.modelProgress.totalBytes : undefined}/></div>}{props.models.length === 0 ? <p className="helper-text">No model files imported.</p> : <div className="model-list">{props.models.map((model) => <div className="model-row" key={model.id}><div><strong>{model.name}</strong><span>{formatBytes(model.sizeBytes)} · SHA-256 {model.sha256.slice(0, 12)}…</span></div><IonButton fill="clear" color="danger" size="small" onClick={() => props.onDeleteModel(model)}>Remove</IonButton></div>)}</div>}</div>
+      <div className="model-manager">
+        <div className="section-heading"><div><span className="eyebrow">MODEL STORAGE</span><h3>On-device model files</h3></div></div>
+        <p className="helper-text">Imports are copied into private app storage and hashed as they copy. Downloads resume from partial files and verify pinned size and SHA-256. File installation does not mean the current renderer supports that model.</p>
+        <div className="catalog-model">
+          <div><strong>{CATALOG_MODELS[0].name}</strong><span>{formatBytes(CATALOG_MODELS[0].sizeBytes)} · desktop primary checkpoint · Android compatibility unverified</span><a href={CATALOG_MODELS[0].licenseUrl} target="_blank" rel="noreferrer">{CATALOG_MODELS[0].license}</a></div>
+          {props.models.some((model) => model.downloadKey === CATALOG_MODELS[0].key) ? <span className="installed-label">Downloaded</span> : <IonButton size="small" disabled={!!props.modelProgress || props.modelDownloadProgress?.state === 'downloading' || props.modelDownloadProgress?.state === 'verifying' || (props.modelStorageFree !== null && props.modelStorageFree < CATALOG_MODELS[0].sizeBytes + 64 * 1024 * 1024)} onClick={() => props.onDownloadModel(CATALOG_MODELS[0])}>{props.modelDownloadProgress?.state === 'cancelled' || props.modelDownloadProgress?.state === 'failed' ? 'Resume download' : 'Download'}</IonButton>}
+        </div>
+        <IonItem className="field-item"><IonInput label="Expected SHA-256 for imported file (optional)" labelPlacement="stacked" value={expectedModelSha256} placeholder="64 hexadecimal characters" onIonChange={(event) => setExpectedModelSha256(event.detail.value ?? '')}/></IonItem>
+        <IonButton fill="outline" size="small" disabled={!!props.modelProgress || (!!expectedModelSha256 && !/^[\da-f]{64}$/i.test(expectedModelSha256))} onClick={() => props.onImportModel(expectedModelSha256.trim() || undefined)}>Import model file</IonButton>
+        {props.modelStorageFree !== null && <p className="storage-note">Available device storage: {formatBytes(props.modelStorageFree)}</p>}
+        {props.modelProgress && <div className="model-progress"><strong>{props.modelProgress.name}</strong><span>{props.modelProgress.totalBytes > 0 ? `${formatBytes(props.modelProgress.bytes)} / ${formatBytes(props.modelProgress.totalBytes)}` : formatBytes(props.modelProgress.bytes)}</span><progress value={props.modelProgress.totalBytes > 0 ? props.modelProgress.bytes : undefined} max={props.modelProgress.totalBytes > 0 ? props.modelProgress.totalBytes : undefined}/></div>}
+        {props.modelDownloadProgress && <div className="model-progress"><strong>{props.modelDownloadProgress.name}</strong><span>{props.modelDownloadProgress.state === 'verifying' ? 'Verifying size and SHA-256…' : props.modelDownloadProgress.state === 'failed' ? props.modelDownloadProgress.error || 'Download failed; partial file retained for retry.' : props.modelDownloadProgress.state === 'cancelled' ? 'Download paused; partial file retained.' : `${formatBytes(props.modelDownloadProgress.bytes)} / ${formatBytes(props.modelDownloadProgress.totalBytes)}`}</span><progress value={props.modelDownloadProgress.totalBytes > 0 ? props.modelDownloadProgress.bytes : undefined} max={props.modelDownloadProgress.totalBytes > 0 ? props.modelDownloadProgress.totalBytes : undefined}/>{props.modelDownloadProgress.state === 'downloading' && <IonButton fill="clear" size="small" onClick={() => props.onCancelModelDownload(props.modelDownloadProgress!.downloadKey)}>Pause download</IonButton>}</div>}
+        {props.models.length === 0 ? <p className="helper-text">No model files imported or downloaded.</p> : <div className="model-list">{props.models.map((model) => <div className="model-row" key={model.id}><div><strong>{model.name}</strong><span>{formatBytes(model.sizeBytes)} · SHA-256 {model.sha256.slice(0, 12)}…{model.licenseName ? ` · ${model.licenseName}` : ''}</span></div><IonButton fill="clear" color="danger" size="small" onClick={() => props.onDeleteModel(model)}>Remove</IonButton></div>)}</div>}
+      </div>
       <IonItem className="field-item"><IonLabel position="stacked">Target panel</IonLabel><select className="native-select" defaultValue={saved.manifest.panels[0]?.id ?? ''}><option value="" disabled>Choose a panel</option>{saved.manifest.panels.map((panel) => <option key={panel.id} value={panel.id}>Page {panel.label.page}, panel {panel.label.panel}</option>)}</select></IonItem>
       <IonItem className="field-item"><IonTextarea label="Prompt" labelPlacement="stacked" placeholder="Describe the artwork to create…" rows={4}/></IonItem>
       <IonItem className="field-item"><IonInput label="Seed" labelPlacement="stacked" type="number" placeholder="Random"/></IonItem>

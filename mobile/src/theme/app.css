@@ -100,6 +100,11 @@ ion-content { --background: #f4f0e8; }
 .model-row strong, .model-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .model-row strong { color: #293a56; font-size: 12px; }
 .model-row span { color: #738096; font-size: 10px; }
+.catalog-model { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 11px; border: 1px solid #e9e2d7; border-radius: 12px; background: #f5f1ea; }
+.catalog-model > div { display: grid; min-width: 0; gap: 4px; }
+.catalog-model strong { color: #293a56; font-size: 12px; }
+.catalog-model span, .catalog-model a { color: #738096; font-size: 10px; }
+.catalog-model .installed-label { color: #547c63; font-weight: 700; }
 .export-preview { align-items: flex-start; }
 .preview-pages { display: flex; gap: 4px; flex: 0 0 42px; flex-direction: column; }
 .preview-pages i { width: 34px; height: 16px; border: 2px solid #293a56; border-radius: 3px; background: linear-gradient(135deg,#f0b17c,#fff0d1); }

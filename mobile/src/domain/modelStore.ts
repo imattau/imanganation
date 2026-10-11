@@ -8,6 +8,11 @@ export interface LocalModel {
   sizeBytes: number;
   sha256: string;
   importedAt: string;
+  downloadKey?: string;
+  origin?: string;
+  licenseName?: string;
+  licenseUrl?: string;
+  sourceUrl?: string;
 }
 
 export interface ModelImportProgress {
@@ -17,11 +22,32 @@ export interface ModelImportProgress {
   totalBytes: number;
 }
 
+export interface ModelDownloadProgress extends ModelImportProgress {
+  downloadKey: string;
+  state: 'downloading' | 'verifying' | 'complete' | 'cancelled' | 'failed';
+  error?: string;
+}
+
+export interface ModelDownloadRequest {
+  downloadKey: string;
+  name: string;
+  url: string;
+  sizeBytes: number;
+  sha256: string;
+  licenseName: string;
+  licenseUrl: string;
+  sourceUrl: string;
+}
+
 interface ModelStorePlugin {
   importModel(options?: { expectedSha256?: string }): Promise<LocalModel>;
+  downloadModel(request: ModelDownloadRequest): Promise<{ downloadKey: string; state: 'downloading' }>;
+  cancelDownload(options: { downloadKey: string }): Promise<void>;
   listModels(): Promise<{ models: LocalModel[]; availableBytes: number }>;
   deleteModel(options: { id: string }): Promise<void>;
   addListener(eventName: 'importProgress', listener: (event: ModelImportProgress) => void): Promise<PluginListenerHandle>;
+  addListener(eventName: 'downloadProgress', listener: (event: ModelDownloadProgress) => void): Promise<PluginListenerHandle>;
+  addListener(eventName: 'downloadComplete', listener: (event: LocalModel & { downloadKey: string }) => void): Promise<PluginListenerHandle>;
 }
 
 export const modelStore = registerPlugin<ModelStorePlugin>('ModelStore');
