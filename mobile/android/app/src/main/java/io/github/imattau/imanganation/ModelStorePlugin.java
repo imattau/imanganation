@@ -63,6 +63,7 @@ public class ModelStorePlugin extends Plugin {
             return;
         }
         Uri source = result.getData().getData();
+        String expectedSha256 = call.getString("expectedSha256");
         io.execute(() -> copyModel(call, source, expectedSha256 == null ? null : expectedSha256.toLowerCase(java.util.Locale.ROOT)));
     }
 
