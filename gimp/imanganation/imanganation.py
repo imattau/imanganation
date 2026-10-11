@@ -4767,10 +4767,8 @@ def _choose_manual_project():
     reading_order.append("ltr", "Left to right")
     reading_order.set_active_id("rtl")
     text_direction = Gtk.ComboBoxText()
-    text_direction.append("auto", "Automatic (from the text)")
-    text_direction.append("ltr", "Left to right")
-    text_direction.append("rtl", "Right to left (Arabic, Hebrew)")
-    text_direction.append("vertical", "Vertical (Japanese tategaki)")
+    for direction_id, direction_label in TEXT_DIRECTION_CHOICES:
+        text_direction.append(direction_id, direction_label)
     text_direction.set_tooltip_text("How lettering text runs inside bubbles. Separate from reading order, which is the page and panel flow.")
     text_direction.set_active_id("auto")
     color_mode = Gtk.ComboBoxText()
@@ -6472,6 +6470,19 @@ def _show_engine_dialog():
     style_combo.connect("changed", update_style_note)
     update_style_note()
     box.pack_start(Gtk.Separator(margin_top=6), False, False, 0)
+    lettering_title = Gtk.Label(xalign=0.0, margin_top=6)
+    lettering_title.set_markup("<b>Lettering</b>")
+    box.pack_start(lettering_title, False, False, 0)
+    direction_combo = Gtk.ComboBoxText(hexpand=True)
+    for direction_id, direction_label in TEXT_DIRECTION_CHOICES:
+        direction_combo.append(direction_id, direction_label)
+    direction_combo.set_tooltip_text("How text runs inside new bubbles. Separate from reading order, which is the page and panel flow. Bubbles already on pages keep theirs.")
+    direction_combo.set_active_id(_manifest_text_direction(manifest))
+    direction_row = Gtk.Box(spacing=12)
+    direction_row.pack_start(Gtk.Label(label="Text direction", xalign=0.0), False, False, 0)
+    direction_row.pack_start(direction_combo, True, True, 0)
+    box.pack_start(direction_row, False, False, 0)
+    box.pack_start(Gtk.Separator(margin_top=6), False, False, 0)
     locations_note = Gtk.Label(xalign=0.0, wrap=True, max_width_chars=76)
     box.pack_start(locations_note, False, False, 0)
     locations_button = dialog.add_button("Design Locations", 1)
@@ -6530,6 +6541,7 @@ def _show_engine_dialog():
             before = engine_ui.project_style(current)
             engine_ui.set_project_render(current, picked["engine"], picked["face_pass"],
                                          picked["style"])
+            current["project"]["text_direction"] = direction_combo.get_active_id() or "auto"
             save_project(root, current)
             Gimp.message(f"Render engine for this project: {picked['engine']}"
                          + (", with the face pass." if picked["face_pass"] else "."))
@@ -7460,6 +7472,12 @@ def _selection_box(image):
     if nonempty and (x2 - x1) > 20 and (y2 - y1) > 20:
         return (x1, y1, x2 - x1, y2 - y1)
     return None
+
+
+TEXT_DIRECTION_CHOICES = (("auto", "Automatic (from the text)"),
+                         ("ltr", "Left to right"),
+                         ("rtl", "Right to left (Arabic, Hebrew)"),
+                         ("vertical", "Vertical (Japanese tategaki)"))
 
 
 def _manifest_text_direction(manifest):
