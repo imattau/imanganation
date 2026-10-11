@@ -66,11 +66,12 @@ export default function App() {
     setModelStorageFree(result.availableBytes);
   };
 
-  const importModel = async () => {
+  const importModel = async (expectedSha256?: string) => {
     if (!Capacitor.isNativePlatform()) { setNotice('Model import is available in the Android app.'); return; }
+    if (expectedSha256 && !/^[\da-f]{64}$/i.test(expectedSha256)) { setNotice('Enter a 64-character SHA-256 checksum or leave it blank.'); return; }
     setModelProgress({ id: '', name: 'Waiting for file selection…', bytes: 0, totalBytes: -1 });
     try {
-      await modelStore.importModel();
+      await modelStore.importModel(expectedSha256 ? { expectedSha256 } : undefined);
       await refreshModels();
       setNotice('Model file copied to app storage and SHA-256 computed. Renderer compatibility is not yet validated.');
     } catch (error) {
@@ -534,7 +535,7 @@ interface WorkspaceProps {
   models: LocalModel[];
   modelStorageFree: number | null;
   modelProgress: ModelImportProgress | null;
-  onImportModel: () => void;
+  onImportModel: (expectedSha256?: string) => void;
   onDeleteModel: (model: LocalModel) => void;
   onTab: (tab: WorkspaceTab) => void;
   onScript: (script: string) => void;
@@ -568,6 +569,7 @@ function Workspace(props: WorkspaceProps) {
   const [sliceHeight, setSliceHeight] = useState<number>(VERTICAL_PRESETS.webtoon.sliceHeight);
   const [selectedToolPage, setSelectedToolPage] = useState(saved.manifest.pages[0]?.id ?? '');
   const [scriptDraft, setScriptDraft] = useState(saved.script);
+  const [expectedModelSha256, setExpectedModelSha256] = useState('');
   useEffect(() => {
     if (!saved.manifest.pages.some((page) => page.id === selectedToolPage)) setSelectedToolPage(saved.manifest.pages[0]?.id ?? '');
   }, [saved.manifest.pages, selectedToolPage]);
@@ -651,7 +653,7 @@ function Workspace(props: WorkspaceProps) {
     {tab === 'generate' && <section className="workspace-section">
       <div className="section-heading"><div><span className="eyebrow">LOCAL IMAGE CREATION</span><h2>Generate artwork</h2></div><span className="offline-pill">ON DEVICE</span></div>
       <div className="renderer-card"><div className="renderer-mark"><WandSparkles/></div><div><strong>Local renderer</strong><p>{props.engineMessage}</p></div></div>
-      <div className="model-manager"><div className="section-heading"><div><span className="eyebrow">MODEL STORAGE</span><h3>On-device model files</h3></div><IonButton fill="outline" size="small" disabled={!!props.modelProgress} onClick={props.onImportModel}>Import model</IonButton></div><p className="helper-text">Imports are copied into private app storage and hashed as they copy. Files remain on this device; import does not mean the current renderer supports that model.</p>{props.modelStorageFree !== null && <p className="storage-note">Available device storage: {formatBytes(props.modelStorageFree)}</p>}{props.modelProgress && <div className="model-progress"><strong>{props.modelProgress.name}</strong><span>{props.modelProgress.totalBytes > 0 ? `${formatBytes(props.modelProgress.bytes)} / ${formatBytes(props.modelProgress.totalBytes)}` : formatBytes(props.modelProgress.bytes)}</span><progress value={props.modelProgress.totalBytes > 0 ? props.modelProgress.bytes : undefined} max={props.modelProgress.totalBytes > 0 ? props.modelProgress.totalBytes : undefined}/></div>}{props.models.length === 0 ? <p className="helper-text">No model files imported.</p> : <div className="model-list">{props.models.map((model) => <div className="model-row" key={model.id}><div><strong>{model.name}</strong><span>{formatBytes(model.sizeBytes)} · SHA-256 {model.sha256.slice(0, 12)}…</span></div><IonButton fill="clear" color="danger" size="small" onClick={() => props.onDeleteModel(model)}>Remove</IonButton></div>)}</div>}</div>
+      <div className="model-manager"><div className="section-heading"><div><span className="eyebrow">MODEL STORAGE</span><h3>On-device model files</h3></div></div><p className="helper-text">Imports are copied into private app storage and hashed as they copy. Files remain on this device; import does not mean the current renderer supports that model.</p><IonItem className="field-item"><IonInput label="Expected SHA-256 (optional)" labelPlacement="stacked" value={expectedModelSha256} placeholder="64 hexadecimal characters" onIonChange={(event) => setExpectedModelSha256(event.detail.value ?? '')}/></IonItem><IonButton fill="outline" size="small" disabled={!!props.modelProgress || (!!expectedModelSha256 && !/^[\da-f]{64}$/i.test(expectedModelSha256))} onClick={() => props.onImportModel(expectedModelSha256.trim() || undefined)}>Import model file</IonButton>{props.modelStorageFree !== null && <p className="storage-note">Available device storage: {formatBytes(props.modelStorageFree)}</p>}{props.modelProgress && <div className="model-progress"><strong>{props.modelProgress.name}</strong><span>{props.modelProgress.totalBytes > 0 ? `${formatBytes(props.modelProgress.bytes)} / ${formatBytes(props.modelProgress.totalBytes)}` : formatBytes(props.modelProgress.bytes)}</span><progress value={props.modelProgress.totalBytes > 0 ? props.modelProgress.bytes : undefined} max={props.modelProgress.totalBytes > 0 ? props.modelProgress.totalBytes : undefined}/></div>}{props.models.length === 0 ? <p className="helper-text">No model files imported.</p> : <div className="model-list">{props.models.map((model) => <div className="model-row" key={model.id}><div><strong>{model.name}</strong><span>{formatBytes(model.sizeBytes)} · SHA-256 {model.sha256.slice(0, 12)}…</span></div><IonButton fill="clear" color="danger" size="small" onClick={() => props.onDeleteModel(model)}>Remove</IonButton></div>)}</div>}</div>
       <IonItem className="field-item"><IonLabel position="stacked">Target panel</IonLabel><select className="native-select" defaultValue={saved.manifest.panels[0]?.id ?? ''}><option value="" disabled>Choose a panel</option>{saved.manifest.panels.map((panel) => <option key={panel.id} value={panel.id}>Page {panel.label.page}, panel {panel.label.panel}</option>)}</select></IonItem>
       <IonItem className="field-item"><IonTextarea label="Prompt" labelPlacement="stacked" placeholder="Describe the artwork to create…" rows={4}/></IonItem>
       <IonItem className="field-item"><IonInput label="Seed" labelPlacement="stacked" type="number" placeholder="Random"/></IonItem>

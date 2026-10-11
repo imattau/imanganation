@@ -18,7 +18,7 @@ export interface ModelImportProgress {
 }
 
 interface ModelStorePlugin {
-  importModel(): Promise<LocalModel>;
+  importModel(options?: { expectedSha256?: string }): Promise<LocalModel>;
   listModels(): Promise<{ models: LocalModel[]; availableBytes: number }>;
   deleteModel(options: { id: string }): Promise<void>;
   addListener(eventName: 'importProgress', listener: (event: ModelImportProgress) => void): Promise<PluginListenerHandle>;

@@ -33,6 +33,11 @@ public class ModelStorePlugin extends Plugin {
 
     @PluginMethod
     public void importModel(PluginCall call) {
+        String expectedSha256 = call.getString("expectedSha256");
+        if (expectedSha256 != null && !expectedSha256.matches("(?i)[0-9a-f]{64}")) {
+            call.reject("Expected SHA-256 must contain exactly 64 hexadecimal characters.");
+            return;
+        }
         if (importing) {
             call.reject("A model import is already running.");
             return;
@@ -58,10 +63,10 @@ public class ModelStorePlugin extends Plugin {
             return;
         }
         Uri source = result.getData().getData();
-        io.execute(() -> copyModel(call, source));
+        io.execute(() -> copyModel(call, source, expectedSha256 == null ? null : expectedSha256.toLowerCase(java.util.Locale.ROOT)));
     }
 
-    private void copyModel(PluginCall call, Uri source) {
+    private void copyModel(PluginCall call, Uri source, String expectedSha256) {
         String id = UUID.randomUUID().toString();
         File modelDir = new File(getContext().getFilesDir(), "models/" + id);
         File partial = null;
@@ -69,12 +74,15 @@ public class ModelStorePlugin extends Plugin {
             String displayName = queryName(source);
             String safeName = new File(displayName).getName().replaceAll("[^A-Za-z0-9._-]", "_");
             if (safeName.isEmpty() || safeName.equals(".") || safeName.equals("..")) safeName = "imported-model.bin";
+            long total = querySize(source);
+            long usable = getContext().getFilesDir().getUsableSpace();
+            long required = total > 0 ? total : 0;
+            if (required > usable - 64L * 1024L * 1024L) throw new Exception("Not enough free device storage for this model file.");
             if (!modelDir.mkdirs() && !modelDir.isDirectory()) throw new Exception("Could not create the model directory.");
             partial = new File(modelDir, safeName + ".partial");
             File target = new File(modelDir, safeName);
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             long copied = 0;
-            long total = querySize(source);
             byte[] buffer = new byte[1024 * 1024];
             try (InputStream input = getContext().getContentResolver().openInputStream(source);
                  FileOutputStream output = new FileOutputStream(partial)) {
@@ -100,6 +108,7 @@ public class ModelStorePlugin extends Plugin {
             }
             if (!partial.renameTo(target)) throw new Exception("Could not finalize the imported model file.");
             String sha256 = hex(digest.digest());
+            if (expectedSha256 != null && !expectedSha256.equals(sha256)) throw new Exception("SHA-256 mismatch. Expected " + expectedSha256 + " but computed " + sha256 + ".");
             JSONObject metadata = new JSONObject();
             metadata.put("id", id);
             metadata.put("name", displayName);
