@@ -217,3 +217,53 @@ def test_qwen_variant_prompt_points_at_the_existing_design():
     tied = build_prose_design_prompt(AppearanceSpec(), variation="a sundress",
                                      has_reference=True)
     assert "same character as in <image1>" in tied.positive
+
+
+def _prop_in(tmp_path, name="red umbrella", description="a red paper umbrella"):
+    from manganation.props import Prop, PropRegistry, prop_key
+
+    props = PropRegistry.from_path(tmp_path)
+    props.root.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (8, 8)).save(props.root / "red-umbrella.png")
+    props.add(Prop(key=prop_key(name), name=name, image="red-umbrella.png",
+                   description=description))
+
+
+def test_another_reference_can_hold_a_prop_as_a_second_reference(tmp_path):
+    reg = CharacterRegistry.from_path(tmp_path)
+    llm = FakeLLM()
+    design_character(reg, "Rin", "girl", seed=7, llm=llm, comfy=FakeComfy(llm),
+                     engine="qwen_image_21")
+    _prop_in(tmp_path)
+    comfy = FakeComfy(llm)
+    result = design_character(reg, "Rin", "", llm=llm, comfy=comfy, engine="qwen_image_21",
+                              variant={"id": "rainy", "description": "a raincoat",
+                                       "prop": "The Red Umbrella"})
+    assert comfy.uploads == [str(tmp_path / "characters/rin/base.png"),
+                             str(tmp_path / "props/red-umbrella.png")]
+    assert "<image2>" in result.prompt and "holding or wearing the red umbrella" in result.prompt
+    assert "arms relaxed" not in result.prompt
+    # the base design never took a prop
+    assert "<image2>" not in CharacterRegistry.from_path(tmp_path).get("Rin").version("base").prompt
+
+
+def test_a_prop_reference_needs_qwen_and_a_picture(tmp_path):
+    reg = CharacterRegistry.from_path(tmp_path)
+    llm = FakeLLM()
+    design_character(reg, "Rin", "girl", seed=7, llm=llm, comfy=FakeComfy(llm))
+    _prop_in(tmp_path)
+    variant = {"id": "rainy", "description": "a raincoat", "prop": "red umbrella"}
+    with pytest.raises(ValueError, match="Qwen"):
+        design_character(reg, "Rin", "", llm=llm, comfy=FakeComfy(llm), engine="sdxl",
+                         variant=variant)
+    with pytest.raises(ValueError, match="no reference picture"):
+        design_character(reg, "Rin", "", llm=llm, comfy=FakeComfy(llm),
+                         engine="qwen_image_21", variant={**variant, "prop": "katana"})
+
+
+def test_api_prop_goes_only_with_another_reference(tmp_path):
+    client = TestClient(create_app(root=tmp_path, outputs=tmp_path / "out",
+                                   design_character=lambda *a, **k: None))
+    body = {"project_dir": str(tmp_path), "name": "Rin", "description": "girl",
+            "variant_prop": "red umbrella"}
+    assert client.post("/characters", json=body).status_code == 422

@@ -144,13 +144,16 @@ def design_character(
     ``style`` is the project's look (styles.py): its tags go into the design, so the
     reference every panel takes after is drawn in that look too.
 
-    ``variant`` ({"id", "description"}) designs *another* reference of an already
+    ``variant`` ({"id", "description", "prop"?}) designs *another* reference of an already
     designed character: the traits are untouched, the description (an outfit, a season)
     is added to this one image, it is saved as version ``id``, and the default reference
     stays as it was. Panels pick it per character. The seed defaults to the default
     version's, and the default reference image goes in as a reference itself (IP-Adapter
     for SDXL, <image1> for Qwen-Image), so the same person is drawn, not a lookalike.
-    Z-Anime has no image input and relies on the seed alone.
+    Z-Anime has no image input and relies on the seed alone. A variant's optional
+    ``prop`` (a name from the project's props, with a picture) is drawn into the image as
+    a second reference (Qwen-Image only); the base design never takes one, so the object
+    doesn't follow the character into panels that don't have it.
     """
     from manganation.script.llm import OllamaClient
 
@@ -192,6 +195,16 @@ def design_character(
         version_id = f"design-{number:02d}"
     engine = engine or settings.defaults.renderer.engine
     prompt = None
+    prop_obj = prop_path = None
+    if variant is not None and variant.get("prop"):
+        from manganation.props import PropRegistry
+
+        props = PropRegistry.from_path(registry.root)
+        prop_obj, prop_path = props.get(variant["prop"]), props.reference_path(variant["prop"])
+        if engine != "qwen_image_21":
+            raise ValueError("a prop reference needs the Qwen-Image 2.1 engine")
+        if prop_obj is None or prop_path is None:
+            raise ValueError(f"the prop {variant['prop']!r} has no reference picture")
     if style or variant is not None:
         from manganation.characters.generator import design_engine_prompt
         from manganation.render.panel import load_style
@@ -201,14 +214,16 @@ def design_character(
             character, engine, extra=look["tags"] if engine == "sdxl" else None,
             style=look["prose"],
             variation=" ".join(variant["description"].split()) if variant else "",
-            has_reference=variant is not None and engine == "qwen_image_21")
+            has_reference=variant is not None and engine == "qwen_image_21",
+            prop=(prop_obj.name, prop_obj.description) if prop_obj and prop_path else None)
         if look["extra_negative"]:  # what the look must not bring (seinen: no monsters)
             prompt.negative = f"{prompt.negative}, {look['extra_negative']}"
     result = generate_design(character, registry, version_id=version_id, seed=seed,
                              settings=settings, client=comfy, prompt=prompt, engine=engine,
                              kind=VersionKind.VARIANT if variant else VersionKind.BASE,
                              reference=(registry.reference_path(character.name)
-                                        if variant else None))
+                                        if variant else None),
+                             prop_reference=prop_path)
     return CharacterDesign(
         name=character.name, created=created,
         appearance=character.appearance.model_dump(), version_id=result.version_id,

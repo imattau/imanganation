@@ -40,13 +40,14 @@ def _checkpoint_id(settings: Settings) -> str:
 
 def design_engine_prompt(character: Character, engine: str,
                          extra: list[str] | None = None, style: str | None = None,
-                         variation: str = "", has_reference: bool = False) -> DesignPrompt:
+                         variation: str = "", has_reference: bool = False,
+                         prop: tuple[str, str] | None = None) -> DesignPrompt:
     """The design prompt in the engine's own language: tags for SDXL, prose otherwise."""
     if engine == "sdxl":
         return design_prompt_for(character, extra=[*(extra or []), variation]
                                  if variation else extra)
     return build_prose_design_prompt(character.appearance, variation=variation,
-                                     has_reference=has_reference,
+                                     has_reference=has_reference, prop=prop,
                                      **({"style": style} if style else {}))
 
 
@@ -82,12 +83,14 @@ def generate_design(
     replace: bool = False,
     engine: str | None = None,
     reference: Path | None = None,
+    prop_reference: Path | None = None,
 ) -> DesignResult:
     """Render a design sheet for ``character`` and register it as a version.
 
     ``reference`` is the character's existing design image: the new one is drawn with
     it as an IP-Adapter (SDXL) or <image1> (Qwen-Image) so the same person comes out
-    rather than a lookalike. Z-Anime can't take one."""
+    rather than a lookalike. Z-Anime can't take one. ``prop_reference`` (Qwen-Image only)
+    is a prop's picture, sent as <image2> so the character is drawn with that object."""
     settings = settings or load_settings()
     client = client or ComfyClient(settings.comfyui.base_url)
     if not client.is_up():
@@ -99,6 +102,8 @@ def generate_design(
     prefix = f"design_{character.name.replace(' ', '_')}"
 
     uploaded = client.upload_image(str(reference))["name"] if reference else None
+    prop_uploaded = (client.upload_image(str(prop_reference))["name"]
+                     if prop_reference and uploaded else None)
     if engine == "sdxl":
         graph = txt2img(
             ckpt=_checkpoint_id(settings),
@@ -120,8 +125,8 @@ def generate_design(
     else:
         graph = trial_text_graph(engine, prompt.positive, prompt.negative, width=width,
                                  height=height, seed=seed, prefix=prefix,
-                                 refs=[uploaded] if uploaded and engine == "qwen_image_21"
-                                 else None)
+                                 refs=[r for r in (uploaded, prop_uploaded) if r]
+                                 if engine == "qwen_image_21" else None)
     blobs = client.run(graph)
     if not blobs:
         raise RuntimeError("ComfyUI returned no image")

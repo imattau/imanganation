@@ -137,11 +137,13 @@ def build_prose_design_prompt(
     style: str = "clean line art and cel shading",
     variation: str = "",
     has_reference: bool = False,
+    prop: tuple[str, str] | None = None,
 ) -> DesignPrompt:
     """The single-figure reference as plain English, for Qwen-Image and Z-Anime.
     ``variation`` (an outfit, a season, an age) is said last and wins over the traits.
     ``has_reference``: the character's existing design is <image1>, to be drawn again
-    (Qwen-Image only; the other engine can't see images)."""
+    (Qwen-Image only; the other engine can't see images). ``prop`` (name, description):
+    the object in <image2> is held, or worn, as fits it: an extra reference, never the base."""
     tags = [t.strip() for t in appearance.prompt_tags() if t and t.strip()]
     kind = _KINDS.get(tags[0], "a person") if tags else "a person"
     looks = ", ".join(t for t in tags if not _COUNT_TAG.match(t))
@@ -150,13 +152,19 @@ def build_prose_design_prompt(
         f"one person and nobody else: {kind}" + (f", {looks}" if looks else "") + ". "
         + ("The same character as in <image1>: keep exactly their face, hair, eyes and "
            "build, and do not add anyone else. " if has_reference else "")
-        + (f"For this image: {variation}. " if variation else "") +
-        "Pose: standing straight, facing the viewer, looking at the viewer, arms relaxed "
-        "at the sides, framed from the thighs up with the whole head in frame. "
+        + (f"For this image: {variation}. " if variation else "")
+        + (f"The {prop[0]} is exactly the object shown in <image2>: keep its shape, colours "
+           "and details, and show it once. " + (f"{prop[1].strip()} " if prop[1].strip() else "")
+           if prop else "") +
+        "Pose: standing straight, facing the viewer, looking at the viewer, "
+        + (f"holding or wearing the {prop[0]} naturally, as it is meant to be used, "
+           if prop else "arms relaxed at the sides, ") +
+        "framed from the thighs up with the whole head in frame. "
         "Background: plain flat white, nothing else in the picture. "
         "One single figure only: no second character, no other people, no group, no "
         "duplicates, no turnaround, no character sheet, no multiple views, no text, no "
         "panel borders."
     )
-    return DesignPrompt(positive=positive, negative=PROSE_DESIGN_NEGATIVE,
+    negative = PROSE_DESIGN_NEGATIVE.replace(" props,", "") if prop else PROSE_DESIGN_NEGATIVE
+    return DesignPrompt(positive=positive, negative=negative,
                         tags=[kind, *([looks] if looks else [])])

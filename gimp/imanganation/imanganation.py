@@ -5163,8 +5163,9 @@ def _design_selected_character():
     _refresh_project_docks()
 
 
-def _choose_variant_reference(name, taken):
-    """Another reference dialog -> (reference name, what is different) or None."""
+def _choose_variant_reference(name, taken, props=()):
+    """Another reference dialog -> (reference name, what is different, prop name or "")
+    or None. ``props``: names of props that have a picture (Qwen-Image 2.1 projects)."""
     dialog = Gtk.Dialog(title=f"Design Another Reference for {name}", flags=Gtk.DialogFlags.MODAL)
     dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
                        "Design", Gtk.ResponseType.OK)
@@ -5183,11 +5184,19 @@ def _choose_variant_reference(name, taken):
                            "this one in Context -> Reference…. About a minute.",
                      xalign=0.0, wrap=True, max_width_chars=48)
     hint.get_style_context().add_class("dim-label")
-    for row, (caption, widget) in enumerate((("Name", label), ("Look", scrolled))):
+    prop_box = Gtk.ComboBoxText(hexpand=True)
+    prop_box.append_text("None")
+    for prop in props:
+        prop_box.append_text(prop)
+    prop_box.set_active(0)
+    rows = [("Name", label), ("Look", scrolled)]
+    if props:
+        rows.append(("Prop", prop_box))
+    for row, (caption, widget) in enumerate(rows):
         grid.attach(Gtk.Label(label=caption, xalign=0.0, valign=Gtk.Align.START),
                     0, row, 1, 1)
         grid.attach(widget, 1, row, 1, 1)
-    grid.attach(hint, 1, 2, 1, 1)
+    grid.attach(hint, 1, len(rows), 1, 1)
     dialog.get_content_area().add(grid)
     dialog.show_all()
     try:
@@ -5201,7 +5210,8 @@ def _choose_variant_reference(name, taken):
             elif ident.casefold() in taken:
                 Gimp.message(f"{name} already has a reference called {ident}.")
             else:
-                return ident, text
+                prop = prop_box.get_active_text() if prop_box.get_active() > 0 else ""
+                return ident, text, prop
         return None
     finally:
         dialog.destroy()
@@ -5226,15 +5236,25 @@ def _design_another_reference():
     if record is None or not record.get("default_version"):
         raise ValueError(f"Design {character['name']} first; another reference builds on "
                          "the first one")
+    options = _style_options(manifest)
+    props = []
+    if options.get("engine") == "qwen_image_21":  # the only engine that sees a prop picture
+        try:
+            known = _http("GET", f"{ENGINE_URL}/props?"
+                          f"{urllib.parse.urlencode(_engine_project(root, manifest))}",
+                          timeout=3)
+            props = [p["name"] for p in known if p.get("image")]
+        except EngineError:
+            pass
     chosen = _choose_variant_reference(character["name"],
-                                       {v.casefold() for v in record["versions"]})
+                                       {v.casefold() for v in record["versions"]}, props)
     if chosen is None:
         return False
-    ident, text = chosen
+    ident, text, prop = chosen
     job = _http("POST", f"{ENGINE_URL}/characters",
                 {**_engine_project(root, manifest), "name": character["name"],
                  "variant_id": ident, "variant_description": text,
-                 **_style_options(manifest)})
+                 **({"variant_prop": prop} if prop else {}), **options})
     _track_design(job, "character", character["name"], _DESIGN_JOBS)
     _refresh_project_docks()
     return True

@@ -226,6 +226,9 @@ class CharacterRequest(BaseModel):
     # and the default reference is left alone. Panels pick it per character.
     variant_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{1,40}$")
     variant_description: str = Field(default="", max_length=1000)
+    # A prop of the project (with a picture) the new reference is drawn holding or
+    # wearing; extra references only, Qwen-Image 2.1 only
+    variant_prop: str | None = Field(default=None, max_length=80)
     style: StyleOptions | None = None  # the project's look: the design is drawn in it
     engine: Literal["sdxl", "qwen_image_21", "z_anime"] | None = None  # the project's render engine
 
@@ -235,6 +238,8 @@ class CharacterRequest(BaseModel):
             raise ValueError("send either project (container id) or project_dir")
         if self.variant_id is not None and not self.variant_description.strip():
             raise ValueError("describe what is different about this reference")
+        if self.variant_prop and self.variant_id is None:
+            raise ValueError("a prop goes with another reference, never the base design")
         if self.variant_id is not None and self.redesign:
             raise ValueError("a new reference and a redesign are separate requests")
         return self
@@ -1180,6 +1185,13 @@ def create_app(
             if existing.version(req.variant_id) is not None:
                 raise HTTPException(409, f"{existing.name} already has a reference "
                                          f"called {req.variant_id!r}")
+            if req.variant_prop:
+                from manganation.props import PropRegistry
+
+                if req.engine != "qwen_image_21":
+                    raise HTTPException(422, "a prop reference needs the Qwen-Image 2.1 engine")
+                if PropRegistry.from_path(reg.root).reference_path(req.variant_prop) is None:
+                    raise HTTPException(422, f"the prop {req.variant_prop!r} has no picture")
         elif existing is not None and existing.default_version is not None and not req.redesign:
             raise HTTPException(409, f"{existing.name} already has a design; send redesign "
                                      "to make a new one")
@@ -1191,7 +1203,8 @@ def create_app(
             reg, req.name, req.description, aliases=req.aliases, seed=req.seed,
             redesign=req.redesign,
             **({"variant": {"id": req.variant_id,
-                            "description": req.variant_description}}
+                            "description": req.variant_description,
+                            **({"prop": req.variant_prop} if req.variant_prop else {})}}
                if req.variant_id else {}),
             **({"style": req.style.model_dump()} if req.style else {}),
             **({"engine": req.engine} if req.engine else {})))
