@@ -16,7 +16,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field, model_validator
 
 from manganation.project import projects_root
@@ -509,7 +509,8 @@ def create_app(
 
             setup_state["runner"] = models_setup.SetupRunner(
                 models_root(settings),
-                lambda: models_setup.needed(load_settings(), load_models()),
+                lambda: [*models_setup.needed(load_settings(), load_models()),
+                         *models_setup.character_masks(load_models())],
                 comfy_paths=comfy_paths_file(),
                 renderer=lambda log: installer_for(load_settings(), log=log),
                 # the engine's own ComfyUI starts as soon as its renderer is installed
@@ -521,6 +522,54 @@ def create_app(
         """Model files the settings need and their state, free disk space, and the
         running setup task (a download or a link search) with its progress."""
         return setup().report()
+
+    @app.post("/character-masks")
+    def create_character_masks(file: UploadFile = File(...)) -> dict:
+        """Detect and segment figures in an uploaded layer image; masks are output PNGs."""
+        from PIL import Image
+        from manganation import models_setup
+        from manganation.config import load_models, load_settings, models_root, outputs_root
+        from manganation.evaluate.detector import default_detector
+        from manganation.evaluate.masks import AnimeSegmenter
+        from manganation.evaluate.masks import character_masks as segment_figures
+
+        models = load_models()
+        segmenter_model = models_setup.character_masks(models)[1]
+        root_dir = models_root(load_settings())
+        detector_model = models_setup.detector(models, models_setup.DEFAULT_DETECTOR)
+        if (models_setup.state(segmenter_model, root_dir) != "present"
+                or models_setup.state(detector_model, root_dir) != "present"):
+            raise HTTPException(409, "Character mask model is not installed. Use Set Up Models.")
+        try:
+            raw = file.file.read(32 * 1024 * 1024 + 1)
+            if len(raw) > 32 * 1024 * 1024:
+                raise HTTPException(413, "layer image is larger than 32 MB")
+            import io
+            with Image.open(io.BytesIO(raw)) as opened:
+                if opened.width * opened.height > 40_000_000:
+                    raise HTTPException(413, "layer image is larger than 40 megapixels")
+                image = opened.convert("RGB")
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(400, "upload must be a readable image") from exc
+        try:
+            figures = segment_figures(
+                image, default_detector(), AnimeSegmenter(segmenter_model.path(root_dir)))
+        except Exception as exc:
+            raise HTTPException(500, f"could not create character masks: {exc}") from exc
+        output_root = Path(outputs) if outputs is not None else outputs_root()
+        folder = output_root / "character-masks" / uuid.uuid4().hex
+        folder.mkdir(parents=True, exist_ok=True)
+        results = []
+        for index, figure in enumerate(figures, 1):
+            rgba = Image.new("RGBA", image.size, (255, 255, 255, 0))
+            rgba.putalpha(figure.mask)
+            path = folder / f"figure-{index:02d}.png"
+            rgba.save(path)
+            results.append({"path": str(path), "box": [figure.box.x0, figure.box.y0,
+                           figure.box.x1, figure.box.y1], "score": figure.box.score})
+        return {"width": image.width, "height": image.height, "figures": results}
 
     @app.post("/setup/download", status_code=202)
     def setup_download(req: SetupDownloadRequest) -> dict:

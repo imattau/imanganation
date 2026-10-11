@@ -154,6 +154,7 @@ PROC_SETREF = "plug-in-imanganation-set-character-reference"
 PROC_SET_LOCATION_REF = "plug-in-imanganation-set-location-reference"
 PROC_SET_PROP_REF = "plug-in-imanganation-set-prop-reference"
 PROC_INPAINT = "plug-in-imanganation-inpaint-selection"
+PROC_MASKS = "plug-in-imanganation-create-character-masks"
 PROC_STAGE = "plug-in-imanganation-develop-panel-stage"
 DEVELOPMENT_PHASES = (
     ("composition", "Panel composition",
@@ -361,6 +362,29 @@ def _http(method, url, body=None, timeout=10):
                "uv run manganation serve")
         raise EngineError(f"imanganation engine not reachable at {url} ({exc}). "
                           f"{how}") from exc
+
+
+def _http_upload(url, path, timeout=60):
+    """POST one PNG as multipart/form-data using only GIMP's bundled stdlib."""
+    boundary = "----imanganation-" + secrets.token_hex(16)
+    payload = Path(path).read_bytes()
+    body = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; "
+            f"filename=\"layer.png\"\r\nContent-Type: image/png\r\n\r\n").encode()
+    body += payload + f"\r\n--{boundary}--\r\n".encode()
+    request = urllib.request.Request(
+        url, data=body, method="POST",
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return json.loads(response.read())
+    except urllib.error.HTTPError as exc:
+        try:
+            detail = json.loads(exc.read()).get("detail", exc.reason)
+        except ValueError:
+            detail = exc.reason
+        raise EngineError(f"engine refused the request: {detail}") from exc
+    except (urllib.error.URLError, OSError) as exc:
+        raise EngineError(f"imanganation engine not reachable at {url} ({exc})") from exc
 
 
 def _ping(url: str) -> str:
@@ -1842,6 +1866,68 @@ def _export_reference(image, drawable, path, square=True, max_side=REF_MAX):
     return side
 
 
+def _export_mask_source(drawable, path):
+    """Export just this layer's visible composite into its own pixel-sized PNG."""
+    width, height = drawable.get_width(), drawable.get_height()
+    if width < 1 or height < 1:
+        raise ValueError("The selected layer is empty.")
+    out = Gimp.Image.new(width, height, Gimp.ImageBaseType.RGB)
+    try:
+        copied = Gimp.Layer.new_from_drawable(drawable, out)
+        copied.set_visible(True)
+        out.insert_layer(copied, None, 0)
+        copied.set_offsets(0, 0)
+        bg = Gimp.Layer.new(out, "white background", width, height,
+                            Gimp.ImageType.RGB_IMAGE, 100, Gimp.LayerMode.NORMAL)
+        out.insert_layer(bg, None, 1)
+        bg.fill(Gimp.FillType.WHITE)
+        out.flatten()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        Gimp.file_save(Gimp.RunMode.NONINTERACTIVE, out,
+                       Gio.File.new_for_path(str(path)), None)
+    finally:
+        out.delete()
+
+
+def create_character_masks(procedure, run_mode, image, drawables, config, data):
+    if not drawables:
+        return _error(procedure, "Select one layer to create character masks from.")
+    drawable = drawables[0]
+    source_path = None
+    try:
+        if run_mode == Gimp.RunMode.INTERACTIVE and not _dialog(procedure, config, PROC_MASKS):
+            return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
+        source_path = Path("/tmp") / f"imanganation-mask-{secrets.token_hex(8)}.png"
+        _export_mask_source(drawable, source_path)
+        endpoint = (config.get_property("engine-url") or ENGINE_URL).rstrip("/")
+        result = _http_upload(endpoint + "/character-masks", source_path)
+        figures = result.get("figures", [])
+        if not figures:
+            return _error(procedure, "No characters were detected in the selected layer.")
+        _, offset_x, offset_y = drawable.get_offsets()
+        group = Gimp.GroupLayer.new(image, f"Character Masks · {drawable.get_name()}")
+        image.undo_group_start()
+        try:
+            image.insert_layer(group, drawable.get_parent(), image.get_item_position(drawable))
+            for index, figure in enumerate(figures, 1):
+                mask_path = Path(figure["path"])
+                layer = Gimp.file_load_layer(
+                    Gimp.RunMode.NONINTERACTIVE, image, Gio.File.new_for_path(str(mask_path)))
+                image.insert_layer(layer, group, index - 1)
+                layer.set_name(f"Figure {index:02d} · {figure['score']:.2f}")
+                layer.set_offsets(offset_x, offset_y)
+                mask_path.unlink(missing_ok=True)
+            group.set_visible(False)
+            image.set_selected_layers([group])
+            Gimp.displays_flush()
+        finally:
+            image.undo_group_end()
+        return _success(procedure, group)
+    except (EngineError, OSError, ValueError, KeyError) as exc:
+        return _error(procedure, str(exc))
+    finally:
+        if source_path is not None:
+            source_path.unlink(missing_ok=True)
 def set_character_reference(procedure, run_mode, image, drawables, config, data):
     layers = [d for d in drawables if isinstance(d, Gimp.Layer)]
     if not layers:
@@ -7210,6 +7296,8 @@ def _show_setup_dialog():
             Gimp.message(f"Set Up Models: {exc}")
         refresh()
 
+    widgets["post"] = post
+
     def on_response(_dialog, response):
         if response == 1:
             folder = _choose_models_folder(dialog)
@@ -7271,12 +7359,21 @@ def _update_setup_dialog(widgets, report, engines_report=None):
             licence = (Gtk.LinkButton.new_with_label(row["license_url"], "Licence")
                        if row.get("license_url") else Gtk.Label(label=""))
             licence.set_tooltip_text(row.get("license") or "")
-            for column, widget in enumerate((feature, size, state, licence)):
+            install = Gtk.Button(label="Install")
+            install.connect("clicked", lambda *_args, role=row.get("role"),
+                            is_optional=bool(row.get("optional")), all_rows=rows:
+                            widgets["post"]("/setup/download", {
+                                "roles": ([r["role"] for r in all_rows if r.get("optional")]
+                                          if is_optional else [role])}))
+            for column, widget in enumerate((feature, size, state, licence, install)):
                 grid.attach(widget, column, index, 1, 1)
-            widgets["rows"].append(state)
+            widgets["rows"].append((state, install))
         grid.show_all()
-    for label, row in zip(widgets["rows"], rows, strict=True):
+    for (label, install), row in zip(widgets["rows"], rows, strict=True):
         label.set_text(setup_ui.row_state(row, task))
+        install.set_visible(bool(row.get("optional")) and row.get("state") != "present")
+        install.set_sensitive(not task or task.get("state") in
+                              ("idle", "done", "error", "cancelled"))
     widgets["headline"].set_text(setup_ui.headline(report))
     fraction, text = setup_ui.progress(report)
     if text:
@@ -8088,7 +8185,7 @@ class Imanganation(Gimp.PlugIn):
         return False, None, None
 
     def do_query_procedures(self):
-        return [PROC_RENDER, PROC_NEXT, PROC_REGEN, PROC_INPAINT, PROC_STAGE,
+        return [PROC_RENDER, PROC_NEXT, PROC_REGEN, PROC_INPAINT, PROC_MASKS, PROC_STAGE,
                 PROC_REFINE, PROC_SETREF,
                 PROC_SET_LOCATION_REF, PROC_SET_PROP_REF,
                 PROC_PLACE, PROC_STATUS, PROC_PROJECT_DOCKS, PROC_CLOSE_PROJECT,
@@ -8279,6 +8376,7 @@ class Imanganation(Gimp.PlugIn):
         run = {PROC_RENDER: render_panel, PROC_NEXT: place_next_panel,
                PROC_REFINE: refine_panel, PROC_REGEN: regenerate_panel,
                PROC_SETREF: set_character_reference, PROC_INPAINT: inpaint_selection,
+               PROC_MASKS: create_character_masks,
                PROC_SET_LOCATION_REF: set_location_reference,
                PROC_SET_PROP_REF: set_prop_reference,
                PROC_PLACE: place_panel, PROC_STATUS: engine_status,
@@ -8312,6 +8410,7 @@ class Imanganation(Gimp.PlugIn):
             PROC_PLACE: "Create",
             PROC_REGEN: "Edit Panel",
             PROC_INPAINT: "Edit Panel",
+            PROC_MASKS: "Edit Panel",
             PROC_STAGE: "Edit Panel",
             PROC_REFINE: "Edit Panel",
         }
@@ -8408,6 +8507,18 @@ class Imanganation(Gimp.PlugIn):
 
         proc.add_layer_return_value(
             "layer", "Layer", "The placed panel layer", False, GObject.ParamFlags.READWRITE)
+
+        if name == PROC_MASKS:
+            proc.set_menu_label("Create Character _Masks...")
+            proc.set_documentation(
+                "Create separate masks for characters on the selected layer",
+                "Detect each anime figure, segment its foreground, and add one editable "
+                "mask layer per figure inside a hidden group. The optional CPU model is "
+                "installed from Set Up Models.", name)
+            proc.add_string_argument(
+                "engine-url", "_Engine URL", "imanganation engine (manganation serve)",
+                ENGINE_URL, GObject.ParamFlags.READWRITE)
+            return proc
 
         if name in (PROC_INPAINT, PROC_STAGE):
             if name == PROC_STAGE:

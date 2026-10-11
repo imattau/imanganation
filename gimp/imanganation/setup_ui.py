@@ -53,7 +53,8 @@ def row_state(row: dict[str, Any], task: dict[str, Any]) -> str:
 
 def headline(report: dict[str, Any]) -> str:
     task = report.get("task") or {}
-    missing = [r for r in report.get("models", []) if r.get("state") != "present"]
+    missing = [r for r in report.get("models", [])
+               if r.get("state") != "present" and not r.get("optional")]
     if running(report):
         if task.get("phase") == RENDERER:
             return ("Installing the renderer (ComfyUI and PyTorch for your GPU): a few GB, "

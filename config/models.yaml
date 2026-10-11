@@ -200,6 +200,18 @@ detectors:
       url: https://huggingface.co/deepghs/anime_face_detection/resolve/784dc4c0bb692351ddcdbe6131a050b17d3025d5/face_detect_v1.4_s/model.onnx
       size: 44583229
       sha256: 403b5bc93b6ff789b7d183418df4a1364049bac00c24acd927604a7ff6891483
+  anime_character_segmenter:
+    id: anime-seg-isnetis.onnx
+    display: Anime character foreground segmenter (ONNX, runs on the CPU)
+    source: https://huggingface.co/skytnt/anime-seg
+    subdir: taggers
+    feature: character masks (segments each detected figure)
+    license: {name: Apache-2.0, url: https://huggingface.co/skytnt/anime-seg}
+    optional: true
+    download:
+      url: https://huggingface.co/skytnt/anime-seg/resolve/976cbb9ba61600e0993d1ee2a8a247ae05d183ee/isnetis.onnx
+      size: 176069933
+      sha256: f15622d853e8260172812b657053460e20806f04b9e05147d49af7bed31a6e99
 
 # Trial models: candidates being compared with the eval (docs/eval.md), not used to
 # render. `manganation setup --trial <name>` fetches one group.

@@ -211,6 +211,8 @@ def setup(
     yes: bool = typer.Option(False, "--yes", "-y", help="Download without asking."),
     evaluation: bool = typer.Option(False, "--eval",
                                     help="Also the tagger `manganation eval` judges with."),
+    selection: bool = typer.Option(False, "--selection",
+                                   help="Also the optional anime character mask segmenter."),
     poses: bool = typer.Option(False, "--poses",
                                help="Also the OpenPose ControlNet for character poses."),
     trial: str = typer.Option("", "--trial", help="Also a trial model group "
@@ -248,6 +250,8 @@ def setup(
     models = ms.needed(settings, load_models())
     if evaluation:
         models += ms.evaluation(load_models())
+    if selection:
+        models += ms.character_masks(load_models())
     if poses:
         models += ms.poses(settings, load_models())
     if trial:

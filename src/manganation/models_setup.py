@@ -49,6 +49,7 @@ class ModelFile:
     license: str = ""
     license_url: str = ""
     note: str = ""  # why it can't be resolved (unknown role, …)
+    optional: bool = False
 
     def path(self, root: Path) -> Path:
         return Path(root) / self.subdir / self.file
@@ -120,6 +121,18 @@ def evaluation(models: dict, tagger: str = DEFAULT_TAGGER) -> list[ModelFile]:
         out.append(_entry(f"detector ({name})", detectors.get(name), "taggers",
                           f"no detectors.{name} in models.yaml"))
     return out
+
+
+def character_masks(models: dict) -> list[ModelFile]:
+    """Optional foreground segmenter used by GIMP's Create Character Masks command."""
+    detector = _entry("detector (anime_person)", models.get("detectors", {}).get(DEFAULT_DETECTOR),
+                      "taggers", "no detectors.anime_person in models.yaml")
+    detector.optional = True
+    entry = models.get("detectors", {}).get("anime_character_segmenter")
+    model = _entry("segmenter (anime_character)", entry, "taggers",
+                   "no detectors.anime_character_segmenter in models.yaml")
+    model.optional = True
+    return [detector, model]
 
 
 def detector(models: dict, name: str) -> ModelFile:
@@ -420,10 +433,10 @@ class SetupRunner:
         rows = [{"role": m.role, "feature": m.feature, "file": m.file, "size": m.size,
                  "state": state(m, self.root), "license": m.license,
                  "license_url": m.license_url, "downloadable": bool(m.urls),
-                 "note": m.note} for m in models]
+                 "note": m.note, "optional": m.optional} for m in models]
         if self.renderer is not None:
             rows.insert(0, self._renderer_row())
-        missing = [r for r in rows if r["state"] != "present"]
+        missing = [r for r in rows if r["state"] != "present" and not r.get("optional")]
         return {"models_dir": str(self.root), "free_bytes": free_bytes(self.root),
                 "models": rows, "missing_bytes": sum(r["size"] or 0 for r in missing
                                                     if r["downloadable"]),
@@ -451,6 +464,7 @@ class SetupRunner:
         """Download what's missing (``roles``: only these). The renderer, if it's set up
         here and missing, is installed first: rendering needs it before any model."""
         todo = [m for m in self.models() if state(m, self.root) != "present" and m.urls
+                and (roles is not None or not m.optional)
                 and (roles is None or m.role in roles)]
         renderer = (self.renderer is not None and (roles is None or RENDERER_ROLE in roles)
                     and self._renderer_row()["state"] != "present")
