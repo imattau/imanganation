@@ -38,6 +38,8 @@ export default function App() {
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [engineMessage, setEngineMessage] = useState('Checking local renderer…');
+  const [loadedModelVersion, setLoadedModelVersion] = useState('');
+  const [modelLoading, setModelLoading] = useState(false);
   const [models, setModels] = useState<LocalModel[]>([]);
   const [modelStorageFree, setModelStorageFree] = useState<number | null>(null);
   const [modelProgress, setModelProgress] = useState<ModelImportProgress | null>(null);
@@ -46,7 +48,10 @@ export default function App() {
 
   const reload = useCallback(async () => setProjects(await listProjects()), []);
   useEffect(() => { void reload(); }, [reload]);
-  useEffect(() => { void renderer.capabilities().then((capabilities) => setEngineMessage(capabilities.available ? 'Local renderer ready' : capabilities.reason ?? 'Local renderer unavailable')); }, []);
+  useEffect(() => { void renderer.capabilities().then((capabilities) => {
+    setEngineMessage(capabilities.available ? 'Local renderer ready' : capabilities.reason ?? 'Local renderer unavailable');
+    setLoadedModelVersion(capabilities.modelVersion ?? '');
+  }); }, []);
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
     let disposed = false;
@@ -97,6 +102,22 @@ export default function App() {
   const deleteModel = async (model: LocalModel) => {
     if (!window.confirm(`Remove ${model.name} from this device?`)) return;
     try { await modelStore.deleteModel({ id: model.id }); await refreshModels(); }
+    catch (error) { setNotice(message(error)); }
+  };
+
+  const loadModel = async (model: LocalModel) => {
+    setModelLoading(true);
+    setNotice(`Loading ${model.name}. Large checkpoints can take several minutes and may need substantial free memory.`);
+    try {
+      const version = await renderer.loadModel(model.path);
+      setLoadedModelVersion(version);
+      setNotice(`Loaded model format: ${version}. Generation controls are still being integrated.`);
+    } catch (error) { setNotice(message(error)); }
+    finally { setModelLoading(false); }
+  };
+
+  const unloadModel = async () => {
+    try { await renderer.unloadModel(); setLoadedModelVersion(''); setNotice('Model unloaded and renderer memory released.'); }
     catch (error) { setNotice(message(error)); }
   };
 
@@ -479,7 +500,7 @@ export default function App() {
   };
 
   const workspace = useMemo(() => current && <Workspace
-    saved={current} tab={tab} engineMessage={engineMessage} busy={busy} models={models} modelStorageFree={modelStorageFree} modelProgress={modelProgress} modelDownloadProgress={modelDownloadProgress}
+    saved={current} tab={tab} engineMessage={engineMessage} loadedModelVersion={loadedModelVersion} modelLoading={modelLoading} busy={busy} models={models} modelStorageFree={modelStorageFree} modelProgress={modelProgress} modelDownloadProgress={modelDownloadProgress}
     onTab={setTab} onScript={(script) => void persist(current.manifest, script)}
     onAddPanel={() => void addPanel()} onAddPage={() => void addPage()}
     onMovePage={(pageId, offset) => void movePage(pageId, offset)}
@@ -520,9 +541,10 @@ export default function App() {
     }}
     onImportModel={() => void importModel()}
     onDeleteModel={(model) => void deleteModel(model)}
+    onLoadModel={(model) => void loadModel(model)} onUnloadModel={() => void unloadModel()}
     onDownloadModel={(model) => void downloadModel(model)}
     onCancelModelDownload={(key) => void cancelModelDownload(key)}
-  />, [current, tab, engineMessage, busy, persist]);
+  />, [current, tab, engineMessage, loadedModelVersion, modelLoading, models, modelStorageFree, modelProgress, modelDownloadProgress, busy, persist]);
 
   return <IonApp>
     <IonPage>
@@ -564,6 +586,8 @@ interface WorkspaceProps {
   saved: SavedProject;
   tab: WorkspaceTab;
   engineMessage: string;
+  loadedModelVersion: string;
+  modelLoading: boolean;
   busy: boolean;
   models: LocalModel[];
   modelStorageFree: number | null;
@@ -571,6 +595,8 @@ interface WorkspaceProps {
   modelDownloadProgress: ModelDownloadProgress | null;
   onImportModel: (expectedSha256?: string) => void;
   onDeleteModel: (model: LocalModel) => void;
+  onLoadModel: (model: LocalModel) => void;
+  onUnloadModel: () => void;
   onDownloadModel: (model: CatalogModel) => void;
   onCancelModelDownload: (key: string) => void;
   onTab: (tab: WorkspaceTab) => void;
@@ -701,7 +727,8 @@ function Workspace(props: WorkspaceProps) {
         {props.modelStorageFree !== null && <p className="storage-note">Available device storage: {formatBytes(props.modelStorageFree)}</p>}
         {props.modelProgress && <div className="model-progress"><strong>{props.modelProgress.name}</strong><span>{props.modelProgress.totalBytes > 0 ? `${formatBytes(props.modelProgress.bytes)} / ${formatBytes(props.modelProgress.totalBytes)}` : formatBytes(props.modelProgress.bytes)}</span><progress value={props.modelProgress.totalBytes > 0 ? props.modelProgress.bytes : undefined} max={props.modelProgress.totalBytes > 0 ? props.modelProgress.totalBytes : undefined}/></div>}
         {props.modelDownloadProgress && <div className="model-progress"><strong>{props.modelDownloadProgress.name}</strong><span>{props.modelDownloadProgress.state === 'verifying' ? 'Verifying size and SHA-256…' : props.modelDownloadProgress.state === 'failed' ? props.modelDownloadProgress.error || 'Download failed; partial file retained for retry.' : props.modelDownloadProgress.state === 'cancelled' ? 'Download paused; partial file retained.' : `${formatBytes(props.modelDownloadProgress.bytes)} / ${formatBytes(props.modelDownloadProgress.totalBytes)}`}</span><progress value={props.modelDownloadProgress.totalBytes > 0 ? props.modelDownloadProgress.bytes : undefined} max={props.modelDownloadProgress.totalBytes > 0 ? props.modelDownloadProgress.totalBytes : undefined}/>{props.modelDownloadProgress.state === 'downloading' && <IonButton fill="clear" size="small" onClick={() => props.onCancelModelDownload(props.modelDownloadProgress!.downloadKey)}>Pause download</IonButton>}</div>}
-        {props.models.length === 0 ? <p className="helper-text">No model files imported or downloaded.</p> : <div className="model-list">{props.models.map((model) => <div className="model-row" key={model.id}><div><strong>{model.name}</strong><span>{formatBytes(model.sizeBytes)} · SHA-256 {model.sha256.slice(0, 12)}…{model.licenseName ? ` · ${model.licenseName}` : ''}</span></div><IonButton fill="clear" color="danger" size="small" onClick={() => props.onDeleteModel(model)}>Remove</IonButton></div>)}</div>}
+        {props.loadedModelVersion && <div className="model-progress"><strong>Loaded model: {props.loadedModelVersion}</strong><span>Inference controls are not available yet.</span><IonButton fill="outline" size="small" disabled={props.modelLoading} onClick={props.onUnloadModel}>Unload model</IonButton></div>}
+        {props.models.length === 0 ? <p className="helper-text">No model files imported or downloaded.</p> : <div className="model-list">{props.models.map((model) => <div className="model-row" key={model.id}><div><strong>{model.name}</strong><span>{formatBytes(model.sizeBytes)} · SHA-256 {model.sha256.slice(0, 12)}…{model.licenseName ? ` · ${model.licenseName}` : ''}</span></div><IonButton fill="outline" size="small" disabled={props.modelLoading || !!props.loadedModelVersion} onClick={() => props.onLoadModel(model)}>Load</IonButton><IonButton fill="clear" color="danger" size="small" disabled={props.modelLoading || !!props.loadedModelVersion} onClick={() => props.onDeleteModel(model)}>Remove</IonButton></div>)}</div>}
       </div>
       <IonItem className="field-item"><IonLabel position="stacked">Target panel</IonLabel><select className="native-select" defaultValue={saved.manifest.panels[0]?.id ?? ''}><option value="" disabled>Choose a panel</option>{saved.manifest.panels.map((panel) => <option key={panel.id} value={panel.id}>Page {panel.label.page}, panel {panel.label.panel}</option>)}</select></IonItem>
       <IonItem className="field-item"><IonTextarea label="Prompt" labelPlacement="stacked" placeholder="Describe the artwork to create…" rows={4}/></IonItem>

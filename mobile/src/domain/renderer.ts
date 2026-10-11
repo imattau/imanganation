@@ -27,11 +27,15 @@ export interface RendererCapabilities {
   totalMemoryBytes?: number;
   availableMemoryBytes?: number;
   lowMemory?: boolean;
+  modelLoaded?: boolean;
+  modelVersion?: string;
   reason?: string;
 }
 
 interface NativeRendererPlugin {
   capabilities(): Promise<RendererCapabilities & { generationAvailable: boolean; engine?: string }>;
+  loadModel(options: { path: string }): Promise<{ modelVersion: string }>;
+  unloadModel(): Promise<void>;
 }
 
 const NativeRenderer = registerPlugin<NativeRendererPlugin>('Renderer');
@@ -48,6 +52,8 @@ export interface RenderJob {
 /** Stable UI boundary; native runtime discovery is separate from generation readiness. */
 export interface RendererAdapter {
   capabilities(): Promise<RendererCapabilities>;
+  loadModel(path: string): Promise<string>;
+  unloadModel(): Promise<void>;
   start(request: RenderRequest): Promise<RenderJob>;
   cancel(jobId: string): Promise<void>;
   subscribe(listener: (job: RenderJob) => void): () => void;
@@ -79,6 +85,14 @@ export class UnavailableRenderer implements RendererAdapter {
       operations: [],
       reason: 'The native renderer is available only in the Android app.',
     };
+  }
+  async loadModel(path: string): Promise<string> {
+    if (!Capacitor.isNativePlatform() || Capacitor.getPlatform() !== 'android') throw new Error('Model loading is available in the Android app.');
+    const result = await NativeRenderer.loadModel({ path });
+    return result.modelVersion;
+  }
+  async unloadModel(): Promise<void> {
+    if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') await NativeRenderer.unloadModel();
   }
   async start(): Promise<RenderJob> {
     throw new Error('Local image generation is not available in this build.');

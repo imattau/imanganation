@@ -95,11 +95,12 @@ Existing XCF page assets are preserved but cannot be previewed or edited.
 
 The Android APK builds and packages the pinned stable-diffusion.cpp C/C++ runtime for
 ARM64 and queries its linked revision and basic device memory/ABI profile through a
-Capacitor/JNI bridge. This is a CPU-backend integration proof: it does not load a model
-or generate images, and model-file presence does not mean compatibility. Generation
-remains disabled until model loading and workflow controls are connected. Adreno
-OpenCL/QNN acceleration and target-device quality, heat, and latency checks remain
-open. The authoring UI is a first implementation scaffold and does not
+Capacitor/JNI bridge. This is a CPU-backend integration proof. A native SDXL model-load
+path is being added, but has not been checked on target hardware; model-file presence
+does not establish compatibility. Image generation remains disabled until the render
+job, output persistence, and workflow controls are connected. Adreno OpenCL/QNN
+acceleration and target-device quality, heat, and latency checks remain open. The
+authoring UI is a first implementation scaffold and does not
 yet provide full desktop workflow parity, freeform canvas editing, or validated ORA
 round-trip checks in GIMP. The CI workflow builds debug APKs and signed release APK/AAB
 artifacts from version tags; signing secrets are documented in the Android README.
@@ -114,7 +115,7 @@ React + TypeScript mobile-first UI
     └── Capacitor bridge
            ├── Kotlin project storage / Android document access
            ├── Kotlin download and foreground job lifecycle
-           └── Android renderer adapter (native runtime packaged; generation bridge pending)
+           └── Android renderer adapter (native runtime packaged; model load bridge underway)
 
 Desktop GIMP plug-in ── existing Python engine ── ComfyUI desktop renderer
                          (behavior reference and desktop product)
