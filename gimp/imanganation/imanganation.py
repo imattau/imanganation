@@ -4072,6 +4072,12 @@ def _edit_story_beat(root, page_number, panel=None, after_panel_id=None):
     updated = load_project(root)
     if panel:
         result = edit_panel_story(updated, panel["id"], **story)
+        if page_number > 0:
+            # The storyboard review is opened from a numbered project page, so
+            # that page is authoritative if an older manifest has stale cover
+            # metadata or a zero-based script label on this ordinary beat.
+            result["label"]["page"] = page_number
+            result.pop("cover", None)
     else:
         result = add_panel(updated, page_number, **story, after_panel_id=after_panel_id)
     _save_story_revision(root, updated, "Edit beat" if panel else "Add beat")
