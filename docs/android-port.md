@@ -106,8 +106,8 @@ inpaint, image references, accelerator backends, and target-device quality, heat
 latency checks remain open. Native sampling progress and cancellation are connected
 through the Android bridge. The
 authoring UI is a first implementation scaffold and does not yet provide full desktop
-workflow parity, freeform painting, layer reordering/groups/masks, the full GEGL filter
-catalog, or validated ORA round-trip checks in GIMP. The CI workflow builds debug APKs and signed release APK/AAB
+workflow parity, group opacity, direct mask painting, the full GEGL filter catalog, or
+validated ORA round-trip checks in GIMP. The CI workflow builds debug APKs and signed release APK/AAB
 artifacts from version tags; signing secrets are documented in the Android README.
 
 ## GIMP-inspired editor workbench plan
@@ -128,7 +128,7 @@ touch instead of shrinking desktop controls to phone size.
 4. **Non-destructive effects:** start with a small set of manga-usable effects, preview
    them on canvas, and apply the same settings when producing page, book, and vertical
    exports. Keep source raster layers intact.
-5. **Expand editing parity:** add group opacity, direct mask painting, history/undo,
+5. **Expand editing parity:** add group opacity, direct mask painting,
    non-destructive selection operations, stroke refinement, and a broader filter catalog
    as project storage and ORA interchange behavior are defined.
 
@@ -136,10 +136,12 @@ The current implementation covers the workbench, responsive dock layout, nested 
 groups, layer reordering, visibility and opacity, selection-derived masks, a persisted
 grayscale/contrast effect stack, and export-time composition. It also has rectangular,
 elliptical, and contiguous-color selection; layer translation, scale, and rotation; and
-project-backed brush strokes with an eraser for those strokes. Group hierarchy, masks,
-and strokes remain app-side project metadata while source ORA pixels are preserved.
-Group opacity, painting directly on mask channels, undo/history, precise stroke splitting
-for erasing, and GIMP-native GEGL effect interchange remain follow-up work.
+project-backed brush strokes with an eraser for those strokes. Undo/redo covers layer
+properties, masks, transforms, effects, stack changes, and completed brush/eraser strokes
+with keyboard shortcuts. Group hierarchy, masks, and strokes remain app-side project
+metadata while source ORA pixels are preserved. Group opacity, painting directly on mask
+channels, precise stroke splitting for erasing, and GIMP-native GEGL effect interchange
+remain follow-up work.
 
 ## System shape
 
