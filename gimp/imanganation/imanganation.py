@@ -195,6 +195,7 @@ PROC_NEW_PROJECT_MANUAL = "plug-in-imanganation-new-project-manual"
 PROC_NEW_PROJECT = "plug-in-imanganation-new-project"
 PROC_SETUP_MODELS = "plug-in-imanganation-setup-models"
 PROC_RENDER_ENGINE = "plug-in-imanganation-render-engine"
+PROC_PROJECT_SETTINGS = "plug-in-imanganation-project-settings"
 DOCK_PROJECT = "project"
 DOCK_INSPECTOR = "inspector"
 DOCK_FILMSTRIP = "filmstrip"
@@ -231,6 +232,7 @@ DOCK_OPEN_PAGE = "plug-in-imanganation-dock-open-page"  # Context's "Open page" 
 DOCK_NEW_PROJECT = "plug-in-imanganation-dock-new-project"
 DOCK_NEW_MANUAL_PROJECT = "plug-in-imanganation-dock-new-manual-project"
 DOCK_SETUP_MODELS = "plug-in-imanganation-dock-setup-models"  # the workspace shows it
+DOCK_PROJECT_SETTINGS = "plug-in-imanganation-dock-project-settings"
 DOCK_RENDER_ENGINE = "plug-in-imanganation-dock-render-engine"  # the workspace shows it
 DOCK_DESIGN_CHARACTER = "plug-in-imanganation-dock-design-character"
 # Project tree right-click menus (one-string procedures: the row id)
@@ -4523,6 +4525,8 @@ def _dock_action(procedure, config, data):
             _show_setup_dialog()
         elif data == "render-engine":
             _show_engine_dialog()
+        elif data == "project-settings":
+            _show_project_settings()
         else:
             _refresh_project_docks()
         return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
@@ -6337,6 +6341,71 @@ def _render_engine_run(procedure, config, data):
     return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
 
 
+def _project_settings_run(procedure, config, data):
+    """Imanganation > Project > Project Settings: shown by the workspace."""
+    try:
+        _dock_pdb_call(DOCK_PROJECT_SETTINGS, {})
+    except Exception:
+        return _error(procedure, "The Imanganation workspace is not running; restart GIMP "
+                                 "to start it")
+    return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+
+
+def _show_project_settings():
+    """Project Settings: chapter, reading order and text direction, written to
+    project.json on Save. Independent of the render engine."""
+    if load_project is None:
+        raise ValueError("This plug-in install is missing project_store.py")
+    root = _DOCK_CONTEXT.get("root")
+    if root is None:
+        raise ValueError("Open a project first (File > Open / Switch Project)")
+    manifest = load_project(root)
+    project = manifest["project"]
+    dialog = Gtk.Dialog(title=f"Project Settings — {project.get('title', '')}",
+                        flags=Gtk.DialogFlags.MODAL)
+    dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+                       Gtk.STOCK_SAVE, Gtk.ResponseType.OK)
+    dialog.set_default_response(Gtk.ResponseType.OK)
+    grid = Gtk.Grid(column_spacing=12, row_spacing=8, border_width=12)
+    chapter = Gtk.Entry(hexpand=True, text=project.get("chapter", ""),
+                        placeholder_text="Optional")
+    reading_order = Gtk.ComboBoxText()
+    reading_order.append("rtl", "Right to left (manga)")
+    reading_order.append("ltr", "Left to right")
+    reading_order.set_active_id(project.get("reading_order", "rtl"))
+    reading_order.set_tooltip_text("Page and panel flow. Applies to layouts and renders "
+                                   "made from now on; pages already laid out keep theirs.")
+    text_direction = Gtk.ComboBoxText()
+    for direction_id, direction_label in TEXT_DIRECTION_CHOICES:
+        text_direction.append(direction_id, direction_label)
+    text_direction.set_active_id(_manifest_text_direction(manifest))
+    text_direction.set_tooltip_text("How text runs inside new bubbles. Separate from "
+                                    "reading order. Bubbles already on pages keep theirs.")
+    for row, (label, widget) in enumerate((("Chapter", chapter),
+                                           ("Reading order", reading_order),
+                                           ("Text direction", text_direction))):
+        grid.attach(Gtk.Label(label=label, xalign=0.0), 0, row, 1, 1)
+        grid.attach(widget, 1, row, 1, 1)
+    dialog.get_content_area().add(grid)
+    dialog.show_all()
+    try:
+        if dialog.run() != Gtk.ResponseType.OK:
+            return
+        current = load_project(root)  # the docks may have saved meanwhile
+        settings = current["project"]
+        text = chapter.get_text().strip()
+        if text:
+            settings["chapter"] = text
+        else:
+            settings.pop("chapter", None)
+        settings["reading_order"] = reading_order.get_active_id() or "rtl"
+        settings["text_direction"] = text_direction.get_active_id() or "auto"
+        save_project(root, current)
+        _refresh_project_docks()
+    finally:
+        dialog.destroy()
+
+
 _ENGINE_DIALOG = {}  # the open Render Engine dialog's widgets, while it's shown
 _LOCATION_JOBS = {}  # job id -> project root, while locations are being designed
 
@@ -6470,19 +6539,6 @@ def _show_engine_dialog():
     style_combo.connect("changed", update_style_note)
     update_style_note()
     box.pack_start(Gtk.Separator(margin_top=6), False, False, 0)
-    lettering_title = Gtk.Label(xalign=0.0, margin_top=6)
-    lettering_title.set_markup("<b>Lettering</b>")
-    box.pack_start(lettering_title, False, False, 0)
-    direction_combo = Gtk.ComboBoxText(hexpand=True)
-    for direction_id, direction_label in TEXT_DIRECTION_CHOICES:
-        direction_combo.append(direction_id, direction_label)
-    direction_combo.set_tooltip_text("How text runs inside new bubbles. Separate from reading order, which is the page and panel flow. Bubbles already on pages keep theirs.")
-    direction_combo.set_active_id(_manifest_text_direction(manifest))
-    direction_row = Gtk.Box(spacing=12)
-    direction_row.pack_start(Gtk.Label(label="Text direction", xalign=0.0), False, False, 0)
-    direction_row.pack_start(direction_combo, True, True, 0)
-    box.pack_start(direction_row, False, False, 0)
-    box.pack_start(Gtk.Separator(margin_top=6), False, False, 0)
     locations_note = Gtk.Label(xalign=0.0, wrap=True, max_width_chars=76)
     box.pack_start(locations_note, False, False, 0)
     locations_button = dialog.add_button("Design Locations", 1)
@@ -6541,7 +6597,6 @@ def _show_engine_dialog():
             before = engine_ui.project_style(current)
             engine_ui.set_project_render(current, picked["engine"], picked["face_pass"],
                                          picked["style"])
-            current["project"]["text_direction"] = direction_combo.get_active_id() or "auto"
             save_project(root, current)
             Gimp.message(f"Render engine for this project: {picked['engine']}"
                          + (", with the face pass." if picked["face_pass"] else "."))
@@ -7757,6 +7812,7 @@ def _add_dock_callbacks(plugin):
         (DOCK_NEW_PROJECT, _dock_action, "new-project", False),
         (DOCK_SETUP_MODELS, _dock_action, "setup-models", False),
         (DOCK_RENDER_ENGINE, _dock_action, "render-engine", False),
+        (DOCK_PROJECT_SETTINGS, _dock_action, "project-settings", False),
         (DOCK_DESIGN_CHARACTER, _dock_action, "design-character", False),
         (DOCK_NEW_CHARACTER, _dock_character_menu, "new", True),
         (DOCK_DESIGN_CHARACTER_ITEM, _dock_character_menu, "design", True),
@@ -8041,7 +8097,7 @@ class Imanganation(Gimp.PlugIn):
                 PROC_COVER_DESIGNER, PROC_EXPORT_PROJECT,
                 PROC_AUTOSTART,
                 PROC_NEW_PROJECT_MANUAL, PROC_NEW_PROJECT,
-                PROC_SETUP_MODELS, PROC_RENDER_ENGINE,
+                PROC_SETUP_MODELS, PROC_RENDER_ENGINE, PROC_PROJECT_SETTINGS,
                 PROC_RESTART_WORKSPACE, *DOCK_SHOW.values()]
 
     def do_create_procedure(self, name):
@@ -8129,6 +8185,20 @@ class Imanganation(Gimp.PlugIn):
                 "Download or link Imanganation's AI models",
                 "Show which model files the engine needs, their licences and state; "
                 "download the missing ones or link files you already have.", name)
+            proc.set_attribution("imanganation", "imanganation", "2026")
+            return proc
+        if name == PROC_PROJECT_SETTINGS:
+            proc = Gimp.Procedure.new(
+                self, name, Gimp.PDBProcType.PLUGIN, _project_settings_run, None)
+            proc.set_menu_label("Project _Settings...")
+            proc.add_enum_argument("run-mode", "Run mode", "How to run the procedure",
+                                   Gimp.RunMode, Gimp.RunMode.INTERACTIVE,
+                                   GObject.ParamFlags.READWRITE)
+            proc.add_menu_path("<Image>/Imanganation/Project")
+            proc.set_documentation(
+                "Edit the open project's settings",
+                "Chapter, reading order and the direction lettering text runs in. "
+                "Needs no render engine.", name)
             proc.set_attribution("imanganation", "imanganation", "2026")
             return proc
         if name == PROC_RENDER_ENGINE:
