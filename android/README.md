@@ -1,43 +1,38 @@
 # Imanganation for Android
 
-This is an Android companion app, starting with an offline canonical-script editor.
-It opens and saves `.md` scripts through Android's document picker so a draft can be
-moved to the desktop workflow without granting broad storage access.
+The target is a new, self-contained mobile-first Imanganation app inspired by the
+desktop GIMP fork. It will provide project and script authoring, character and
+reference management, image generation, and page assembly/export without requiring a
+desktop or cloud service for its core workflow.
 
-## Why native Android first
+The current Compose app is a packaging and CI scaffold only. Its offline script editor
+is not the product definition and does not yet provide generation or image editing.
+See [the Android port architecture](../docs/android-port.md) for the feasibility
+assessment, proposed boundaries, and milestones.
 
-The existing interface is a Python plug-in built around GIMP and GTK; there is no web
-front end to package. Tauri can produce Android packages, and its current GitHub Action
-has experimental mobile-build support, but adopting it here would still mean creating a
-new web UI plus a Rust/Tauri integration layer. It would not reuse the current GIMP UI.
+## Framework direction
 
-Jetpack Compose gives this first companion a native editor, Android document access and
-platform text behavior with a smaller bridge surface. If the product later needs the
-same rewritten UI on iOS and desktop, revisit Tauri or Compose Multiplatform then.
+The product app now uses React + TypeScript + Vite, Ionic React, PixiJS and Capacitor.
+The Compose app remains a separate build proof. The existing GIMP app and Python engine
+remain the behavior reference; they are not the new UI or Android runtime. See
+[the mobile app architecture](../docs/android-port.md) for the boundaries and technical
+gates.
 
-The Android app does not bundle GIMP, ComfyUI, model weights or image generation. Those
-remain desktop responsibilities for now. A future online/desktop connection needs its
-own explicit transport and authentication design; the current engine binds to localhost.
+The critical unknown is still local image generation on Android. The mobile inference
+path must be proved before promising desktop feature parity.
 
-## Build
+## CI build
 
-The GitHub Actions workflow builds a debug APK on changes to this directory, on pull
-requests and when run manually. It attaches the APK as a 14-day workflow artifact; no
-signing key or release credentials are needed for this development build.
+The GitHub Actions workflow builds a debug APK for mobile-app changes, pull requests,
+and manual dispatch. Version tags named `imanganation-android-v*` build signed APK and
+AAB artifacts using the four `ANDROID_*` signing secrets. No store publication is
+configured.
 
 ```sh
+cd mobile
+npm ci
+npm run build
+npx cap sync android
 cd android
-gradle --no-daemon :app:assembleDebug
+./gradlew --no-daemon assembleDebug
 ```
-
-The output is `app/build/outputs/apk/debug/app-debug.apk`.
-
-## First milestone
-
-- Open a Markdown script with Android's file picker.
-- Edit the canonical script text offline.
-- Save a Markdown copy to a chosen location.
-- Continue project creation, panel generation and page assembly in desktop GIMP.
-
-The Android app is intentionally a script companion at this stage, not a mobile port of
-the GIMP workspace.

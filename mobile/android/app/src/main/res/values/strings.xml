@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Imanganation</string>
+    <string name="title_activity_main">Imanganation</string>
+    <string name="package_name">io.github.imattau.imanganation</string>
+    <string name="custom_url_scheme">io.github.imattau.imanganation</string>
+</resources>
