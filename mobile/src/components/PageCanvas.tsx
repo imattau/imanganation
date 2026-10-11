@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Application, Container, Graphics, Sprite, Texture } from 'pixi.js';
-import type { MangaPage, MangaPanel, PageObject } from '../domain/project';
+import type { MangaPage, MangaPanel } from '../domain/project';
 import { loadOraPreview } from '../domain/pageAssets';
 
 interface Props {
@@ -8,13 +8,15 @@ interface Props {
   page: MangaPage;
   panels: MangaPanel[];
   onMoveObject?: (objectId: string, x: number, y: number) => void;
+  onMovePanel?: (panelId: string, x: number, y: number) => void;
 }
 
-export function PageCanvas({ projectId, page, panels, onMoveObject }: Props) {
+export function PageCanvas({ projectId, page, panels, onMoveObject, onMovePanel }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const [surface, setSurface] = useState({ width: 0, height: 0 });
   const [dragged, setDragged] = useState<{ id: string; x: number; y: number } | null>(null);
   const dragStart = useRef<{ id: string; x: number; y: number; pointerX: number; pointerY: number; scale: number } | null>(null);
+  const dragPosition = useRef<{ id: string; x: number; y: number } | null>(null);
 
   useEffect(() => {
     let disposed = false;
@@ -81,20 +83,53 @@ export function PageCanvas({ projectId, page, panels, onMoveObject }: Props) {
   const left = (surface.width - pageWidth) / 2;
   const top = (surface.height - pageHeight) / 2;
   const objects = page.mobile_objects ?? [];
-  const moveObject = (event: React.PointerEvent<HTMLButtonElement>, object: PageObject) => {
-    if (!dragStart.current || dragStart.current.id !== object.id) return;
+  const startDrag = (event: React.PointerEvent<HTMLButtonElement>, id: string, x: number, y: number) => {
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragStart.current = { id, x, y, pointerX: event.clientX, pointerY: event.clientY, scale };
+    dragPosition.current = { id, x, y };
+  };
+  const updateDrag = (event: React.PointerEvent<HTMLButtonElement>, id: string, width: number, height: number) => {
+    if (!dragStart.current || dragStart.current.id !== id) return;
     const deltaX = (event.clientX - dragStart.current.pointerX) / dragStart.current.scale;
     const deltaY = (event.clientY - dragStart.current.pointerY) / dragStart.current.scale;
-    setDragged({ id: object.id, x: Math.max(0, Math.min(1200 - object.width, dragStart.current.x + deltaX)), y: Math.max(0, Math.min(1800 - object.height, dragStart.current.y + deltaY)) });
+    const position = { id, x: Math.max(0, Math.min(1200 - width, dragStart.current.x + deltaX)), y: Math.max(0, Math.min(1800 - height, dragStart.current.y + deltaY)) };
+    dragPosition.current = position;
+    setDragged(position);
   };
-  const finishDrag = (object: PageObject) => {
-    const current = dragged?.id === object.id ? dragged : null;
+  const finishDrag = (id: string, x: number, y: number, onMove?: (id: string, x: number, y: number) => void) => {
+    const current = dragPosition.current?.id === id ? dragPosition.current : null;
     dragStart.current = null;
-    if (current && (current.x !== object.x || current.y !== object.y)) onMoveObject?.(object.id, current.x, current.y);
+    dragPosition.current = null;
+    if (current && (current.x !== x || current.y !== y)) onMove?.(id, current.x, current.y);
     setDragged(null);
   };
 
   return <div className="page-canvas" ref={host} aria-label={`${page.label} canvas`}>
+    {scale > 0 && panels.filter((panel) => panel.placement?.page === page.id).map((panel) => {
+      const [x, y, width, height] = panel.placement!.frame;
+      const position = dragged?.id === panel.id ? dragged : { x, y };
+      return <button
+        key={panel.id}
+        type="button"
+        className="page-panel-handle"
+        aria-label={`Move panel ${panel.label.page}.${panel.label.panel}`}
+        title="Drag to reposition panel"
+        style={{ left: left + position.x * scale, top: top + position.y * scale, width: width * scale, height: height * scale }}
+        onPointerDown={(event) => startDrag(event, panel.id, position.x, position.y)}
+        onPointerMove={(event) => updateDrag(event, panel.id, width, height)}
+        onPointerUp={() => finishDrag(panel.id, x, y, onMovePanel)}
+        onPointerCancel={() => finishDrag(panel.id, x, y, onMovePanel)}
+        onKeyDown={(event) => {
+          const step = event.shiftKey ? 50 : 10;
+          const offsets: Record<string, [number, number]> = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] };
+          const offset = offsets[event.key];
+          if (!offset) return;
+          event.preventDefault();
+          onMovePanel?.(panel.id, Math.max(0, Math.min(1200 - width, x + offset[0])), Math.max(0, Math.min(1800 - height, y + offset[1])));
+        }}
+      ><span>Panel {panel.label.page}.{panel.label.panel}</span></button>;
+    })}
     {scale > 0 && objects.map((object) => {
       const position = dragged?.id === object.id ? dragged : object;
       return <button
@@ -104,14 +139,10 @@ export function PageCanvas({ projectId, page, panels, onMoveObject }: Props) {
         aria-label={`Move ${object.kind.replace('-', ' ')}${object.text ? `: ${object.text}` : ''}`}
         title="Drag to reposition"
         style={{ left: left + position.x * scale, top: top + position.y * scale, width: object.width * scale, height: object.height * scale }}
-        onPointerDown={(event) => {
-          event.preventDefault();
-          event.currentTarget.setPointerCapture(event.pointerId);
-          dragStart.current = { id: object.id, x: position.x, y: position.y, pointerX: event.clientX, pointerY: event.clientY, scale };
-        }}
-        onPointerMove={(event) => moveObject(event, object)}
-        onPointerUp={() => finishDrag(object)}
-        onPointerCancel={() => finishDrag(object)}
+        onPointerDown={(event) => startDrag(event, object.id, position.x, position.y)}
+        onPointerMove={(event) => updateDrag(event, object.id, object.width, object.height)}
+        onPointerUp={() => finishDrag(object.id, object.x, object.y, onMoveObject)}
+        onPointerCancel={() => finishDrag(object.id, object.x, object.y, onMoveObject)}
         onKeyDown={(event) => {
           const step = event.shiftKey ? 50 : 10;
           const offsets: Record<string, [number, number]> = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] };
