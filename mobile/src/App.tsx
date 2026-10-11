@@ -111,14 +111,43 @@ export default function App() {
     try {
       const version = await renderer.loadModel(model.path);
       setLoadedModelVersion(version);
+      setEngineMessage(`Loaded ${version} · experimental CPU rendering · Android performance is not validated.`);
       setNotice(`Loaded model format: ${version}. Generation controls are still being integrated.`);
     } catch (error) { setNotice(message(error)); }
     finally { setModelLoading(false); }
   };
 
   const unloadModel = async () => {
-    try { await renderer.unloadModel(); setLoadedModelVersion(''); setNotice('Model unloaded and renderer memory released.'); }
+    try { await renderer.unloadModel(); setLoadedModelVersion(''); setEngineMessage('Renderer packaged; load a compatible local model to begin.'); setNotice('Model unloaded and renderer memory released.'); }
     catch (error) { setNotice(message(error)); }
+  };
+
+  const generatePanel = async (panelId: string, prompt: string, seed?: number) => {
+    if (!current) return;
+    const panel = current.manifest.panels.find((item) => item.id === panelId);
+    if (!panel) { setNotice('Choose a panel before rendering.'); return; }
+    if (!prompt.trim()) { setNotice('Enter a prompt before rendering.'); return; }
+    setBusy(true);
+    try {
+      const result = await renderer.generate({ prompt: prompt.trim(), width: 512, height: 512, seed });
+      const bytes = new Uint8Array(await (await fetch(result.dataUrl)).arrayBuffer());
+      const takeId = `take_${crypto.randomUUID().replaceAll('-', '').slice(0, 12)}`;
+      const path = `panels/${panelId}/takes/${takeId}.png`;
+      await saveProjectFile(current.manifest.project.id, path, bytes);
+      const take: MangaTake = {
+        panel: panelId, file: path, width: result.width, height: result.height,
+        kind: 'panel', parent: null, origin: 'android-renderer', created: new Date().toISOString(),
+        engine: { name: 'stable-diffusion.cpp', model_version: result.modelVersion, prompt: prompt.trim(), seed: seed ?? -1 },
+      };
+      const manifest = {
+        ...current.manifest,
+        takes: { ...current.manifest.takes, [takeId]: take },
+        panels: current.manifest.panels.map((item) => item.id === panelId ? { ...item, takes: [...(item.takes ?? []), takeId] } : item),
+      };
+      await persist(manifest, current.script);
+      setNotice('Render saved as a new take. Select it in the panel workspace to make it active.');
+    } catch (error) { setNotice(message(error)); }
+    finally { setBusy(false); }
   };
 
   const downloadModel = async (model: CatalogModel) => {
@@ -542,6 +571,7 @@ export default function App() {
     onImportModel={() => void importModel()}
     onDeleteModel={(model) => void deleteModel(model)}
     onLoadModel={(model) => void loadModel(model)} onUnloadModel={() => void unloadModel()}
+    onGeneratePanel={(panelId, prompt, seed) => generatePanel(panelId, prompt, seed)}
     onDownloadModel={(model) => void downloadModel(model)}
     onCancelModelDownload={(key) => void cancelModelDownload(key)}
   />, [current, tab, engineMessage, loadedModelVersion, modelLoading, models, modelStorageFree, modelProgress, modelDownloadProgress, busy, persist]);
@@ -597,6 +627,7 @@ interface WorkspaceProps {
   onDeleteModel: (model: LocalModel) => void;
   onLoadModel: (model: LocalModel) => void;
   onUnloadModel: () => void;
+  onGeneratePanel: (panelId: string, prompt: string, seed?: number) => Promise<void>;
   onDownloadModel: (model: CatalogModel) => void;
   onCancelModelDownload: (key: string) => void;
   onTab: (tab: WorkspaceTab) => void;
@@ -632,9 +663,15 @@ function Workspace(props: WorkspaceProps) {
   const [selectedToolPage, setSelectedToolPage] = useState(saved.manifest.pages[0]?.id ?? '');
   const [scriptDraft, setScriptDraft] = useState(saved.script);
   const [expectedModelSha256, setExpectedModelSha256] = useState('');
+  const [generationPanel, setGenerationPanel] = useState(saved.manifest.panels[0]?.id ?? '');
+  const [generationPrompt, setGenerationPrompt] = useState('');
+  const [generationSeed, setGenerationSeed] = useState('');
   useEffect(() => {
     if (!saved.manifest.pages.some((page) => page.id === selectedToolPage)) setSelectedToolPage(saved.manifest.pages[0]?.id ?? '');
   }, [saved.manifest.pages, selectedToolPage]);
+  useEffect(() => {
+    if (!saved.manifest.panels.some((panel) => panel.id === generationPanel)) setGenerationPanel(saved.manifest.panels[0]?.id ?? '');
+  }, [saved.manifest.panels, generationPanel]);
   useEffect(() => { setScriptDraft(saved.script); }, [saved.manifest.project.id, saved.script]);
   useEffect(() => {
     if (scriptDraft === saved.script) return;
@@ -727,14 +764,14 @@ function Workspace(props: WorkspaceProps) {
         {props.modelStorageFree !== null && <p className="storage-note">Available device storage: {formatBytes(props.modelStorageFree)}</p>}
         {props.modelProgress && <div className="model-progress"><strong>{props.modelProgress.name}</strong><span>{props.modelProgress.totalBytes > 0 ? `${formatBytes(props.modelProgress.bytes)} / ${formatBytes(props.modelProgress.totalBytes)}` : formatBytes(props.modelProgress.bytes)}</span><progress value={props.modelProgress.totalBytes > 0 ? props.modelProgress.bytes : undefined} max={props.modelProgress.totalBytes > 0 ? props.modelProgress.totalBytes : undefined}/></div>}
         {props.modelDownloadProgress && <div className="model-progress"><strong>{props.modelDownloadProgress.name}</strong><span>{props.modelDownloadProgress.state === 'verifying' ? 'Verifying size and SHA-256…' : props.modelDownloadProgress.state === 'failed' ? props.modelDownloadProgress.error || 'Download failed; partial file retained for retry.' : props.modelDownloadProgress.state === 'cancelled' ? 'Download paused; partial file retained.' : `${formatBytes(props.modelDownloadProgress.bytes)} / ${formatBytes(props.modelDownloadProgress.totalBytes)}`}</span><progress value={props.modelDownloadProgress.totalBytes > 0 ? props.modelDownloadProgress.bytes : undefined} max={props.modelDownloadProgress.totalBytes > 0 ? props.modelDownloadProgress.totalBytes : undefined}/>{props.modelDownloadProgress.state === 'downloading' && <IonButton fill="clear" size="small" onClick={() => props.onCancelModelDownload(props.modelDownloadProgress!.downloadKey)}>Pause download</IonButton>}</div>}
-        {props.loadedModelVersion && <div className="model-progress"><strong>Loaded model: {props.loadedModelVersion}</strong><span>Inference controls are not available yet.</span><IonButton fill="outline" size="small" disabled={props.modelLoading} onClick={props.onUnloadModel}>Unload model</IonButton></div>}
+        {props.loadedModelVersion && <div className="model-progress"><strong>Loaded model: {props.loadedModelVersion}</strong><span>Experimental 512×512 CPU text-to-image is available. Performance and model compatibility are unverified.</span><IonButton fill="outline" size="small" disabled={props.modelLoading || props.busy} onClick={props.onUnloadModel}>Unload model</IonButton></div>}
         {props.models.length === 0 ? <p className="helper-text">No model files imported or downloaded.</p> : <div className="model-list">{props.models.map((model) => <div className="model-row" key={model.id}><div><strong>{model.name}</strong><span>{formatBytes(model.sizeBytes)} · SHA-256 {model.sha256.slice(0, 12)}…{model.licenseName ? ` · ${model.licenseName}` : ''}</span></div><IonButton fill="outline" size="small" disabled={props.modelLoading || !!props.loadedModelVersion} onClick={() => props.onLoadModel(model)}>Load</IonButton><IonButton fill="clear" color="danger" size="small" disabled={props.modelLoading || !!props.loadedModelVersion} onClick={() => props.onDeleteModel(model)}>Remove</IonButton></div>)}</div>}
       </div>
-      <IonItem className="field-item"><IonLabel position="stacked">Target panel</IonLabel><select className="native-select" defaultValue={saved.manifest.panels[0]?.id ?? ''}><option value="" disabled>Choose a panel</option>{saved.manifest.panels.map((panel) => <option key={panel.id} value={panel.id}>Page {panel.label.page}, panel {panel.label.panel}</option>)}</select></IonItem>
-      <IonItem className="field-item"><IonTextarea label="Prompt" labelPlacement="stacked" placeholder="Describe the artwork to create…" rows={4}/></IonItem>
-      <IonItem className="field-item"><IonInput label="Seed" labelPlacement="stacked" type="number" placeholder="Random"/></IonItem>
-      <IonButton expand="block" disabled><WandSparkles size={17}/>&nbsp; Renderer integration pending</IonButton>
-      <p className="helper-text">This build does not generate placeholder results. The UI boundary is ready for the Android native runtime.</p>
+      <IonItem className="field-item"><IonLabel position="stacked">Target panel</IonLabel><select className="native-select" value={generationPanel} onChange={(event) => setGenerationPanel(event.target.value)}><option value="" disabled>Choose a panel</option>{saved.manifest.panels.map((panel) => <option key={panel.id} value={panel.id}>Page {panel.label.page}, panel {panel.label.panel}</option>)}</select></IonItem>
+      <IonItem className="field-item"><IonTextarea label="Prompt" labelPlacement="stacked" placeholder="Describe the artwork to create…" rows={4} value={generationPrompt} onIonChange={(event) => setGenerationPrompt(event.detail.value ?? '')}/></IonItem>
+      <IonItem className="field-item"><IonInput label="Seed" labelPlacement="stacked" type="number" placeholder="Random" value={generationSeed} onIonChange={(event) => setGenerationSeed(event.detail.value ?? '')}/></IonItem>
+      <IonButton expand="block" disabled={props.busy || !props.loadedModelVersion || !generationPanel || !generationPrompt.trim()} onClick={() => void props.onGeneratePanel(generationPanel, generationPrompt, generationSeed.trim() ? Number(generationSeed) : undefined)}><WandSparkles size={17}/>&nbsp; {props.busy ? 'Rendering on device…' : 'Render 512 × 512 panel'}</IonButton>
+      <p className="helper-text">Experimental CPU rendering only. Use short prompts and allow several minutes. Each result is stored as a separate take and does not replace the current active take.</p>
     </section>}
 
     {tab === 'export' && <section className="workspace-section">

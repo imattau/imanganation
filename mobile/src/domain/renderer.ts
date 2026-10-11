@@ -36,6 +36,7 @@ interface NativeRendererPlugin {
   capabilities(): Promise<RendererCapabilities & { generationAvailable: boolean; engine?: string }>;
   loadModel(options: { path: string }): Promise<{ modelVersion: string }>;
   unloadModel(): Promise<void>;
+  generate(options: { prompt: string; negativePrompt?: string; width: number; height: number; seed?: number; steps?: number; guidance?: number }): Promise<NativeImageResult>;
 }
 
 const NativeRenderer = registerPlugin<NativeRendererPlugin>('Renderer');
@@ -49,11 +50,19 @@ export interface RenderJob {
   error?: string;
 }
 
+export interface NativeImageResult {
+  dataUrl: string;
+  width: number;
+  height: number;
+  modelVersion: string;
+}
+
 /** Stable UI boundary; native runtime discovery is separate from generation readiness. */
 export interface RendererAdapter {
   capabilities(): Promise<RendererCapabilities>;
   loadModel(path: string): Promise<string>;
   unloadModel(): Promise<void>;
+  generate(options: { prompt: string; negativePrompt?: string; width?: number; height?: number; seed?: number; steps?: number; guidance?: number }): Promise<NativeImageResult>;
   start(request: RenderRequest): Promise<RenderJob>;
   cancel(jobId: string): Promise<void>;
   subscribe(listener: (job: RenderJob) => void): () => void;
@@ -68,7 +77,7 @@ export class UnavailableRenderer implements RendererAdapter {
           ...native,
           available: native.generationAvailable,
           engines: native.runtimePackaged && native.engine ? [native.engine] : [],
-          operations: [],
+          operations: native.generationAvailable ? ['render'] : [],
         };
       } catch {
         return {
@@ -94,10 +103,16 @@ export class UnavailableRenderer implements RendererAdapter {
   async unloadModel(): Promise<void> {
     if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') await NativeRenderer.unloadModel();
   }
-  async start(): Promise<RenderJob> {
-    throw new Error('Local image generation is not available in this build.');
+  async generate(options: { prompt: string; negativePrompt?: string; width?: number; height?: number; seed?: number; steps?: number; guidance?: number }): Promise<NativeImageResult> {
+    if (!Capacitor.isNativePlatform() || Capacitor.getPlatform() !== 'android') throw new Error('On-device generation is available only in the Android app.');
+    return NativeRenderer.generate({ prompt: options.prompt, negativePrompt: options.negativePrompt, width: options.width ?? 512, height: options.height ?? 512, seed: options.seed, steps: options.steps, guidance: options.guidance });
   }
-  async cancel(): Promise<void> {}
+  async start(request: RenderRequest): Promise<RenderJob> {
+    if (request.operation !== 'render') throw new Error('This Android renderer currently supports text-to-image renders only.');
+    const result = await this.generate({ prompt: request.prompt, negativePrompt: request.negativePrompt, width: request.width, height: request.height, seed: request.seed });
+    return { id: `render_${crypto.randomUUID()}`, state: 'succeeded', progress: 100, resultUri: result.dataUrl, message: `Rendered with ${result.modelVersion}.` };
+  }
+  async cancel(): Promise<void> { throw new Error('This renderer build does not support interrupting an in-progress native render yet.'); }
   subscribe(): () => void { return () => undefined; }
 }
 

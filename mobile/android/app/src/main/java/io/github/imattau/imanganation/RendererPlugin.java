@@ -1,9 +1,12 @@
 package io.github.imattau.imanganation;
 
 import android.app.ActivityManager;
+import android.graphics.Bitmap;
 import android.content.Context;
 import android.os.Build;
 import java.io.File;
+import java.io.ByteArrayOutputStream;
+import android.util.Base64;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -35,6 +38,7 @@ public class RendererPlugin extends Plugin {
     private static native String nativeLoadModel(String path);
     private static native void nativeUnloadModel();
     private static native String nativeLoadedModelVersion();
+    private static native byte[] nativeGenerate(String prompt, String negativePrompt, int width, int height, long seed, int steps, float guidance);
 
     @PluginMethod
     public void capabilities(PluginCall call) {
@@ -52,10 +56,10 @@ public class RendererPlugin extends Plugin {
         result.put("totalMemoryBytes", memoryInfo.totalMem);
         result.put("availableMemoryBytes", memoryInfo.availMem);
         result.put("lowMemory", memoryInfo.lowMemory);
-        result.put("generationAvailable", false);
         String loadedVersion = runtimeLoaded ? nativeLoadedModelVersion() : "";
         result.put("modelLoaded", !loadedVersion.isEmpty());
         result.put("modelVersion", loadedVersion);
+        result.put("generationAvailable", runtimeLoaded && !loadedVersion.isEmpty());
         result.put("reason", runtimeLoaded
             ? "Native inference library is packaged. Model loading and generation are not connected yet."
             : "Native inference library is not available for this device ABI.");
@@ -105,5 +109,61 @@ public class RendererPlugin extends Plugin {
     public void unloadModel(PluginCall call) {
         if (runtimeLoaded) nativeUnloadModel();
         call.resolve();
+    }
+
+    @PluginMethod
+    public void generate(PluginCall call) {
+        String prompt = call.getString("prompt");
+        String negativePrompt = call.getString("negativePrompt", "");
+        int width = call.getInt("width", 512);
+        int height = call.getInt("height", 512);
+        int steps = call.getInt("steps", 20);
+        float guidance = (float) call.getDouble("guidance", 7.0);
+        long seed = call.getLong("seed", -1L);
+        if (prompt == null || prompt.trim().isEmpty() || prompt.length() > 4000) {
+            call.reject("Enter a prompt of 1 to 4000 characters.");
+            return;
+        }
+        if (width < 256 || width > 1024 || height < 256 || height > 1024 || width % 64 != 0 || height % 64 != 0) {
+            call.reject("Image dimensions must be multiples of 64 between 256 and 1024.");
+            return;
+        }
+        if (steps < 1 || steps > 50 || guidance < 1 || guidance > 20) {
+            call.reject("Sampling steps or guidance scale are outside the supported range.");
+            return;
+        }
+        if (!runtimeLoaded || nativeLoadedModelVersion().isEmpty()) {
+            call.reject("Load a compatible model before generating.");
+            return;
+        }
+        call.setKeepAlive(true);
+        modelExecutor.execute(() -> {
+            Bitmap bitmap = null;
+            try {
+                byte[] rgba = nativeGenerate(prompt, negativePrompt, width, height, seed, steps, guidance);
+                if (rgba == null || rgba.length != width * height * 4) throw new Exception("Renderer returned no image.");
+                int[] pixels = new int[width * height];
+                for (int i = 0; i < pixels.length; i++) {
+                    int offset = i * 4;
+                    pixels[i] = ((rgba[offset + 3] & 0xff) << 24)
+                        | ((rgba[offset] & 0xff) << 16)
+                        | ((rgba[offset + 1] & 0xff) << 8)
+                        | (rgba[offset + 2] & 0xff);
+                }
+                bitmap = Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888);
+                ByteArrayOutputStream png = new ByteArrayOutputStream();
+                if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, png)) throw new Exception("Could not encode the rendered image.");
+                JSObject result = new JSObject();
+                result.put("dataUrl", "data:image/png;base64," + Base64.encodeToString(png.toByteArray(), Base64.NO_WRAP));
+                result.put("width", width);
+                result.put("height", height);
+                result.put("modelVersion", nativeLoadedModelVersion());
+                call.resolve(result);
+            } catch (Exception error) {
+                call.reject("Image generation failed: " + error.getMessage(), error);
+            } finally {
+                if (bitmap != null) bitmap.recycle();
+            }
+        });
     }
 }
