@@ -4010,32 +4010,34 @@ def _edit_story_beat(root, page_number, panel=None, after_panel_id=None):
         scroller.add(widget); box.pack_start(scroller, False, False, 0)
         fields[label] = widget.get_buffer()
     characters = ", ".join(c.get("name", "") for c in seed.get("characters", [])) if panel else ""
-    entry("Scene heading", seed.get("scene_heading", ""))
-    entry_suggestions("Location", seed.get("location", ""),
-                      [l.get("name", "") for l in manifest.get("locations", [])])
-    entry_choices("Characters (comma separated)", characters,
-                  [c.get("name", "") for c in manifest.get("cast", [])])
-    entry_choices("Props (comma separated)", ", ".join(seed.get("props", [])) if panel else "",
-                  [p.get("name", "") for p in manifest.get("props", [])])
-    select_text("Shot", seed.get("camera", "") if panel else "", SHOT_CHOICES,
-                editable=True)
-    text_area("Action", seed.get("action", "") if panel else "", 4)
     dialogue = "\n".join(f"{d.get('speaker','')}"
                           + (f" ({d.get('kind')})" if d.get("kind") != "speech" else "")
                           + f": {d.get('text','')}"
                           for d in (seed.get("dialogue", []) if panel else []))
-    text_area("Dialogue (one SPEAKER: line per row)", dialogue)
-    text_area("Sound effects (one per row)", "\n".join(seed.get("sfx", [])) if panel else "")
-    text_area("Notes", seed.get("notes", "") if panel else "")
     expressions = "; ".join(f"{name}: {value}" for name, value in
                              (seed.get("expressions", {}) if panel else {}).items())
-    entry("Expressions (Name: expression; …)", expressions)
-    select_text("Frame shape", seed.get("aspect_ratio", "") if panel else "",
-                ASPECT_CHOICES, editable=True)
-    select_text("Frame size", seed.get("size", "") if panel else "", PANEL_SIZES)
+    # Fields follow the script template's order: flashback, scene, shot, frame,
+    # characters, expressions, props, action, sound effects, dialogue, notes.
     flashback = Gtk.CheckButton(label="This beat is in a flashback")
     flashback.set_active(bool(seed.get("flashback")))
     box.pack_start(flashback, False, False, 0)
+    entry("Scene heading", seed.get("scene_heading", ""))
+    entry_suggestions("Location", seed.get("location", ""),
+                      [l.get("name", "") for l in manifest.get("locations", [])])
+    select_text("Shot", seed.get("camera", "") if panel else "", SHOT_CHOICES,
+                editable=True)
+    select_text("Frame shape", seed.get("aspect_ratio", "") if panel else "",
+                ASPECT_CHOICES, editable=True)
+    select_text("Frame size", seed.get("size", "") if panel else "", PANEL_SIZES)
+    entry_choices("Characters (comma separated)", characters,
+                  [c.get("name", "") for c in manifest.get("cast", [])])
+    entry("Expressions (Name: expression; …)", expressions)
+    entry_choices("Props (comma separated)", ", ".join(seed.get("props", [])) if panel else "",
+                  [p.get("name", "") for p in manifest.get("props", [])])
+    text_area("Action", seed.get("action", "") if panel else "", 4)
+    text_area("Sound effects (one per row)", "\n".join(seed.get("sfx", [])) if panel else "")
+    text_area("Dialogue (one SPEAKER: line per row)", dialogue)
+    text_area("Notes", seed.get("notes", "") if panel else "")
     dialog.show_all()
     try:
         if dialog.run() != Gtk.ResponseType.OK: return None
