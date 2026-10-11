@@ -7525,9 +7525,22 @@ def _dock_field_edit(procedure, config, data):
     return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
 
 
+_LAST_PROJECT_CLICK = {"item": None, "ended": 0.0}
+_DOUBLE_CLICK_SECONDS = 0.6  # click handlers take a while, so the gap runs from the end
+
+
+def _project_double_click(item):
+    """True when this Project tree click repeats the last one: the tree activates on a
+    single click, so a double-click shows as the same item twice in quick succession."""
+    last = _LAST_PROJECT_CLICK
+    return (last["item"] == item
+            and time.monotonic() - last["ended"] < _DOUBLE_CLICK_SECONDS)
+
+
 def _dock_item_action(procedure, config, data):
     try:
         item = config.get_property("item")
+        double = data in (DOCK_PROJECT, DOCK_SCRIPT) and _project_double_click(item)
         manifest = load_project(_DOCK_CONTEXT["root"])
         valid = {p["id"] for p in manifest["panels"]}
         valid.update(page["id"] for page in manifest["pages"])
@@ -7552,6 +7565,14 @@ def _dock_item_action(procedure, config, data):
                           if candidate["id"] == item), None)
             if panel is not None:
                 _focus_panel_on_canvas(_DOCK_CONTEXT["root"], manifest, panel)
+        if double:  # double-click: bring Context forward to edit the item
+            try:
+                _dock_pdb_call("gimp-extension-panel-show", {"identifier": DOCK_INSPECTOR})
+            except Exception:
+                pass
+        if data in (DOCK_PROJECT, DOCK_SCRIPT):
+            _LAST_PROJECT_CLICK.update(item=None if double else item,
+                                       ended=time.monotonic())
         return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
     except Exception as exc:
         return _error(procedure, str(exc))
