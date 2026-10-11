@@ -15,6 +15,8 @@ import { makeVerticalComic, saveVerticalArchive, VERTICAL_PRESETS } from './doma
 import { exportProjectArchive, importProjectArchive } from './domain/projectArchive';
 import { parseCanonicalScript } from './domain/canonicalScript';
 import { exportBook } from './domain/bookExport';
+import { Capacitor } from '@capacitor/core';
+import { formatBytes, modelStore, type LocalModel, type ModelImportProgress } from './domain/modelStore';
 
 type WorkspaceTab = 'story' | 'panels' | 'pages' | 'people' | 'tools' | 'generate' | 'export';
 
@@ -35,11 +37,52 @@ export default function App() {
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [engineMessage, setEngineMessage] = useState('Checking local renderer…');
+  const [models, setModels] = useState<LocalModel[]>([]);
+  const [modelStorageFree, setModelStorageFree] = useState<number | null>(null);
+  const [modelProgress, setModelProgress] = useState<ModelImportProgress | null>(null);
   const importInput = useRef<HTMLInputElement>(null);
 
   const reload = useCallback(async () => setProjects(await listProjects()), []);
   useEffect(() => { void reload(); }, [reload]);
   useEffect(() => { void renderer.capabilities().then((capabilities) => setEngineMessage(capabilities.available ? 'Local renderer ready' : capabilities.reason ?? 'Local renderer unavailable')); }, []);
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    let disposed = false;
+    let handle: { remove: () => Promise<void> } | undefined;
+    void modelStore.listModels().then((result) => {
+      if (!disposed) { setModels(result.models); setModelStorageFree(result.availableBytes); }
+    }).catch(() => undefined);
+    void modelStore.addListener('importProgress', (progress) => { if (!disposed) setModelProgress(progress); }).then((listener) => {
+      handle = listener;
+      if (disposed) void listener.remove();
+    });
+    return () => { disposed = true; if (handle) void handle.remove(); };
+  }, []);
+
+  const refreshModels = async () => {
+    if (!Capacitor.isNativePlatform()) return;
+    const result = await modelStore.listModels();
+    setModels(result.models);
+    setModelStorageFree(result.availableBytes);
+  };
+
+  const importModel = async () => {
+    if (!Capacitor.isNativePlatform()) { setNotice('Model import is available in the Android app.'); return; }
+    setModelProgress({ id: '', name: 'Waiting for file selection…', bytes: 0, totalBytes: -1 });
+    try {
+      await modelStore.importModel();
+      await refreshModels();
+      setNotice('Model file copied to app storage and SHA-256 computed. Renderer compatibility is not yet validated.');
+    } catch (error) {
+      if (!(error instanceof Error) || !error.message.toLowerCase().includes('cancel')) setNotice(message(error));
+    } finally { setModelProgress(null); }
+  };
+
+  const deleteModel = async (model: LocalModel) => {
+    if (!window.confirm(`Remove ${model.name} from this device?`)) return;
+    try { await modelStore.deleteModel({ id: model.id }); await refreshModels(); }
+    catch (error) { setNotice(message(error)); }
+  };
 
   const persist = useCallback(async (manifest: MangaProject, script: string) => {
     const prior = current?.manifest.project.id === manifest.project.id ? current : null;
@@ -404,7 +447,7 @@ export default function App() {
   };
 
   const workspace = useMemo(() => current && <Workspace
-    saved={current} tab={tab} engineMessage={engineMessage} busy={busy}
+    saved={current} tab={tab} engineMessage={engineMessage} busy={busy} models={models} modelStorageFree={modelStorageFree} modelProgress={modelProgress}
     onTab={setTab} onScript={(script) => void persist(current.manifest, script)}
     onAddPanel={() => void addPanel()} onAddPage={() => void addPage()}
     onMovePage={(pageId, offset) => void movePage(pageId, offset)}
@@ -443,6 +486,8 @@ export default function App() {
       catch (error) { setNotice(message(error)); }
       finally { setBusy(false); }
     }}
+    onImportModel={() => void importModel()}
+    onDeleteModel={(model) => void deleteModel(model)}
   />, [current, tab, engineMessage, busy, persist]);
 
   return <IonApp>
@@ -486,6 +531,11 @@ interface WorkspaceProps {
   tab: WorkspaceTab;
   engineMessage: string;
   busy: boolean;
+  models: LocalModel[];
+  modelStorageFree: number | null;
+  modelProgress: ModelImportProgress | null;
+  onImportModel: () => void;
+  onDeleteModel: (model: LocalModel) => void;
   onTab: (tab: WorkspaceTab) => void;
   onScript: (script: string) => void;
   onAddPanel: () => void;
@@ -601,6 +651,7 @@ function Workspace(props: WorkspaceProps) {
     {tab === 'generate' && <section className="workspace-section">
       <div className="section-heading"><div><span className="eyebrow">LOCAL IMAGE CREATION</span><h2>Generate artwork</h2></div><span className="offline-pill">ON DEVICE</span></div>
       <div className="renderer-card"><div className="renderer-mark"><WandSparkles/></div><div><strong>Local renderer</strong><p>{props.engineMessage}</p></div></div>
+      <div className="model-manager"><div className="section-heading"><div><span className="eyebrow">MODEL STORAGE</span><h3>On-device model files</h3></div><IonButton fill="outline" size="small" disabled={!!props.modelProgress} onClick={props.onImportModel}>Import model</IonButton></div><p className="helper-text">Imports are copied into private app storage and hashed as they copy. Files remain on this device; import does not mean the current renderer supports that model.</p>{props.modelStorageFree !== null && <p className="storage-note">Available device storage: {formatBytes(props.modelStorageFree)}</p>}{props.modelProgress && <div className="model-progress"><strong>{props.modelProgress.name}</strong><span>{props.modelProgress.totalBytes > 0 ? `${formatBytes(props.modelProgress.bytes)} / ${formatBytes(props.modelProgress.totalBytes)}` : formatBytes(props.modelProgress.bytes)}</span><progress value={props.modelProgress.totalBytes > 0 ? props.modelProgress.bytes : undefined} max={props.modelProgress.totalBytes > 0 ? props.modelProgress.totalBytes : undefined}/></div>}{props.models.length === 0 ? <p className="helper-text">No model files imported.</p> : <div className="model-list">{props.models.map((model) => <div className="model-row" key={model.id}><div><strong>{model.name}</strong><span>{formatBytes(model.sizeBytes)} · SHA-256 {model.sha256.slice(0, 12)}…</span></div><IonButton fill="clear" color="danger" size="small" onClick={() => props.onDeleteModel(model)}>Remove</IonButton></div>)}</div>}</div>
       <IonItem className="field-item"><IonLabel position="stacked">Target panel</IonLabel><select className="native-select" defaultValue={saved.manifest.panels[0]?.id ?? ''}><option value="" disabled>Choose a panel</option>{saved.manifest.panels.map((panel) => <option key={panel.id} value={panel.id}>Page {panel.label.page}, panel {panel.label.panel}</option>)}</select></IonItem>
       <IonItem className="field-item"><IonTextarea label="Prompt" labelPlacement="stacked" placeholder="Describe the artwork to create…" rows={4}/></IonItem>
       <IonItem className="field-item"><IonInput label="Seed" labelPlacement="stacked" type="number" placeholder="Random"/></IonItem>
