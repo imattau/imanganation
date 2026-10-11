@@ -91,6 +91,18 @@ public class RendererPlugin extends Plugin {
                 call.reject("Choose a model stored in the app's model library.");
                 return;
             }
+            ActivityManager manager = (ActivityManager) getContext().getSystemService(Context.ACTIVITY_SERVICE);
+            ActivityManager.MemoryInfo memory = new ActivityManager.MemoryInfo();
+            manager.getMemoryInfo(memory);
+            long gib = 1024L * 1024L * 1024L;
+            if (memory.totalMem < 12L * gib) {
+                call.reject("The Android renderer currently targets devices with at least 12 GB of RAM.");
+                return;
+            }
+            if (memory.lowMemory || memory.availMem < modelFile.length() + gib) {
+                call.reject("Close other apps and free at least this model's file size plus 1 GB of RAM before loading.");
+                return;
+            }
         } catch (Exception error) {
             call.reject("Could not validate the model file path.", error);
             return;
