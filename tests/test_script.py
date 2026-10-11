@@ -270,3 +270,15 @@ def test_declared_locations_become_project_locations_with_notes():
                                    script_text=text, script_format="canonical")
     assert document["locations"] == [{"name": "Harbor pier", "notes": "stone pier, fog."},
                                      {"name": "Cellar"}]
+
+
+def test_serialized_cover_drops_its_frame_hint_and_reparses():
+    from manganation.script.formats.canonical import parse, serialize
+
+    text = serialize({"panels": [
+        {"cover": True, "label": {"page": 0, "panel": 1}, "scene_heading": "Sky",
+         "action": "Title art", "aspect_ratio": "3:4", "size": "large"},
+        {"label": {"page": 1, "panel": 1}, "scene_heading": "Sky", "action": "Rain",
+         "aspect_ratio": "1:1"}]})
+    assert text.count("[FRAME") == 1
+    assert parse(text)["problems"] == []

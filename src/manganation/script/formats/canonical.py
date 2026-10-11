@@ -585,7 +585,8 @@ def serialize(document: dict) -> str:
                 f"{n}: {v}" for n, v in p["expressions"].items()) + "]")
         if p.get("location"): out.append(f"[LOCATION: {p['location']}]")
         if p.get("props"): out.append("[PROPS: " + ", ".join(p["props"]) + "]")
-        if p.get("aspect_ratio") or p.get("size"):
+        # A cover fills its page; the parser rejects a [FRAME] on one.
+        if (p.get("aspect_ratio") or p.get("size")) and not cover:
             out.append("[FRAME: " + ", ".join(
                 v for v in (p.get("aspect_ratio"), p.get("size")) if v) + "]")
         out.extend(("[ACTION]", p.get("action", "").strip()))
