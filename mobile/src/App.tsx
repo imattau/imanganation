@@ -5,10 +5,10 @@ import {
   IonTextarea, IonTitle, IonToolbar, IonToast,
 } from '@ionic/react';
 import { BookOpen, Boxes, Download, FolderPlus, ImagePlus, Layers3, Sparkles, Users, WandSparkles } from 'lucide-react';
-import type { MangaPanel, MangaProject, PageObject } from './domain/project';
+import type { MangaPanel, MangaProject, MangaTake, PageObject } from './domain/project';
 import { createProject, touchProject } from './domain/project';
 import { deleteProject, listProjects, saveProject, type SavedProject } from './domain/repository';
-import { composePageOra, createBlankOra, deleteProjectAssets, savePageAsset, saveProjectFile } from './domain/pageAssets';
+import { composePageOra, createBlankOra, deleteProjectAssets, getProjectFile, savePageAsset, saveProjectFile } from './domain/pageAssets';
 const PageCanvas = lazy(() => import('./components/PageCanvas').then((module) => ({ default: module.PageCanvas })));
 import { renderer } from './domain/renderer';
 import { makeVerticalComic, saveVerticalArchive, VERTICAL_PRESETS } from './domain/verticalExport';
@@ -185,6 +185,47 @@ export default function App() {
     catch (error) { setNotice(message(error)); }
   };
 
+  const importPanelTake = async (panelId: string, file: File) => {
+    if (!current) return;
+    if (!/^image\/(png|jpeg|webp)$/.test(file.type)) { setNotice('Choose a PNG, JPEG or WebP image.'); return; }
+    const panel = current.manifest.panels.find((item) => item.id === panelId);
+    if (!panel) return;
+    try {
+      const bitmap = await createImageBitmap(file);
+      const { width, height } = bitmap;
+      bitmap.close();
+      const takeId = `take_${crypto.randomUUID().replaceAll('-', '').slice(0, 12)}`;
+      const extension = file.type === 'image/jpeg' ? 'jpg' : file.type.slice('image/'.length);
+      const path = `panels/${panelId}/takes/${takeId}.${extension}`;
+      await saveProjectFile(current.manifest.project.id, path, new Uint8Array(await file.arrayBuffer()));
+      const take: MangaTake = { panel: panelId, file: path, width, height, kind: 'panel', parent: null, origin: 'user-import', created: new Date().toISOString(), engine: { name: 'Imported artwork', original_name: file.name } };
+      const manifest = {
+        ...current.manifest,
+        takes: { ...current.manifest.takes, [takeId]: take },
+        panels: current.manifest.panels.map((item) => item.id === panelId ? { ...item, takes: [...(item.takes ?? []), takeId] } : item),
+      };
+      await persist(manifest, current.script);
+      setNotice('Artwork added as a take. Select it below to make it active.');
+    } catch (error) { setNotice(message(error)); }
+  };
+
+  const selectPanelTake = async (panelId: string, takeId: string) => {
+    if (!current || !current.manifest.takes[takeId]) return;
+    const panels = current.manifest.panels.map((panel) => panel.id === panelId ? { ...panel, active_take: takeId } : panel);
+    const manifest = { ...current.manifest, panels };
+    const pageId = panels.find((panel) => panel.id === panelId)?.placement?.page;
+    const page = manifest.pages.find((item) => item.id === pageId);
+    if (page) {
+      try {
+        const archive = await composePageOra(manifest.project.id, page.id, panels, manifest.takes, page.mobile_objects ?? []);
+        await savePageAsset(manifest.project.id, page.id, archive);
+        await saveProjectFile(manifest.project.id, page.file, archive);
+      } catch (error) { setNotice(message(error)); return; }
+    }
+    try { await persist(manifest, current.script); }
+    catch (error) { setNotice(message(error)); }
+  };
+
   const placePanel = async (panelId: string, pageId: string) => {
     if (!current) return;
     const ids = [...current.manifest.panels.filter((panel) => panel.placement?.page === pageId && panel.id !== panelId).map((panel) => panel.id), panelId];
@@ -342,6 +383,8 @@ export default function App() {
     onAddPanel={() => void addPanel()} onAddPage={() => void addPage()}
     onParseScript={() => void parseScript()}
     onChangePanel={(id, patch) => void changePanel(id, patch)} onAddCast={() => void addCastMember()}
+    onImportTake={(panelId, file) => void importPanelTake(panelId, file)}
+    onSelectTake={(panelId, takeId) => void selectPanelTake(panelId, takeId)}
     onPlacePanel={(panelId, pageId) => void placePanel(panelId, pageId)}
     onAddPageObject={(pageId, kind) => void addPageObject(pageId, kind)}
     onRemovePageObject={(pageId, objectId) => void removePageObject(pageId, objectId)}
@@ -421,6 +464,8 @@ interface WorkspaceProps {
   onAddPage: () => void;
   onParseScript: () => void;
   onChangePanel: (id: string, patch: Partial<MangaPanel>) => void;
+  onImportTake: (panelId: string, file: File) => void;
+  onSelectTake: (panelId: string, takeId: string) => void;
   onAddCast: () => void;
   onPlacePanel: (panelId: string, pageId: string) => void;
   onAddPageObject: (pageId: string, kind: PageObject['kind']) => void;
@@ -469,6 +514,15 @@ function Workspace(props: WorkspaceProps) {
       <div className="section-heading"><div><span className="eyebrow">PRODUCTION</span><h2>Panels</h2></div><IonButton onClick={props.onAddPanel}><ImagePlus size={17}/>&nbsp; Add</IonButton></div>
       {saved.manifest.panels.length === 0 ? <Empty title="No panels yet" detail="Add a panel and write its action, cast and dialogue."/> : <div className="panel-list">{saved.manifest.panels.map((panel) => <article className="panel-card" key={panel.id}>
         <div className="panel-card-top"><span className="panel-number">{panel.label.page}.{panel.label.panel}</span><span className="panel-status">{panel.active_take ? 'Take selected' : 'Needs artwork'}</span></div>
+        <div className="take-heading"><strong>Artwork takes</strong><IonButton fill="outline" size="small" onClick={() => chooseImageFile((file) => props.onImportTake(panel.id, file))}>Import take</IonButton></div>
+        {(panel.takes ?? []).filter((takeId) => !!saved.manifest.takes[takeId]).length === 0 ? <p className="helper-text">No artwork yet. Add an image as a take, then select it to show it on the page.</p> : <div className="take-grid">{(panel.takes ?? []).filter((takeId) => !!saved.manifest.takes[takeId]).map((takeId) => {
+          const take = saved.manifest.takes[takeId];
+          const active = panel.active_take === takeId;
+          return <div className={active ? 'take-card active' : 'take-card'} key={takeId}>
+            <TakeThumbnail projectId={saved.manifest.project.id} path={take.file}/>
+            <div className="take-card-info"><strong>{active ? 'Active take' : 'Take'}</strong><span>{take.width} × {take.height}</span><button disabled={active} onClick={() => props.onSelectTake(panel.id, takeId)}>{active ? 'Selected' : 'Select'}</button></div>
+          </div>;
+        })}</div>}
         <IonItem className="field-item"><IonTextarea label="Panel action" labelPlacement="stacked" value={panel.action} autoGrow onIonChange={(event) => props.onChangePanel(panel.id, { action: event.detail.value ?? '' })}/></IonItem>
         <IonItem className="field-item"><IonInput label="Location" labelPlacement="stacked" value={panel.location ?? ''} onIonChange={(event) => props.onChangePanel(panel.id, { location: event.detail.value ?? '' })}/></IonItem>
         <IonItem className="field-item"><IonInput label="Camera / shot" labelPlacement="stacked" value={panel.camera ?? ''} placeholder="Wide shot" onIonChange={(event) => props.onChangePanel(panel.id, { camera: event.detail.value ?? '' })}/></IonItem>
@@ -546,6 +600,31 @@ function Workspace(props: WorkspaceProps) {
 
 function Empty({ title, detail, action }: { title: string; detail: string; action?: () => void }) {
   return <div className="empty-state compact"><div className="empty-icon"><ImagePlus/></div><h3>{title}</h3><p>{detail}</p>{action && <IonButton fill="outline" onClick={action}>Get started</IonButton>}</div>;
+}
+
+function TakeThumbnail({ projectId, path }: { projectId: string; path: string }) {
+  const [url, setUrl] = useState('');
+  useEffect(() => {
+    let disposed = false;
+    let objectUrl = '';
+    setUrl('');
+    void getProjectFile(projectId, path).then((bytes) => {
+      if (!bytes) return;
+      objectUrl = URL.createObjectURL(new Blob([Uint8Array.from(bytes).buffer as ArrayBuffer]));
+      if (disposed) URL.revokeObjectURL(objectUrl);
+      else setUrl(objectUrl);
+    }).catch(() => setUrl(''));
+    return () => { disposed = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [projectId, path]);
+  return url ? <img className="take-thumbnail" src={url} alt="Imported panel artwork"/> : <div className="take-thumbnail empty">Artwork preview</div>;
+}
+
+function chooseImageFile(onFile: (file: File) => void): void {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/png,image/jpeg,image/webp';
+  input.onchange = () => { const file = input.files?.[0]; if (file) onFile(file); };
+  input.click();
 }
 
 function message(error: unknown): string { return error instanceof Error ? error.message : 'Something went wrong.'; }

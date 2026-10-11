@@ -88,7 +88,8 @@ product UI and Android shell.
 The app currently supports local project creation, import/export of version 1 project
 ZIPs, canonical script editing with bounded revision snapshots, panel and reference
 management, basic panel placement, layered ORA page creation, lettering/effect overlays,
-vertical-comic slicing, CBZ, PDF and page-image ZIP exports. IndexedDB stores project
+direct panel/effect repositioning, imported artwork takes with explicit active-take
+selection, vertical-comic slicing, CBZ, PDF and page-image ZIP exports. IndexedDB stores project
 records and file assets; imported unknown files are carried through project export.
 Existing XCF page assets are preserved but cannot be previewed or edited.
 

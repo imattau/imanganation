@@ -156,7 +156,7 @@ export async function composePageOra(
   for (const panel of pagePanels) {
     const frame = panel.placement!.frame;
     const [x, y, frameWidth, frameHeight] = frame;
-    const takeId = panel.active_take ?? panel.takes?.at(-1);
+    const takeId = panel.active_take ?? null;
     const take = takeId ? takes[takeId] : undefined;
     const imageBytes = take ? await getProjectFile(projectId, take.file) : null;
     if (imageBytes && take?.file.toLowerCase().match(/\.(png|jpe?g|webp)$/)) {

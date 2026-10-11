@@ -55,6 +55,17 @@ ion-content { --background: #f4f0e8; }
 .panel-card-top { display: flex; justify-content: space-between; align-items: center; padding: 2px 4px 7px; }
 .panel-number { color: #d96d45; font-weight: 850; font-size: 12px; }
 .panel-status { color: #8490a0; font-size: 10px; }
+.take-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 4px; color: #293a56; font-size: 12px; }
+.take-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(138px,1fr)); gap: 9px; padding: 0 2px 12px; }
+.take-card { overflow: hidden; border: 1px solid #e8e1d6; border-radius: 11px; background: #fffdf8; }
+.take-card.active { border-color: #55836b; box-shadow: 0 0 0 1px #55836b; }
+.take-thumbnail { display: block; width: 100%; height: 120px; object-fit: contain; background: #e8e5df; }
+.take-thumbnail.empty { display: grid; place-items: center; color: #8490a0; font-size: 10px; }
+.take-card-info { display: grid; grid-template-columns: 1fr auto; gap: 3px 7px; padding: 8px; align-items: center; }
+.take-card-info strong { color: #293a56; font-size: 10px; }
+.take-card-info span { color: #8490a0; font-size: 9px; }
+.take-card-info button { grid-column: 1 / -1; padding: 6px; border: 0; border-radius: 7px; color: #fff; background: #293a56; font: 650 10px var(--ion-font-family); }
+.take-card-info button:disabled { color: #426d57; background: #e1efe3; }
 .people-list { padding: 0; background: transparent; }
 .people-list ion-item { --background: #fffdf8; --border-color: #e8e1d6; --padding-start: 12px; --inner-padding-end: 12px; margin: 8px 0; border: 1px solid #e8e1d6; border-radius: 13px; }
 .people-list ion-item h3 { font-weight: 750; color: #293a56; }
