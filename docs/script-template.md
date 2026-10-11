@@ -310,8 +310,11 @@ does not throw away finished panels.
 
 - **Panel frames**: the frame you render into decides a panel's real shape. `[FRAME]`
   hints can also be changed in the panel's Context (Aspect ratio, Frame size).
-- **Character designs beyond the first**: **Design character** (a new version) or
-  *Set Character Reference from Layer*.
+- **Character designs beyond the first**: **Design character** (a new version),
+  **Design another reference…** (an outfit, a season; with Qwen-Image 2.1 it can also
+  hold or wear one of the project's props, so the object and the grip are drawn once
+  and panels reuse them) or *Set Character Reference from Layer*. The script only lists
+  a prop in `[PROPS: …]`; it never sets a character's extra references.
 - **Page layouts and panel frames**: you draw these, or choose a layout for a page.
 
 Everything the script sets (shot, characters, expressions, location, action, notes) can

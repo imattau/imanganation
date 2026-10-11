@@ -317,6 +317,10 @@ page placement metadata are still being migrated. Image procedures are grouped u
   character keeps the old name as an alias (so the script's text still finds them), moves
   their folder in the engine, and renames them in every panel and expression; dialogue
   speakers are script text and stay as written (`POST /characters/rename`).
+  **Design another reference…** has an optional **Prop** drop-down on Qwen-Image 2.1
+  projects (props that have a picture): the new reference is drawn holding or wearing it.
+  It is never offered for the first design, so the prop doesn't follow the character
+  into panels that don't have it.
 - **Pages strip shape.** The Pages dock is always a single line of page tiles: a row when
   its dock is wide (the bottom) and a column when it is taller than wide (a side dock),
   with the **+** tile last. It scrolls along the line to reach the end, and scrolls to the

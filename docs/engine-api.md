@@ -168,6 +168,15 @@ locked as the `base` reference. The result has `name`, `created`, `appearance`,
 keeps them) and the sheet is added as a new version (`design-02`, …) and made active;
 earlier designs are kept. No description and no traits is a `422`.
 
+`variant_id` + `variant_description` design *another* reference of a designed character
+(an outfit, a season): the traits and the default reference stay, and the new image is
+saved as version `variant_id`. Add `variant_prop` (a prop's name, from `GET /props`) to
+draw the character holding or wearing that object: the prop's picture goes to
+Qwen-Image 2.1 as `<image2>` beside the character's default reference as `<image1>`.
+It is a `422` without `variant_id` (the base design never takes a prop, so the object
+doesn't follow the character into panels that don't have it), on any engine but
+`qwen_image_21` (`engine` in the request), or when the prop has no picture.
+
 ## Models: `/setup`
 
 The engine fetches its own models (`src/manganation/models_setup.py`, also behind
