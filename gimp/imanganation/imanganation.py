@@ -4766,6 +4766,13 @@ def _choose_manual_project():
     reading_order.append("rtl", "Right to left (manga)")
     reading_order.append("ltr", "Left to right")
     reading_order.set_active_id("rtl")
+    text_direction = Gtk.ComboBoxText()
+    text_direction.append("auto", "Automatic (from the text)")
+    text_direction.append("ltr", "Left to right")
+    text_direction.append("rtl", "Right to left (Arabic, Hebrew)")
+    text_direction.append("vertical", "Vertical (Japanese tategaki)")
+    text_direction.set_tooltip_text("How lettering text runs inside bubbles. Separate from reading order, which is the page and panel flow.")
+    text_direction.set_active_id("auto")
     color_mode = Gtk.ComboBoxText()
     color_mode.append("color", "Color")
     color_mode.append("bw", "Black and white")
@@ -4867,6 +4874,7 @@ def _choose_manual_project():
     rows = (("Project preset", project_preset),
             ("Project title", title), ("Parent folder", folder),
             ("Chapter", chapter), ("Reading order", reading_order),
+            ("Text direction", text_direction),
             ("Default color", color_mode), ("Panels to start", panel_count),
             ("", create_page), ("Page format", page_format),
             ("First page size", size_row), ("Resolution", resolution_row),
@@ -4887,6 +4895,7 @@ def _choose_manual_project():
                 "parent": Path(parent_path) if parent_path else None,
                 "chapter": chapter.get_text().strip(),
                 "reading_order": reading_order.get_active_id() or "rtl",
+                "text_direction": text_direction.get_active_id() or "auto",
                 "default_color_mode": color_mode.get_active_id() or "color",
                 "starter_panels": panel_count.get_value_as_int(),
                 "create_page": create_page.get_active(),
@@ -4913,7 +4922,7 @@ def _choose_manual_project():
         dialog.destroy()
 
 
-def _create_manual_project(title, parent, chapter, reading_order,
+def _create_manual_project(title, parent, chapter, reading_order, text_direction,
                            default_color_mode, starter_panels, create_page, page_size,
                            resolution, page_format, preset, style=None):
     """Write a schema-shaped manual project, optionally with a ready-to-draw page."""
@@ -4923,7 +4932,7 @@ def _create_manual_project(title, parent, chapter, reading_order,
     root.mkdir(parents=False)
     try:
         manifest = new_project_document(
-            title, reading_order=reading_order,
+            title, reading_order=reading_order, text_direction=text_direction,
             default_color_mode=default_color_mode, chapter=chapter,
             starter_panels=starter_panels, page_size=page_size,
             resolution=resolution, page_format=page_format, preset=preset)
@@ -7453,6 +7462,20 @@ def _selection_box(image):
     return None
 
 
+def _manifest_text_direction(manifest):
+    """The project's lettering direction: auto, ltr, rtl or vertical."""
+    return (manifest.get("project") or {}).get("text_direction", "auto")
+
+
+def _project_text_direction():
+    """The open project's lettering direction ("auto" with no project open)."""
+    root = _DOCK_CONTEXT.get("root")
+    try:
+        return _manifest_text_direction(load_project(root)) if root else "auto"
+    except Exception:
+        return "auto"
+
+
 def _dock_bubble(procedure, config, data):
     """Bubble…: a script line's (line), a page's (new), a Bubbles dock tile
     (template), and Fit bubble to text (fit)."""
@@ -7468,9 +7491,12 @@ def _dock_bubble(procedure, config, data):
             box = _selection_box(image)
             if box:
                 Gimp.Selection.none(image)
+            direction = _project_text_direction()
             lettering.insert_bubble(image, template, "Text", box=box,
                                     center=None if box else (image.get_width() / 2,
-                                                             image.get_height() / 2))
+                                                             image.get_height() / 2),
+                                    vertical=direction == "vertical",
+                                    text_direction=direction)
         elif data == "new":
             root = _DOCK_CONTEXT["root"]
             manifest = load_project(root)
@@ -7478,8 +7504,10 @@ def _dock_bubble(procedure, config, data):
             image = (_show_project_page(root, manifest, page_id)
                      if any(p["id"] == page_id for p in manifest["pages"])
                      else _bubble_target_image())
+            direction = _manifest_text_direction(manifest)
             chosen = lettering.choose_bubble("speech", "", _bubble_previews(),
-                                             size=lettering.default_size(image))
+                                             size=lettering.default_size(image),
+                                             vertical_default=direction == "vertical")
             if chosen is None:
                 return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
             template, text, vertical, size = chosen
@@ -7489,7 +7517,7 @@ def _dock_bubble(procedure, config, data):
             lettering.insert_bubble(image, template, text or "Text", box=box,
                                     center=None if box else (image.get_width() / 2,
                                                              image.get_height() / 2),
-                                    size=size, vertical=vertical)
+                                    size=size, vertical=vertical, text_direction=direction)
         else:  # a script line
             panel_id, _, line = config.get_property("item").rpartition(":")
             root = _DOCK_CONTEXT["root"]
@@ -7514,9 +7542,11 @@ def _dock_bubble(procedure, config, data):
                 entry = panel.get("dialogue", [])[int(line)]
                 speaker, text, kind = (entry.get("speaker", ""), entry.get("text", ""),
                                        entry.get("kind", "speech"))
+            direction = _manifest_text_direction(manifest)
             chosen = lettering.choose_bubble(
                 bubble_templates.KIND_CATEGORY.get(kind, "speech"), text, _bubble_previews(),
-                title=f"Bubble for {speaker}", size=lettering.default_size(image))
+                title=f"Bubble for {speaker}", size=lettering.default_size(image),
+                vertical_default=direction == "vertical")
             if chosen is None:
                 return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
             template, text, vertical, size = chosen
@@ -7529,7 +7559,7 @@ def _dock_bubble(procedure, config, data):
             tip = (_bubble_tail_tip(image, speaker, center, frame)
                    if template.tail != "none" and not template.flipped else None)
             lettering.insert_bubble(image, template, text, center=center, tail_tip=tip,
-                                    size=size, vertical=vertical,
+                                    size=size, vertical=vertical, text_direction=direction,
                                     source={"panel": panel_id, "line": line},
                                     name=f"{speaker}: {text}"[:60])
         _refresh_project_docks()

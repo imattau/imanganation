@@ -17,6 +17,8 @@
         "title": {"type": "string"},
         "chapter": {"type": "string"},
         "reading_order": {"enum": ["rtl", "ltr"]},
+        "text_direction": {"enum": ["auto", "ltr", "rtl", "vertical"],
+                           "description": "Lettering direction, separate from page reading order; absent = auto (GIMP detects it from the text)"},
         "default_color_mode": {"enum": ["inherit", "color", "bw"],
                                "description": "Recorded only; the engine renders colour"},
         "preset": {"enum": ["oneshot", "manga_series", "color_comic", "digital_comic", "custom"],

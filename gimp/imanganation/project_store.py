@@ -40,7 +40,11 @@ def new_id(prefix: str) -> str:
     return prefix + secrets.token_hex(6)
 
 
+TEXT_DIRECTIONS = ("auto", "ltr", "rtl", "vertical")
+
+
 def new_project_document(title: str, *, reading_order: str = "rtl",
+                         text_direction: str = "auto",
                          default_color_mode: str = "color",
                          chapter: str = "", starter_panels: int = 1,
                          page_size: tuple[int, int] = (1512, 2150),
@@ -52,6 +56,8 @@ def new_project_document(title: str, *, reading_order: str = "rtl",
         raise ProjectFileError("project title cannot be empty")
     if reading_order not in {"rtl", "ltr"}:
         raise ProjectFileError("reading order must be right-to-left or left-to-right")
+    if text_direction not in TEXT_DIRECTIONS:
+        raise ProjectFileError("text direction must be auto, ltr, rtl, or vertical")
     if default_color_mode not in {"color", "bw", "inherit"}:
         raise ProjectFileError("default color mode must be color, bw, or inherit")
     if preset not in PROJECT_PRESETS:
@@ -71,6 +77,7 @@ def new_project_document(title: str, *, reading_order: str = "rtl",
         "id": new_id("prj_"),
         "title": title,
         "reading_order": reading_order,
+        "text_direction": text_direction,
         "default_color_mode": default_color_mode,
         "preset": preset,
         "page_setup": {"format": page_format, "width": page_size[0],

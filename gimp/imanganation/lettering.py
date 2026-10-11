@@ -159,7 +159,8 @@ def _shape_layer(image, template, box, tail_tip, parent, position=0):
     return layer
 
 
-def _text_layer(image, template, text, box, font, size, vertical, parent):
+def _text_layer(image, template, text, box, font, size, vertical, parent,
+                text_direction="auto"):
     Gimp, _ = _gimp()
     tx, ty, tw, th = B.text_box(template, box[2], box[3])
     layer = Gimp.TextLayer.new(image, text or " ", font, size, Gimp.Unit.pixel())
@@ -171,7 +172,11 @@ def _text_layer(image, template, text, box, font, size, vertical, parent):
         layer.set_base_direction(Gimp.TextDirection.TTB_RTL)
         layer.resize(tw, th)
         layer.set_offsets(int(box[0] + tx), int(box[1] + ty))
-    else:  # a dynamic box centred in the text area (GIMP boxes align to the top)
+    else:
+        # "auto" leaves GIMP to pick the direction from the characters
+        if text_direction in ("ltr", "rtl"):
+            layer.set_base_direction(Gimp.TextDirection.RTL if text_direction == "rtl"
+                                     else Gimp.TextDirection.LTR)  # a dynamic box centred in the text area (GIMP boxes align to the top)
         lw, lh = layer.get_width(), layer.get_height()
         layer.set_offsets(int(box[0] + tx + (tw - lw) / 2), int(box[1] + ty + (th - lh) / 2))
     return layer
@@ -198,7 +203,8 @@ def default_size(image):
 
 
 def insert_bubble(image, template, text, *, center=None, box=None, tail_tip=None,
-                  font_name=None, size=None, vertical=False, source=None, name=None):
+                  font_name=None, size=None, vertical=False, source=None, name=None,
+                  text_direction="auto"):
     """Add a bubble to the page's Speech bubbles group -> the bubble group.
 
     ``box`` (x, y, w, h) fixes the bubble's size (text wraps inside it); otherwise the
@@ -223,10 +229,12 @@ def insert_bubble(image, template, text, *, center=None, box=None, tail_tip=None
         group = Gimp.GroupLayer.new(image, name or "Bubble")
         image.insert_layer(group, parent, 0)
         _shape_layer(image, template, box, tail_tip, group)
-        _text_layer(image, template, wrapped, box, font, size, vertical, group)
+        _text_layer(image, template, wrapped, box, font, size, vertical, group,
+                    text_direction)
         record = {"template": template.id, "box": [round(v, 1) for v in box],
                   "tail": [round(v, 1) for v in tail_tip] if tail_tip else None,
-                  "font": font.get_name(), "size": size, "vertical": vertical}
+                  "font": font.get_name(), "size": size, "vertical": vertical,
+                  "text_direction": "vertical" if vertical else text_direction}
         record.update(source or {})
         _attach(group, BUBBLE_PARASITE, record)
         image.set_selected_layers([group])
@@ -320,7 +328,8 @@ def library_rows(previews):
     return "\n".join(rows)
 
 
-def choose_bubble(category, text, previews, title="Add bubble", size=28.0):
+def choose_bubble(category, text, previews, title="Add bubble", size=28.0,
+                  vertical_default=False):
     """The bubble picker -> (template, text, vertical, size), or None if cancelled.
     Opens on ``category``'s tab with ``text`` ready to edit; double-click inserts."""
     from gi.repository import GdkPixbuf, Gtk
@@ -383,7 +392,7 @@ def choose_bubble(category, text, previews, title="Add bubble", size=28.0):
     frame.add(entry)
     size_spin = Gtk.SpinButton.new_with_range(8, 400, 1)
     size_spin.set_value(size)
-    vertical = Gtk.CheckButton(label="Vertical text")
+    vertical = Gtk.CheckButton(label="Vertical text", active=vertical_default)
     grid.attach(Gtk.Label(label="Text", xalign=0.0, valign=Gtk.Align.START), 0, 0, 1, 1)
     grid.attach(frame, 1, 0, 3, 1)
     grid.attach(Gtk.Label(label="Size", xalign=0.0), 0, 1, 1, 1)
