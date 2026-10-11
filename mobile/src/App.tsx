@@ -303,6 +303,21 @@ export default function App() {
     } catch (error) { setNotice(message(error)); }
   };
 
+  const changePageObject = async (pageId: string, objectId: string, patch: Partial<PageObject>) => {
+    if (!current) return;
+    const page = current.manifest.pages.find((item) => item.id === pageId);
+    if (!page) return;
+    const objects = (page.mobile_objects ?? []).map((item) => item.id === objectId ? { ...item, ...patch } : item);
+    const nextPage = { ...page, mobile_objects: objects };
+    const manifest = { ...current.manifest, pages: current.manifest.pages.map((item) => item.id === pageId ? nextPage : item) };
+    try {
+      const archive = await composePageOra(manifest.project.id, pageId, manifest.panels, manifest.takes, objects);
+      await savePageAsset(manifest.project.id, pageId, archive);
+      await saveProjectFile(manifest.project.id, page.file, archive);
+      await persist(manifest, current.script);
+    } catch (error) { setNotice(message(error)); }
+  };
+
   const movePageObject = async (pageId: string, objectId: string, x: number, y: number) => {
     if (!current) return;
     const page = current.manifest.pages.find((item) => item.id === pageId);
@@ -400,6 +415,7 @@ export default function App() {
     onPlacePanel={(panelId, pageId) => void placePanel(panelId, pageId)}
     onAddPageObject={(pageId, kind) => void addPageObject(pageId, kind)}
     onRemovePageObject={(pageId, objectId) => void removePageObject(pageId, objectId)}
+    onChangePageObject={(pageId, objectId, patch) => void changePageObject(pageId, objectId, patch)}
     onMovePageObject={(pageId, objectId, x, y) => void movePageObject(pageId, objectId, x, y)}
     onMovePagePanel={(pageId, panelId, x, y) => void movePagePanel(pageId, panelId, x, y)}
     onAddReference={(name) => addReference(name)}
@@ -483,6 +499,7 @@ interface WorkspaceProps {
   onPlacePanel: (panelId: string, pageId: string) => void;
   onAddPageObject: (pageId: string, kind: PageObject['kind']) => void;
   onRemovePageObject: (pageId: string, objectId: string) => void;
+  onChangePageObject: (pageId: string, objectId: string, patch: Partial<PageObject>) => void;
   onMovePageObject: (pageId: string, objectId: string, x: number, y: number) => void;
   onMovePagePanel: (pageId: string, panelId: string, x: number, y: number) => void;
   onAddReference: (characterName: string) => void;
@@ -577,7 +594,7 @@ function Workspace(props: WorkspaceProps) {
         <div className="tool-grid">
           {([['bubble', 'Speech bubble'], ['sfx', 'Sound effect'], ['screentone', 'Screentone'], ['speed-lines', 'Speed lines'], ['impact-burst', 'Impact burst']] as const).map(([kind, label]) => <button key={kind} className="tool-card" onClick={() => props.onAddPageObject(selectedToolPage, kind)}><Sparkles size={19}/><strong>{label}</strong><span>Add to page layer</span></button>)}
         </div>
-        <div className="objects-list"><h3>Page objects</h3>{(saved.manifest.pages.find((page) => page.id === selectedToolPage)?.mobile_objects ?? []).length === 0 ? <p className="helper-text">No lettering or effects yet.</p> : (saved.manifest.pages.find((page) => page.id === selectedToolPage)?.mobile_objects ?? []).map((object) => <div key={object.id} className="object-row"><div><strong>{object.kind.replace('-', ' ')}</strong><span>{object.text || 'Graphic effect'}</span></div><button onClick={() => props.onRemovePageObject(selectedToolPage, object.id)}>Remove</button></div>)}</div>
+        <div className="objects-list"><h3>Page objects</h3>{(saved.manifest.pages.find((page) => page.id === selectedToolPage)?.mobile_objects ?? []).length === 0 ? <p className="helper-text">No lettering or effects yet.</p> : (saved.manifest.pages.find((page) => page.id === selectedToolPage)?.mobile_objects ?? []).map((object) => <div key={object.id} className="page-object-editor"><div className="object-row"><div><strong>{object.kind.replace('-', ' ')}</strong><span>{object.text || 'Graphic effect'}</span></div><button onClick={() => props.onRemovePageObject(selectedToolPage, object.id)}>Remove</button></div>{(object.kind === 'bubble' || object.kind === 'sfx' || object.kind === 'impact-burst') && <IonItem className="field-item"><IonInput label={object.kind === 'bubble' ? 'Lettering' : 'Effect text'} labelPlacement="stacked" value={object.text ?? ''} onIonChange={(event) => props.onChangePageObject(selectedToolPage, object.id, { text: event.detail.value ?? '' })}/></IonItem>}</div>)}</div>
       </>}
     </section>}
 
