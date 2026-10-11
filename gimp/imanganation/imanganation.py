@@ -7954,8 +7954,8 @@ class Imanganation(Gimp.PlugIn):
             proc.add_enum_argument("run-mode", "Run mode", "How to run the procedure",
                                    Gimp.RunMode, Gimp.RunMode.INTERACTIVE,
                                    GObject.ParamFlags.READWRITE)
-            proc.add_menu_path("<Toolbox>/File/[Open]")
-            proc.add_menu_path("<Image>/File/[Open]")
+            proc.add_menu_path("<Toolbox>/File/Imanganation")
+            proc.add_menu_path("<Image>/File/Imanganation")
             proc.add_menu_path("<Image>/Imanganation/Project")
             proc.set_documentation(
                 "Create an Imanganation project manually",
@@ -7970,10 +7970,10 @@ class Imanganation(Gimp.PlugIn):
             proc.add_enum_argument("run-mode", "Run mode", "How to run the procedure",
                                    Gimp.RunMode, Gimp.RunMode.INTERACTIVE,
                                    GObject.ParamFlags.READWRITE)
-            # Keep project creation beside the other ways to open/create work,
-            # in the first File section and in the toolbox before an image exists.
-            proc.add_menu_path("<Toolbox>/File/[Open]")
-            proc.add_menu_path("<Image>/File/[Open]")
+            # Keep project actions together at the top of File, before GIMP's
+            # standard Open section.
+            proc.add_menu_path("<Toolbox>/File/Imanganation")
+            proc.add_menu_path("<Image>/File/Imanganation")
             proc.add_menu_path("<Image>/Imanganation/Project")
             proc.set_documentation(
                 "New Imanganation project from a script",
@@ -8018,8 +8018,8 @@ class Imanganation(Gimp.PlugIn):
             proc.add_enum_argument("run-mode", "Run mode", "How to run the procedure",
                                    Gimp.RunMode, Gimp.RunMode.INTERACTIVE,
                                    GObject.ParamFlags.READWRITE)
-            proc.add_menu_path("<Toolbox>/File/[Open]")
-            proc.add_menu_path("<Image>/File/[Open]")
+            proc.add_menu_path("<Toolbox>/File/Imanganation")
+            proc.add_menu_path("<Image>/File/Imanganation")
             proc.add_menu_path("<Image>/Imanganation/Project")
             proc.set_documentation(
                 "Read the open project's script again",
@@ -8036,8 +8036,8 @@ class Imanganation(Gimp.PlugIn):
             proc.add_enum_argument("run-mode", "Run mode", "How to run the procedure",
                                    Gimp.RunMode, Gimp.RunMode.INTERACTIVE,
                                    GObject.ParamFlags.READWRITE)
-            proc.add_menu_path("<Toolbox>/File/[Open]")
-            proc.add_menu_path("<Image>/File/[Open]")
+            proc.add_menu_path("<Toolbox>/File/Imanganation")
+            proc.add_menu_path("<Image>/File/Imanganation")
             proc.add_menu_path("<Image>/Imanganation/Project")
             proc.set_documentation(
                 "Close the open Imanganation project",
@@ -8057,8 +8057,8 @@ class Imanganation(Gimp.PlugIn):
             # The toolbox File menu is available before an image is open, which
             # is when users most need to open an existing project. Keep the
             # image-window entry as well for switching projects while editing.
-            proc.add_menu_path("<Toolbox>/File/[Open]")
-            proc.add_menu_path("<Image>/File/[Open]")
+            proc.add_menu_path("<Toolbox>/File/Imanganation")
+            proc.add_menu_path("<Image>/File/Imanganation")
             proc.add_menu_path("<Image>/Imanganation/Project")
             proc.set_documentation(
                 "Open the Imanganation project docks",
