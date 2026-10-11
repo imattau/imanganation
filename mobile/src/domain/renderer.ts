@@ -1,3 +1,5 @@
+import { Capacitor, registerPlugin } from '@capacitor/core';
+
 export type RenderOperation = 'render' | 'design' | 'refine' | 'inpaint';
 
 export interface RenderRequest {
@@ -19,8 +21,20 @@ export interface RendererCapabilities {
   available: boolean;
   engines: string[];
   operations: RenderOperation[];
+  runtimePackaged?: boolean;
+  runtimeVersion?: string;
+  supportedAbis?: string[];
+  totalMemoryBytes?: number;
+  availableMemoryBytes?: number;
+  lowMemory?: boolean;
   reason?: string;
 }
+
+interface NativeRendererPlugin {
+  capabilities(): Promise<RendererCapabilities & { generationAvailable: boolean; engine?: string }>;
+}
+
+const NativeRenderer = registerPlugin<NativeRendererPlugin>('Renderer');
 
 export interface RenderJob {
   id: string;
@@ -31,7 +45,7 @@ export interface RenderJob {
   error?: string;
 }
 
-/** Stable UI boundary; Android runtime implementation will be registered behind this interface. */
+/** Stable UI boundary; native runtime discovery is separate from generation readiness. */
 export interface RendererAdapter {
   capabilities(): Promise<RendererCapabilities>;
   start(request: RenderRequest): Promise<RenderJob>;
@@ -41,11 +55,29 @@ export interface RendererAdapter {
 
 export class UnavailableRenderer implements RendererAdapter {
   async capabilities(): Promise<RendererCapabilities> {
+    if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
+      try {
+        const native = await NativeRenderer.capabilities();
+        return {
+          ...native,
+          available: native.generationAvailable,
+          engines: native.runtimePackaged && native.engine ? [native.engine] : [],
+          operations: [],
+        };
+      } catch {
+        return {
+          available: false,
+          engines: [],
+          operations: [],
+          reason: 'Could not inspect the Android native renderer runtime.',
+        };
+      }
+    }
     return {
       available: false,
       engines: [],
       operations: [],
-      reason: 'The Android image-generation runtime has not been integrated yet.',
+      reason: 'The native renderer is available only in the Android app.',
     };
   }
   async start(): Promise<RenderJob> {
@@ -56,3 +88,4 @@ export class UnavailableRenderer implements RendererAdapter {
 }
 
 export const renderer: RendererAdapter = new UnavailableRenderer();
+
