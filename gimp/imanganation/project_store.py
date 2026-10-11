@@ -393,10 +393,27 @@ PANEL_SIZES = ("small", "large", "splash")
 FRAME_SHAPES = {"wide": "2:1", "tall": "1:2", "square": "1:1"}
 
 
+def normalize_aspect(value: str) -> str:
+    """A frame shape as the ``W:H`` ratio the engine needs: the words wide/tall/square
+    map to ratios, blank stays blank, anything else must already be a ratio."""
+    value = " ".join(str(value or "").split()).replace(" ", "")
+    value = FRAME_SHAPES.get(value.lower(), value)
+    if value and not _ASPECT.match(value):
+        raise ProjectFileError("aspect ratio must look like 3:2 (or wide, tall, square)")
+    return value
+
+
+def normalize_size(value: str) -> str:
+    value = str(value or "").strip().lower()
+    if value and value not in PANEL_SIZES:
+        raise ProjectFileError(f"size must be one of {', '.join(PANEL_SIZES)}")
+    return value
+
+
 SHOT_CHOICES = ("extreme close-up", "close-up", "reaction shot", "medium shot", "two-shot",
                 "full shot", "wide shot", "establishing shot", "over-the-shoulder",
                 "low angle", "high angle", "bird's-eye", "worm's-eye", "dutch angle", "pov")
-ASPECT_CHOICES = ("wide", "tall", "square", "16:9", "3:2", "4:3", "1:1", "2:3", "3:4", "9:16")
+ASPECT_CHOICES = ("16:9", "3:2", "4:3", "1:1", "2:3", "3:4", "9:16")
 # Context fields picked from a list (a Choose… button) rather than typed: field -> how
 FIELD_CHOICES = {"characters": "many", "props": "many", "location": "one", "camera": "one",
                  "aspect_ratio": "one", "size": "one"}
@@ -534,15 +551,10 @@ def apply_field_edit(document: dict[str, Any], key: str, value: str,
                                            "leave it blank for a random one")
                 panel["seed"] = int(value)
         elif field in PANEL_TEXT_FIELDS:
-            if field == "aspect_ratio" and value:
-                value = FRAME_SHAPES.get(value.lower(), value)
-                if not _ASPECT.match(value):
-                    raise ProjectFileError("aspect ratio must look like 3:2 (or wide, "
-                                           "tall, square)")
-            if field == "size" and value:
-                value = value.lower()
-                if value not in PANEL_SIZES:
-                    raise ProjectFileError(f"size must be one of {', '.join(PANEL_SIZES)}")
+            if field == "aspect_ratio":
+                value = normalize_aspect(value)
+            if field == "size":
+                value = normalize_size(value)
             if value or field == "action":  # action is required, the rest optional
                 panel[field] = value
                 if field == "location" and find_location(document, value) is None:
@@ -1156,6 +1168,7 @@ def add_panel(document: dict[str, Any], page_number: int, *, action: str,
     action = " ".join(action.split())
     if not action:
         raise ProjectFileError("a panel needs an action")
+    aspect_ratio, size = normalize_aspect(aspect_ratio), normalize_size(size)
     if page_number < 1:
         raise ProjectFileError("a panel needs a page number of 1 or more; "
                                "the cover is added with Add cover")
@@ -1196,6 +1209,8 @@ def edit_panel_story(document: dict[str, Any], panel_id: str, **fields) -> dict[
     panel = next((p for p in document["panels"] if p["id"] == panel_id), None)
     if panel is None or panel.get("status") == "orphaned":
         raise ProjectFileError("that story beat is no longer available")
+    if "aspect_ratio" in fields: fields["aspect_ratio"] = normalize_aspect(fields["aspect_ratio"])
+    if "size" in fields: fields["size"] = normalize_size(fields["size"])
     for key in ("scene_heading", "location", "action", "camera", "notes",
                 "aspect_ratio", "size"):
         if key in fields: panel[key] = str(fields[key]).strip()

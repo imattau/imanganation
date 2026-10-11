@@ -666,3 +666,16 @@ def test_renaming_a_character_updates_their_panels_and_keeps_the_old_name_as_an_
         rename_character(document, old, "  ")
     with pytest.raises(ProjectFileError):
         rename_character(document, "ghost", "x")
+
+
+def test_frame_shape_words_become_ratios_and_junk_is_refused():
+    from gimp.imanganation.project_store import normalize_aspect, normalize_size
+
+    assert normalize_aspect("wide") == "2:1"
+    assert normalize_aspect(" 3 : 2 ") == "3:2"
+    assert normalize_aspect("") == ""
+    with pytest.raises(ProjectFileError):
+        normalize_aspect("cinematic")
+    assert normalize_size("Large") == "large"
+    with pytest.raises(ProjectFileError):
+        normalize_size("huge")
