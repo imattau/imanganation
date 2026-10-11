@@ -32,6 +32,13 @@ projects/*/characters/**/*.webp
 *.swp
 .env
 
+# Android / Gradle
+.gradle/
+**/build/
+local.properties
+*.apk
+*.aab
+
 # More generated images: datasets, retake/backup folders (panels_*, characters_*)
 projects/*/datasets/**/*.png
 projects/*/panels*/*.png

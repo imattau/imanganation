@@ -42,6 +42,7 @@ config/     settings, model registry, style presets
 src/        Python orchestrator (script, characters, layout, render, memory, web)
 workflows/  ComfyUI workflow JSON templates
 gimp/       GIMP 3 plug-in (the interface) + headless smoke tests
+android/    Android script companion (early development)
 projects/   per-project scripts, characters, panels, manifests
 models/     checkpoints, LoRAs, IP-Adapters, ControlNets
 ```
