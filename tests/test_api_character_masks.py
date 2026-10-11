@@ -14,6 +14,8 @@ from manganation.web.api import create_app
 
 
 class StubDetector:
+    loads = 0
+
     def __init__(self, boxes):
         self.boxes = boxes
 
@@ -22,8 +24,10 @@ class StubDetector:
 
 
 class StubSegmenter:
+    loads = 0
+
     def __init__(self, model):
-        pass
+        StubSegmenter.loads += 1
 
     def mask(self, image):
         return Image.new("L", image.size, 255)
@@ -36,10 +40,15 @@ def _png(size=(100, 80)) -> bytes:
 
 
 def _client(tmp_path, monkeypatch, boxes, present=True):
+    StubSegmenter.loads = 0
+    StubDetector.loads = 0
     monkeypatch.setattr(models_setup, "state",
                         lambda model, root: "present" if present else "missing")
-    monkeypatch.setattr("manganation.evaluate.detector.default_detector",
-                        lambda name=None: StubDetector(boxes))
+    def load_detector(name=None):
+        StubDetector.loads += 1
+        return StubDetector(boxes)
+
+    monkeypatch.setattr("manganation.evaluate.detector.default_detector", load_detector)
     monkeypatch.setattr("manganation.evaluate.masks.AnimeSegmenter", StubSegmenter)
     return TestClient(create_app(outputs=tmp_path))
 
@@ -84,3 +93,11 @@ def test_unreadable_upload_is_400(tmp_path, monkeypatch):
 def test_oversized_image_is_413(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch, [])
     assert _post(client, _png((7000, 6000))).status_code == 413
+
+
+def test_models_load_once_across_requests(tmp_path, monkeypatch):
+    box = Box(10, 5, 60, 70, 0.9)
+    client = _client(tmp_path, monkeypatch, [box])
+    for _ in range(3):
+        assert _post(client, _png()).status_code == 200
+    assert (StubDetector.loads, StubSegmenter.loads) == (1, 1)

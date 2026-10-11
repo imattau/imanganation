@@ -523,6 +523,17 @@ def create_app(
         running setup task (a download or a link search) with its progress."""
         return setup().report()
 
+    mask_models: dict = {}  # loaded ONNX sessions, keyed by model path
+    mask_models_lock = threading.Lock()
+
+    def cached_mask_model(path: Path, load):
+        """One loaded session per model file, reused across requests (the segmenter is
+        ~176 MB); a different path (the models folder moved) loads afresh."""
+        with mask_models_lock:
+            if path not in mask_models:
+                mask_models[path] = load()
+            return mask_models[path]
+
     @app.post("/character-masks")
     def create_character_masks(file: UploadFile = File(...)) -> dict:
         """Detect and segment figures in an uploaded layer image; masks are output PNGs."""
@@ -554,8 +565,11 @@ def create_app(
         except Exception as exc:
             raise HTTPException(400, "upload must be a readable image") from exc
         try:
+            segmenter_path = segmenter_model.path(root_dir)
             figures = segment_figures(
-                image, default_detector(), AnimeSegmenter(segmenter_model.path(root_dir)))
+                image,
+                cached_mask_model(detector_model.path(root_dir), default_detector),
+                cached_mask_model(segmenter_path, lambda: AnimeSegmenter(segmenter_path)))
         except Exception as exc:
             raise HTTPException(500, f"could not create character masks: {exc}") from exc
         output_root = Path(outputs) if outputs is not None else outputs_root()
