@@ -7,13 +7,13 @@ import android.provider.OpenableColumns;
 
 import androidx.activity.result.ActivityResult;
 
-import com.getcapacitor.ActivityCallback;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import com.getcapacitor.annotation.ActivityCallback;
 
 import org.json.JSONObject;
 
