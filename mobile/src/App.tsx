@@ -251,6 +251,21 @@ export default function App() {
     } catch (error) { setNotice(message(error)); }
   };
 
+  const movePageObject = async (pageId: string, objectId: string, x: number, y: number) => {
+    if (!current) return;
+    const page = current.manifest.pages.find((item) => item.id === pageId);
+    if (!page) return;
+    const objects = (page.mobile_objects ?? []).map((object) => object.id === objectId ? { ...object, x, y } : object);
+    const nextPage = { ...page, mobile_objects: objects };
+    const manifest = { ...current.manifest, pages: current.manifest.pages.map((item) => item.id === pageId ? nextPage : item) };
+    try {
+      const archive = await composePageOra(manifest.project.id, pageId, manifest.panels, manifest.takes, objects);
+      await savePageAsset(manifest.project.id, pageId, archive);
+      await saveProjectFile(manifest.project.id, page.file, archive);
+      await persist(manifest, current.script);
+    } catch (error) { setNotice(message(error)); }
+  };
+
   const addCastMember = async () => {
     if (!current) return;
     const name = window.prompt('Character name');
@@ -312,6 +327,7 @@ export default function App() {
     onPlacePanel={(panelId, pageId) => void placePanel(panelId, pageId)}
     onAddPageObject={(pageId, kind) => void addPageObject(pageId, kind)}
     onRemovePageObject={(pageId, objectId) => void removePageObject(pageId, objectId)}
+    onMovePageObject={(pageId, objectId, x, y) => void movePageObject(pageId, objectId, x, y)}
     onAddReference={(name) => addReference(name)}
     onAddCollectionEntry={(kind) => void addCollectionEntry(kind)}
     onChapter={(chapter) => void persist({ ...current.manifest, project: { ...current.manifest.project, chapter } }, current.script)}
@@ -390,6 +406,7 @@ interface WorkspaceProps {
   onPlacePanel: (panelId: string, pageId: string) => void;
   onAddPageObject: (pageId: string, kind: PageObject['kind']) => void;
   onRemovePageObject: (pageId: string, objectId: string) => void;
+  onMovePageObject: (pageId: string, objectId: string, x: number, y: number) => void;
   onAddReference: (characterName: string) => void;
   onAddCollectionEntry: (kind: 'location' | 'prop') => void;
   onChapter: (chapter: string) => void;
@@ -454,7 +471,7 @@ function Workspace(props: WorkspaceProps) {
 
     {tab === 'pages' && <section className="workspace-section">
       <div className="section-heading"><div><span className="eyebrow">PAGE LAYOUT</span><h2>Pages</h2></div><IonButton onClick={props.onAddPage}><Layers3 size={17}/>&nbsp; New page</IonButton></div>
-      {saved.manifest.pages.length === 0 ? <Empty title="Your page canvas is ready" detail="Create a blank layered OpenRaster page, then arrange your panels." action={props.onAddPage}/> : <div className="page-grid">{saved.manifest.pages.map((page) => <article className="page-card" key={page.id}><div className="page-canvas-wrap">{page.file.toLowerCase().endsWith('.ora') ? <Suspense fallback={<div className="canvas-loading">Loading page preview…</div>}><PageCanvas projectId={saved.manifest.project.id} page={page} panels={saved.manifest.panels}/></Suspense> : <div className="canvas-unavailable"><strong>{page.file.split('.').pop()?.toUpperCase() ?? 'Page'} page preserved</strong><span>Android can keep this source file, but cannot preview or edit it yet.</span></div>}</div><div className="page-card-caption"><strong>{page.label}</strong><span>{page.file.split('.').pop()?.toUpperCase()} · 1200 × 1800</span></div>
+      {saved.manifest.pages.length === 0 ? <Empty title="Your page canvas is ready" detail="Create a blank layered OpenRaster page, then arrange your panels." action={props.onAddPage}/> : <div className="page-grid">{saved.manifest.pages.map((page) => <article className="page-card" key={page.id}><div className="page-canvas-wrap">{page.file.toLowerCase().endsWith('.ora') ? <Suspense fallback={<div className="canvas-loading">Loading page preview…</div>}><PageCanvas projectId={saved.manifest.project.id} page={page} panels={saved.manifest.panels} onMoveObject={(objectId, x, y) => props.onMovePageObject(page.id, objectId, x, y)}/></Suspense> : <div className="canvas-unavailable"><strong>{page.file.split('.').pop()?.toUpperCase() ?? 'Page'} page preserved</strong><span>Android can keep this source file, but cannot preview or edit it yet.</span></div>}</div><div className="page-card-caption"><strong>{page.label}</strong><span>{page.file.split('.').pop()?.toUpperCase()} · 1200 × 1800</span></div>
         {saved.manifest.panels.filter((panel) => !panel.placement?.page || panel.placement.page !== page.id).length > 0 && <div className="place-panel-list"><strong>Unplaced panels</strong>{saved.manifest.panels.filter((panel) => !panel.placement?.page || panel.placement.page !== page.id).map((panel) => <button key={panel.id} onClick={() => props.onPlacePanel(panel.id, page.id)}>Place panel {panel.label.page}.{panel.label.panel}<span>+</span></button>)}</div>}
       </article>)}</div>}
       <p className="helper-text">Page files use OpenRaster and can be opened in GIMP. Existing XCF page assets are left untouched.</p>
