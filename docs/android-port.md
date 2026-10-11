@@ -99,8 +99,9 @@ Capacitor/JNI bridge. The native SDXL model-load path and initial 512×512 CPU
 text-to-image route now produce a PNG take without changing the active take. These are
 integration proofs only: model loading and rendering have not been checked on target
 hardware, and model-file presence does not establish compatibility. Reroll/refine,
-inpaint, image references, progress/cancellation, accelerator backends, and target
-device quality, heat, and latency checks remain open. The
+inpaint, image references, accelerator backends, and target-device quality, heat, and
+latency checks remain open. Native sampling progress and cancellation are connected
+through the Android bridge. The
 authoring UI is a first implementation scaffold and does not
 yet provide full desktop workflow parity, freeform canvas editing, or validated ORA
 round-trip checks in GIMP. The CI workflow builds debug APKs and signed release APK/AAB

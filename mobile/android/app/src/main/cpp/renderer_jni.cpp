@@ -1,6 +1,7 @@
 #include <jni.h>
 #include "stable-diffusion.h"
 #include <algorithm>
+#include <atomic>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -9,7 +10,17 @@
 namespace {
 std::mutex contextMutex;
 sd_ctx_t *context = nullptr;
+std::atomic<sd_ctx_t *> activeContext{nullptr};
+std::atomic<int> progressStep{0};
+std::atomic<int> progressTotal{0};
+std::atomic<bool> cancelRequested{false};
+std::atomic<bool> generationRunning{false};
 std::string modelVersion;
+
+void onProgress(int step, int steps, float, void *) {
+    progressStep.store(step);
+    progressTotal.store(steps);
+}
 }
 
 extern "C" JNIEXPORT jstring JNICALL
@@ -25,6 +36,7 @@ Java_io_github_imattau_imanganation_RendererPlugin_nativeLoadModel(JNIEnv *env, 
 
     std::lock_guard<std::mutex> lock(contextMutex);
     if (context != nullptr) {
+        activeContext.store(nullptr);
         free_sd_ctx(context);
         context = nullptr;
         modelVersion.clear();
@@ -40,6 +52,7 @@ Java_io_github_imattau_imanganation_RendererPlugin_nativeLoadModel(JNIEnv *env, 
         context = nullptr;
         return env->NewStringUTF("");
     }
+    activeContext.store(context);
     const char *version = sd_get_model_version_name(context);
     modelVersion = version != nullptr ? version : "Unknown model";
     return env->NewStringUTF(modelVersion.c_str());
@@ -48,6 +61,7 @@ Java_io_github_imattau_imanganation_RendererPlugin_nativeLoadModel(JNIEnv *env, 
 extern "C" JNIEXPORT void JNICALL
 Java_io_github_imattau_imanganation_RendererPlugin_nativeUnloadModel(JNIEnv *, jclass) {
     std::lock_guard<std::mutex> lock(contextMutex);
+    activeContext.store(nullptr);
     if (context != nullptr) free_sd_ctx(context);
     context = nullptr;
     modelVersion.clear();
@@ -88,10 +102,17 @@ Java_io_github_imattau_imanganation_RendererPlugin_nativeGenerate(JNIEnv *env, j
 
     sd_image_t *images = nullptr;
     int imageCount = 0;
+    cancelRequested.store(false);
+    generationRunning.store(true);
+    progressStep.store(0);
+    progressTotal.store(0);
+    sd_set_progress_callback(onProgress, nullptr);
     bool success = generate_image(context, &params, &images, &imageCount);
+    sd_set_progress_callback(nullptr, nullptr);
+    generationRunning.store(false);
     env->ReleaseStringUTFChars(prompt, promptText);
     if (negativeText != nullptr) env->ReleaseStringUTFChars(negativePrompt, negativeText);
-    if (!success || images == nullptr || imageCount < 1 || images[0].data == nullptr) {
+    if (!success || cancelRequested.load() || images == nullptr || imageCount < 1 || images[0].data == nullptr) {
         if (images != nullptr) free_sd_images(images, imageCount);
         return nullptr;
     }
@@ -112,4 +133,26 @@ Java_io_github_imattau_imanganation_RendererPlugin_nativeGenerate(JNIEnv *env, j
     if (output != nullptr) env->SetByteArrayRegion(output, 0, byteCount, rgba.data());
     free_sd_images(images, imageCount);
     return output;
+}
+
+extern "C" JNIEXPORT jintArray JNICALL
+Java_io_github_imattau_imanganation_RendererPlugin_nativeProgress(JNIEnv *env, jclass) {
+    jint values[2] = {progressStep.load(), progressTotal.load()};
+    jintArray result = env->NewIntArray(2);
+    if (result != nullptr) env->SetIntArrayRegion(result, 0, 2, values);
+    return result;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_io_github_imattau_imanganation_RendererPlugin_nativeCancelGeneration(JNIEnv *, jclass) {
+    sd_ctx_t *active = activeContext.load();
+    if (active == nullptr || !generationRunning.load()) return JNI_FALSE;
+    cancelRequested.store(true);
+    sd_cancel_generation(active, SD_CANCEL_ALL);
+    return JNI_TRUE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_io_github_imattau_imanganation_RendererPlugin_nativeGenerationWasCancelled(JNIEnv *, jclass) {
+    return cancelRequested.load() ? JNI_TRUE : JNI_FALSE;
 }

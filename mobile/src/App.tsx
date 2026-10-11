@@ -10,7 +10,7 @@ import { createProject, touchProject } from './domain/project';
 import { deleteProject, listProjects, saveProject, type SavedProject } from './domain/repository';
 import { composePageOra, createBlankOra, deleteProjectAssets, getProjectFile, savePageAsset, saveProjectFile } from './domain/pageAssets';
 const PageCanvas = lazy(() => import('./components/PageCanvas').then((module) => ({ default: module.PageCanvas })));
-import { renderer } from './domain/renderer';
+import { renderer, type NativeRenderProgress } from './domain/renderer';
 import { makeVerticalComic, saveVerticalArchive, VERTICAL_PRESETS } from './domain/verticalExport';
 import { exportProjectArchive, importProjectArchive } from './domain/projectArchive';
 import { parseCanonicalScript } from './domain/canonicalScript';
@@ -40,6 +40,7 @@ export default function App() {
   const [engineMessage, setEngineMessage] = useState('Checking local renderer…');
   const [loadedModelVersion, setLoadedModelVersion] = useState('');
   const [modelLoading, setModelLoading] = useState(false);
+  const [renderProgress, setRenderProgress] = useState<NativeRenderProgress | null>(null);
   const [models, setModels] = useState<LocalModel[]>([]);
   const [modelStorageFree, setModelStorageFree] = useState<number | null>(null);
   const [modelProgress, setModelProgress] = useState<ModelImportProgress | null>(null);
@@ -52,6 +53,15 @@ export default function App() {
     setEngineMessage(capabilities.available ? 'Local renderer ready' : capabilities.reason ?? 'Local renderer unavailable');
     setLoadedModelVersion(capabilities.modelVersion ?? '');
   }); }, []);
+  useEffect(() => {
+    let disposed = false;
+    let removeListener: (() => Promise<void>) | undefined;
+    void renderer.listenProgress((progress) => setRenderProgress(progress.state === 'complete' ? null : progress)).then((remove) => {
+      removeListener = remove;
+      if (disposed) void remove();
+    });
+    return () => { disposed = true; if (removeListener) void removeListener(); };
+  }, []);
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
     let disposed = false;
@@ -112,7 +122,7 @@ export default function App() {
       const version = await renderer.loadModel(model.path);
       setLoadedModelVersion(version);
       setEngineMessage(`Loaded ${version} · experimental CPU rendering · Android performance is not validated.`);
-      setNotice(`Loaded model format: ${version}. Generation controls are still being integrated.`);
+      setNotice(`Loaded model format: ${version}. Experimental 512×512 text-to-image is ready.`);
     } catch (error) { setNotice(message(error)); }
     finally { setModelLoading(false); }
   };
@@ -128,6 +138,7 @@ export default function App() {
     if (!panel) { setNotice('Choose a panel before rendering.'); return; }
     if (!prompt.trim()) { setNotice('Enter a prompt before rendering.'); return; }
     setBusy(true);
+    setRenderProgress({ step: 0, totalSteps: 0, state: 'running' });
     try {
       const result = await renderer.generate({ prompt: prompt.trim(), width: 512, height: 512, seed });
       const bytes = new Uint8Array(await (await fetch(result.dataUrl)).arrayBuffer());
@@ -146,8 +157,13 @@ export default function App() {
       };
       await persist(manifest, current.script);
       setNotice('Render saved as a new take. Select it in the panel workspace to make it active.');
-    } catch (error) { setNotice(message(error)); }
-    finally { setBusy(false); }
+    } catch (error) { setNotice(error instanceof Error && error.message.toLowerCase().includes('cancel') ? 'Rendering cancelled.' : message(error)); }
+    finally { setBusy(false); setRenderProgress(null); }
+  };
+
+  const cancelRender = async () => {
+    try { await renderer.cancelCurrentRender(); }
+    catch (error) { setNotice(message(error)); }
   };
 
   const downloadModel = async (model: CatalogModel) => {
@@ -529,7 +545,7 @@ export default function App() {
   };
 
   const workspace = useMemo(() => current && <Workspace
-    saved={current} tab={tab} engineMessage={engineMessage} loadedModelVersion={loadedModelVersion} modelLoading={modelLoading} busy={busy} models={models} modelStorageFree={modelStorageFree} modelProgress={modelProgress} modelDownloadProgress={modelDownloadProgress}
+    saved={current} tab={tab} engineMessage={engineMessage} loadedModelVersion={loadedModelVersion} modelLoading={modelLoading} renderProgress={renderProgress} busy={busy} models={models} modelStorageFree={modelStorageFree} modelProgress={modelProgress} modelDownloadProgress={modelDownloadProgress}
     onTab={setTab} onScript={(script) => void persist(current.manifest, script)}
     onAddPanel={() => void addPanel()} onAddPage={() => void addPage()}
     onMovePage={(pageId, offset) => void movePage(pageId, offset)}
@@ -572,9 +588,10 @@ export default function App() {
     onDeleteModel={(model) => void deleteModel(model)}
     onLoadModel={(model) => void loadModel(model)} onUnloadModel={() => void unloadModel()}
     onGeneratePanel={(panelId, prompt, seed) => generatePanel(panelId, prompt, seed)}
+    onCancelRender={() => void cancelRender()}
     onDownloadModel={(model) => void downloadModel(model)}
     onCancelModelDownload={(key) => void cancelModelDownload(key)}
-  />, [current, tab, engineMessage, loadedModelVersion, modelLoading, models, modelStorageFree, modelProgress, modelDownloadProgress, busy, persist]);
+  />, [current, tab, engineMessage, loadedModelVersion, modelLoading, renderProgress, models, modelStorageFree, modelProgress, modelDownloadProgress, busy, persist]);
 
   return <IonApp>
     <IonPage>
@@ -618,6 +635,7 @@ interface WorkspaceProps {
   engineMessage: string;
   loadedModelVersion: string;
   modelLoading: boolean;
+  renderProgress: NativeRenderProgress | null;
   busy: boolean;
   models: LocalModel[];
   modelStorageFree: number | null;
@@ -628,6 +646,7 @@ interface WorkspaceProps {
   onLoadModel: (model: LocalModel) => void;
   onUnloadModel: () => void;
   onGeneratePanel: (panelId: string, prompt: string, seed?: number) => Promise<void>;
+  onCancelRender: () => void;
   onDownloadModel: (model: CatalogModel) => void;
   onCancelModelDownload: (key: string) => void;
   onTab: (tab: WorkspaceTab) => void;
@@ -762,6 +781,7 @@ function Workspace(props: WorkspaceProps) {
         <IonItem className="field-item"><IonInput label="Expected SHA-256 for imported file (optional)" labelPlacement="stacked" value={expectedModelSha256} placeholder="64 hexadecimal characters" onIonChange={(event) => setExpectedModelSha256(event.detail.value ?? '')}/></IonItem>
         <IonButton fill="outline" size="small" disabled={!!props.modelProgress || (!!expectedModelSha256 && !/^[\da-f]{64}$/i.test(expectedModelSha256))} onClick={() => props.onImportModel(expectedModelSha256.trim() || undefined)}>Import model file</IonButton>
         {props.modelStorageFree !== null && <p className="storage-note">Available device storage: {formatBytes(props.modelStorageFree)}</p>}
+        {props.modelLoading && <div className="model-progress"><strong>Loading model into memory…</strong><span>This can take several minutes on a large checkpoint.</span></div>}
         {props.modelProgress && <div className="model-progress"><strong>{props.modelProgress.name}</strong><span>{props.modelProgress.totalBytes > 0 ? `${formatBytes(props.modelProgress.bytes)} / ${formatBytes(props.modelProgress.totalBytes)}` : formatBytes(props.modelProgress.bytes)}</span><progress value={props.modelProgress.totalBytes > 0 ? props.modelProgress.bytes : undefined} max={props.modelProgress.totalBytes > 0 ? props.modelProgress.totalBytes : undefined}/></div>}
         {props.modelDownloadProgress && <div className="model-progress"><strong>{props.modelDownloadProgress.name}</strong><span>{props.modelDownloadProgress.state === 'verifying' ? 'Verifying size and SHA-256…' : props.modelDownloadProgress.state === 'failed' ? props.modelDownloadProgress.error || 'Download failed; partial file retained for retry.' : props.modelDownloadProgress.state === 'cancelled' ? 'Download paused; partial file retained.' : `${formatBytes(props.modelDownloadProgress.bytes)} / ${formatBytes(props.modelDownloadProgress.totalBytes)}`}</span><progress value={props.modelDownloadProgress.totalBytes > 0 ? props.modelDownloadProgress.bytes : undefined} max={props.modelDownloadProgress.totalBytes > 0 ? props.modelDownloadProgress.totalBytes : undefined}/>{props.modelDownloadProgress.state === 'downloading' && <IonButton fill="clear" size="small" onClick={() => props.onCancelModelDownload(props.modelDownloadProgress!.downloadKey)}>Pause download</IonButton>}</div>}
         {props.loadedModelVersion && <div className="model-progress"><strong>Loaded model: {props.loadedModelVersion}</strong><span>Experimental 512×512 CPU text-to-image is available. Performance and model compatibility are unverified.</span><IonButton fill="outline" size="small" disabled={props.modelLoading || props.busy} onClick={props.onUnloadModel}>Unload model</IonButton></div>}
@@ -771,6 +791,7 @@ function Workspace(props: WorkspaceProps) {
       <IonItem className="field-item"><IonTextarea label="Prompt" labelPlacement="stacked" placeholder="Describe the artwork to create…" rows={4} value={generationPrompt} onIonChange={(event) => setGenerationPrompt(event.detail.value ?? '')}/></IonItem>
       <IonItem className="field-item"><IonInput label="Seed" labelPlacement="stacked" type="number" placeholder="Random" value={generationSeed} onIonChange={(event) => setGenerationSeed(event.detail.value ?? '')}/></IonItem>
       <IonButton expand="block" disabled={props.busy || !props.loadedModelVersion || !generationPanel || !generationPrompt.trim()} onClick={() => void props.onGeneratePanel(generationPanel, generationPrompt, generationSeed.trim() ? Number(generationSeed) : undefined)}><WandSparkles size={17}/>&nbsp; {props.busy ? 'Rendering on device…' : 'Render 512 × 512 panel'}</IonButton>
+      {props.renderProgress && <div className="model-progress"><strong>{props.renderProgress.totalSteps > 0 ? `Sampling · ${props.renderProgress.step} / ${props.renderProgress.totalSteps}` : 'Preparing renderer…'}</strong><progress value={props.renderProgress.totalSteps > 0 ? props.renderProgress.step : undefined} max={props.renderProgress.totalSteps > 0 ? props.renderProgress.totalSteps : undefined}/><IonButton fill="clear" color="danger" size="small" onClick={props.onCancelRender}>Cancel render</IonButton></div>}
       <p className="helper-text">Experimental CPU rendering only. Use short prompts and allow several minutes. Each result is stored as a separate take and does not replace the current active take.</p>
     </section>}
 

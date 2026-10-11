@@ -9,6 +9,9 @@ import java.io.ByteArrayOutputStream;
 import android.util.Base64;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
@@ -23,6 +26,7 @@ public class RendererPlugin extends Plugin {
     private static boolean runtimeLoaded;
     private static String runtimeVersion = "";
     private final ExecutorService modelExecutor = Executors.newSingleThreadExecutor();
+    private final ScheduledExecutorService progressExecutor = Executors.newSingleThreadScheduledExecutor();
 
     static {
         try {
@@ -39,6 +43,9 @@ public class RendererPlugin extends Plugin {
     private static native void nativeUnloadModel();
     private static native String nativeLoadedModelVersion();
     private static native byte[] nativeGenerate(String prompt, String negativePrompt, int width, int height, long seed, int steps, float guidance);
+    private static native int[] nativeProgress();
+    private static native boolean nativeCancelGeneration();
+    private static native boolean nativeGenerationWasCancelled();
 
     @PluginMethod
     public void capabilities(PluginCall call) {
@@ -137,11 +144,24 @@ public class RendererPlugin extends Plugin {
             return;
         }
         call.setKeepAlive(true);
+        ScheduledFuture<?> progressPoller = progressExecutor.scheduleAtFixedRate(() -> {
+            int[] progress = nativeProgress();
+            JSObject update = new JSObject();
+            update.put("step", progress != null && progress.length > 0 ? progress[0] : 0);
+            update.put("totalSteps", progress != null && progress.length > 1 ? progress[1] : 0);
+            update.put("state", "running");
+            notifyListeners("renderProgress", update);
+        }, 0, 400, TimeUnit.MILLISECONDS);
         modelExecutor.execute(() -> {
             Bitmap bitmap = null;
             try {
                 byte[] rgba = nativeGenerate(prompt, negativePrompt, width, height, seed, steps, guidance);
-                if (rgba == null || rgba.length != width * height * 4) throw new Exception("Renderer returned no image.");
+                if (rgba == null) {
+                    boolean cancelled = nativeGenerationWasCancelled();
+                    call.reject(cancelled ? "Image generation cancelled." : "The native renderer returned no image.", cancelled ? "CANCELLED" : "RENDER_FAILED");
+                    return;
+                }
+                if (rgba == null || rgba.length != width * height * 4) throw new Exception("Renderer returned an invalid image.");
                 int[] pixels = new int[width * height];
                 for (int i = 0; i < pixels.length; i++) {
                     int offset = i * 4;
@@ -162,8 +182,20 @@ public class RendererPlugin extends Plugin {
             } catch (Exception error) {
                 call.reject("Image generation failed: " + error.getMessage(), error);
             } finally {
+                progressPoller.cancel(false);
+                JSObject complete = new JSObject();
+                complete.put("step", steps);
+                complete.put("totalSteps", steps);
+                complete.put("state", "complete");
+                notifyListeners("renderProgress", complete);
                 if (bitmap != null) bitmap.recycle();
             }
         });
+    }
+
+    @PluginMethod
+    public void cancelGeneration(PluginCall call) {
+        if (nativeCancelGeneration()) call.resolve();
+        else call.reject("No render is currently running.");
     }
 }
