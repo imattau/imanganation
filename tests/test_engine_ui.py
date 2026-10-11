@@ -100,3 +100,15 @@ def test_the_adult_content_flag_is_stored_and_sent_without_choosing_an_engine():
     assert project["render"]["style"] == style  # the engine dialog keeps the flag
     engine_ui.set_project_nsfw(manifest, False)
     assert "nsfw" not in project["render"].get("style", {})
+
+
+def test_a_new_project_can_start_with_a_look_and_no_engine_choice():
+    project = {"id": "prj_abc123", "title": "t", "reading_order": "rtl",
+               "created": "2026-10-07T00:00:00Z", "modified": "2026-10-07T00:00:00Z"}
+    manifest = {"project": project}
+    engine_ui.set_project_style(manifest, {"preset": "watercolor", "text": " autumn  palette "})
+    style = {"preset": "watercolor", "text": "autumn palette"}
+    assert project["render"] == {"style": style}  # no engine chosen
+    assert engine_ui.job_options(manifest) == {"style": style}
+    engine_ui.set_project_style(manifest, {"preset": "default", "text": ""})
+    assert "render" not in project

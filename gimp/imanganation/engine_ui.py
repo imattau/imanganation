@@ -60,12 +60,12 @@ def set_project_render(manifest: dict[str, Any], engine: str, face_pass: bool,
     manifest["project"]["render"] = render
 
 
-def set_project_nsfw(manifest: dict[str, Any], nsfw: bool) -> None:
-    """Record the adult-content flag on a new project without choosing an engine: its
-    renders keep the engine's own settings, but send the flag with the style."""
-    style = {**project_style(manifest), **({"nsfw": True} if nsfw else {})}
-    if not nsfw:
-        style.pop("nsfw", None)
+def set_project_style(manifest: dict[str, Any], style: dict[str, Any]) -> None:
+    """Record a look on a new project without choosing an engine: its renders keep the
+    engine's own settings, but send the look (and the adult-content flag) with them."""
+    style = {"preset": style.get("preset") or "default",
+             "text": " ".join(style.get("text", "").split()),
+             **({"nsfw": True} if style.get("nsfw") else {})}
     render = manifest["project"].setdefault("render", {})
     if is_default_style(style):
         render.pop("style", None)
@@ -73,6 +73,13 @@ def set_project_nsfw(manifest: dict[str, Any], nsfw: bool) -> None:
             del manifest["project"]["render"]
     else:
         render["style"] = style
+
+
+def set_project_nsfw(manifest: dict[str, Any], nsfw: bool) -> None:
+    """Record only the adult-content flag, keeping the look the project has."""
+    style = project_style(manifest)
+    style.pop("nsfw", None)
+    set_project_style(manifest, {**style, **({"nsfw": True} if nsfw else {})})
 
 
 def style_options(manifest: dict[str, Any] | None) -> dict[str, Any]:

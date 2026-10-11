@@ -4632,6 +4632,40 @@ def _dock_cancel_job(procedure, config, data):
     return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
 
 
+def _style_picker():
+    """The project's look for a new-project dialog: a preset from the engine
+    (GET /styles) and the author's own words. -> (widget, get) where get() is
+    ``{"preset", "text"}``. With the engine off, only the default look is offered."""
+    try:
+        presets = _http("GET", f"{ENGINE_URL}/styles", timeout=3)
+    except EngineError:
+        presets = [{"id": "default", "label": "Clean modern anime"}]
+    combo = Gtk.ComboBoxText(hexpand=True)
+    for entry in presets:
+        combo.append(entry["id"], entry.get("label") or entry["id"])
+    combo.set_active_id("default")
+    words = Gtk.Entry(hexpand=True, max_length=300,
+                      placeholder_text="Optional, your own words: e.g. thick brush "
+                                       "outlines, autumn palette")
+    note = Gtk.Label(xalign=0.0, wrap=True, max_width_chars=60)
+    note.get_style_context().add_class("dim-label")
+
+    def update_note(*_):
+        chosen = next((p for p in presets if p["id"] == combo.get_active_id()), None)
+        note.set_text(engine_ui.style_note(chosen) if engine_ui is not None else "")
+
+    combo.connect("changed", update_note)
+    update_note()
+    grid = Gtk.Grid(column_spacing=12, row_spacing=6)
+    grid.attach(Gtk.Label(label="Style", xalign=0.0), 0, 0, 1, 1)
+    grid.attach(combo, 1, 0, 1, 1)
+    grid.attach(Gtk.Label(label="Also", xalign=0.0), 0, 1, 1, 1)
+    grid.attach(words, 1, 1, 1, 1)
+    grid.attach(note, 1, 2, 1, 1)
+    return grid, lambda: {"preset": combo.get_active_id() or "default",
+                          "text": " ".join(words.get_text().split())}
+
+
 def _choose_new_project():
     """New Project from Script dialog -> keyword arguments for
     _create_project_from_script, or None if cancelled."""
@@ -4681,6 +4715,9 @@ def _choose_new_project():
     grid.attach(hint, 1, 4, 1, 1)
     grid.attach(design, 1, 5, 1, 1)
     grid.attach(nsfw, 1, 6, 1, 1)
+    style_grid, get_style = _style_picker()
+    grid.attach(Gtk.Label(label="Look", xalign=0.0), 0, 7, 1, 1)
+    grid.attach(style_grid, 1, 7, 1, 1)
     dialog.get_content_area().add(grid)
     dialog.show_all()
     try:
@@ -4689,7 +4726,8 @@ def _choose_new_project():
                        "title": title.get_text().strip(),
                        "parent": Path(folder.get_filename() or Path.home()),
                        "page_size": (width.get_value_as_int(), height.get_value_as_int()),
-                       "design": design.get_active(), "nsfw": nsfw.get_active()}
+                       "design": design.get_active(),
+                       "style": {**get_style(), **({"nsfw": True} if nsfw.get_active() else {})}}
             problem = (None if options["script_path"].is_file() else "Choose a script file.")
             problem = problem or (None if options["title"] else "Give the project a title.")
             target = options["parent"] / f"{_slug(options['title'])}.imanga"
@@ -4817,6 +4855,7 @@ def _choose_manual_project():
     project_preset.connect("changed", apply_project_preset)
     apply_project_preset(project_preset)
 
+    style_grid, get_style = _style_picker()
     hint = Gtk.Label(
         label="A new .imanga folder will be created inside the chosen parent. "
               "Starter panels appear in Script and Context so you can fill in the "
@@ -4831,7 +4870,7 @@ def _choose_manual_project():
             ("Default color", color_mode), ("Panels to start", panel_count),
             ("", create_page), ("Page format", page_format),
             ("First page size", size_row), ("Resolution", resolution_row),
-            ("", nsfw))
+            ("Look", style_grid), ("", nsfw))
     for row, (label, widget) in enumerate(rows):
         if label:
             grid.attach(Gtk.Label(label=label, xalign=0.0), 0, row, 1, 1)
@@ -4854,7 +4893,7 @@ def _choose_manual_project():
                 "page_size": (width.get_value_as_int(), height.get_value_as_int()),
                 "resolution": resolution.get_value_as_int(),
                 "page_format": page_format.get_active_id() or "custom",
-                "nsfw": nsfw.get_active(),
+                "style": {**get_style(), **({"nsfw": True} if nsfw.get_active() else {})},
             }
             parent = options["parent"]
             problem = None if options["title"] else "Enter a project title."
@@ -4876,7 +4915,7 @@ def _choose_manual_project():
 
 def _create_manual_project(title, parent, chapter, reading_order,
                            default_color_mode, starter_panels, create_page, page_size,
-                           resolution, page_format, preset, nsfw=False):
+                           resolution, page_format, preset, style=None):
     """Write a schema-shaped manual project, optionally with a ready-to-draw page."""
     if new_project_document is None:
         raise RuntimeError("The plug-in install is missing project_store.py")
@@ -4888,8 +4927,8 @@ def _create_manual_project(title, parent, chapter, reading_order,
             default_color_mode=default_color_mode, chapter=chapter,
             starter_panels=starter_panels, page_size=page_size,
             resolution=resolution, page_format=page_format, preset=preset)
-        if nsfw and engine_ui is not None:
-            engine_ui.set_project_nsfw(manifest, True)
+        if style and engine_ui is not None:
+            engine_ui.set_project_style(manifest, style)
         save_project(root, manifest)
         first_page = (_create_project_page(root, manifest, *page_size,
                                            resolution=resolution)
@@ -5064,7 +5103,7 @@ def _reload_script(root, choose=False):
     return True
 
 
-def _create_project_from_script(script_path, title, parent, page_size, design, nsfw=False):
+def _create_project_from_script(script_path, title, parent, page_size, design, style=None):
     """Build a project from a script: panels, cast (with the script's descriptions),
     locations and one page document per script page; open it, then queue a design
     sheet for each described character."""
@@ -5088,8 +5127,8 @@ def _create_project_from_script(script_path, title, parent, page_size, design, n
         original_path.write_text(text, encoding="utf-8")
         manifest["script"].update({"original_file": original_relative,
             "original_format": script_format, "original_sha256": original_digest})
-        if nsfw and engine_ui is not None:
-            engine_ui.set_project_nsfw(manifest, True)
+        if style and engine_ui is not None:
+            engine_ui.set_project_style(manifest, style)
         save_project(root, manifest)
         for number in dict.fromkeys(p["label"]["page"] for p in manifest["panels"]):
             _create_project_page(root, manifest, *page_size, number=number or None,

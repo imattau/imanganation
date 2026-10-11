@@ -1,7 +1,7 @@
 # Project styles
 
 A project can have an overall look: a **preset** and, optionally, **your own words**. Set
-it in GIMP under *Imanganation → Render Engine… → Style*. It is saved in `project.json`
+it when creating a project (New Project and New Project from Script both have a Look row), or later under *Imanganation → Render Engine… → Style*. It is saved in `project.json`
 as `project.render.style` (`{"preset": "retro_90s", "text": "autumn palette"}`) and goes
 with every render, inpaint, and character and location design.
 
