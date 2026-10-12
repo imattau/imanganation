@@ -157,3 +157,39 @@ def test_page_availability_ranks_by_script_order_and_project_reading_order():
     assert available["recommendation"] == "Three: tall opener"
     first = available["layouts"][0]
     assert first["regions"][0][0] < 0.5  # ltr: the opener stays on the left
+
+
+def _angled():
+    return [layout for layout in LAYOUTS if layout.get("polygons")]
+
+
+def test_angled_layouts_cover_every_panel_count_with_real_diagonals():
+    angled = _angled()
+    assert {len(layout["regions"]) for layout in angled} == {2, 3, 4, 5, 6}
+    for layout in angled:
+        assert len(layout["polygons"]) == len(layout["regions"])
+        # at least one edge is neither horizontal nor vertical
+        assert any(abs(x1 - x2) > 0.01 and abs(y1 - y2) > 0.01
+                   for polygon in layout["polygons"]
+                   for (x1, y1), (x2, y2) in zip(polygon, polygon[1:] + polygon[:1]))
+        assert layout["overlays"] == ()
+
+
+def test_angled_panels_stay_on_page_and_never_overlap():
+    for layout in _angled():
+        for order in ("ltr", "rtl"):
+            shapes = for_reading_order(layout, order)["polygons"]
+            for polygon in shapes:
+                assert len(polygon) >= 3
+                assert all(0 <= x <= 1 and 0 <= y <= 1 for x, y in polygon)
+            pixels = layout_preview_rgb(for_reading_order(layout, order),
+                                        FRAME_STYLES[2], 120, 160)
+            assert len(pixels) == 120 * 160 * 3
+
+
+def test_angled_frame_rings_follow_the_polygon():
+    layout = _angled()[0]
+    polygon = layout["polygons"][0]
+    (outer, inner), = frame_rings(layout["regions"][0], 400, 600, FRAME_STYLES[1], 0, polygon)
+    assert len(outer) == len(polygon) == len(inner)
+    assert outer != inner

@@ -2461,9 +2461,11 @@ def _draw_page_layout(image, layout, frame_style, replace_layers=(), page_id=Non
             image, f"Imanganation Layout Ink - {layout['name']} - {frame_style['name']}",
             width, height, Gimp.ImageType.RGBA_IMAGE, 100, Gimp.LayerMode.NORMAL)
 
-    def draw_ring(target, region, style, index, color):
+    polygons = layout.get("polygons") or ()
+
+    def draw_ring(target, region, style, index, color, polygon=None):
         Gimp.context_set_foreground(Gegl.Color.new(color))
-        for outer, inner in frame_rings(region, width, height, style, index):
+        for outer, inner in frame_rings(region, width, height, style, index, polygon):
             image.select_polygon(Gimp.ChannelOps.REPLACE,
                                  [v for point in outer for v in point])
             image.select_polygon(Gimp.ChannelOps.SUBTRACT,
@@ -2491,10 +2493,11 @@ def _draw_page_layout(image, layout, frame_style, replace_layers=(), page_id=Non
             borderless = set(layout.get("borderless", ()))
             guide_style = {"weight": 0.0035, "slant": 0.0, "double": False}
             for index, region in enumerate(layout["regions"]):
+                polygon = polygons[index] if index < len(polygons) else None
                 if index in borderless:
-                    draw_ring(layer, region, guide_style, index, "cyan")
+                    draw_ring(layer, region, guide_style, index, "cyan", polygon)
                 else:
-                    draw_ring(layer, region, frame_style, index, "black")
+                    draw_ring(layer, region, frame_style, index, "black", polygon)
 
             records = []
             for index in layout.get("overlays", ()):
@@ -2515,7 +2518,9 @@ def _draw_page_layout(image, layout, frame_style, replace_layers=(), page_id=Non
                 for record in records:
                     if not record["borderless"]:
                         draw_ring(ink, record["region"], frame_style,
-                                  record["index"], "black")
+                                  record["index"], "black",
+                                  polygons[record["index"]]
+                                  if record["index"] < len(polygons) else None)
 
         layer.attach_parasite(Gimp.Parasite.new(
             LAYOUT_PARASITE, Gimp.PARASITE_PERSISTENT,

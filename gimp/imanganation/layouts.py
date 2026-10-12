@@ -127,6 +127,112 @@ _five_insets = (
     (_M, 0.57, (_W - _G) / 2, 0.39),
     (_M + (_W + _G) / 2, 0.57, (_W - _G) / 2, 0.39),
 )
+def _clip(polygon, a, b, c):
+    """Keep the part of a convex polygon where ``a*x + b*y + c >= 0``."""
+    kept = []
+    for index, (x1, y1) in enumerate(polygon):
+        x2, y2 = polygon[(index + 1) % len(polygon)]
+        d1, d2 = a * x1 + b * y1 + c, a * x2 + b * y2 + c
+        if d1 >= 0:
+            kept.append((x1, y1))
+        if (d1 >= 0) != (d2 >= 0):
+            t = d1 / (d1 - d2)
+            kept.append((x1 + t * (x2 - x1), y1 + t * (y2 - y1)))
+    return tuple(kept)
+
+
+def _cut(polygon, start, end, gap=_G):
+    """Split a convex polygon along the line start->end, leaving ``gap`` between the
+    halves. Returns (before, after): above / left of the line, then below / right."""
+    (x1, y1), (x2, y2) = start, end
+    length = math.hypot(x2 - x1, y2 - y1)
+    nx, ny = (y1 - y2) / length, (x2 - x1) / length
+    # the "after" side is below a mostly-horizontal line, right of a mostly-vertical one
+    if (ny < 0) if abs(ny) >= abs(nx) else (nx < 0):
+        nx, ny = -nx, -ny
+    base = nx * x1 + ny * y1
+    before = _clip(polygon, -nx, -ny, base - gap / 2)
+    after = _clip(polygon, nx, ny, -base - gap / 2)
+    return before, after
+
+
+def _angled(name, polygons, description=None):
+    """A layout of convex, non-rectangular panels; each region is the polygon's box."""
+    polygons = tuple(tuple((float(x), float(y)) for x, y in polygon)
+                     for polygon in polygons)
+    regions = tuple((min(x for x, _ in polygon), min(y for _, y in polygon),
+                     max(x for x, _ in polygon) - min(x for x, _ in polygon),
+                     max(y for _, y in polygon) - min(y for _, y in polygon))
+                    for polygon in polygons)
+    preset = _preset(name, regions, description=description
+                     or "Angled panels split by diagonal gutters.")
+    # Boxes of neighbouring diagonal panels overlap although the panels never do.
+    preset["overlays"] = ()
+    preset["polygons"] = polygons
+    return preset
+
+
+_PAGE = ((_M, _M), (_M + _W, _M), (_M + _W, _M + _W), (_M, _M + _W))
+
+
+def _h(y_left, y_right):
+    return (_M, y_left), (_M + _W, y_right)
+
+
+def _v(x_top, x_bottom):
+    return (x_top, _M), (x_bottom, _M + _W)
+
+
+def _angled_layouts():
+    layouts = []
+    layouts.append(_angled("Two: diagonal stack", _cut(_PAGE, *_h(0.60, 0.40))))
+    layouts.append(_angled("Two: diagonal side by side", _cut(_PAGE, *_v(0.62, 0.38))))
+
+    a, rest = _cut(_PAGE, *_h(0.40, 0.30))
+    layouts.append(_angled("Three: slanted stack", (a, *_cut(rest, *_h(0.70, 0.62)))))
+    a, rest = _cut(_PAGE, *_h(0.50, 0.36))
+    layouts.append(_angled("Three: diagonal opener", (a, *_cut(rest, *_v(0.58, 0.44)))))
+    a, rest = _cut(_PAGE, *_v(0.46, 0.34))
+    layouts.append(_angled("Three: angled tall opener", (a, *_cut(rest, *_h(0.52, 0.64)))))
+
+    top, bottom = _cut(_PAGE, *_h(0.52, 0.44))
+    layouts.append(_angled("Four: angled grid", (*_cut(top, *_v(0.56, 0.44)),
+                                                 *_cut(bottom, *_v(0.46, 0.58)))))
+    a, rest = _cut(_PAGE, *_h(0.32, 0.24))
+    b, rest = _cut(rest, *_h(0.56, 0.62))
+    layouts.append(_angled("Four: slanted rows", (a, b, *_cut(rest, *_h(0.80, 0.70)))))
+    top, bottom = _cut(_PAGE, *_h(0.46, 0.38))
+    b, rest = _cut(bottom, *_v(0.36, 0.28))
+    layouts.append(_angled("Four: diagonal opener + trio",
+                           (top, b, *_cut(rest, *_v(0.72, 0.64)))))
+
+    a, rest = _cut(_PAGE, *_h(0.34, 0.26))
+    top, bottom = _cut(rest, *_h(0.66, 0.56))
+    layouts.append(_angled("Five: angled rhythm", (a, *_cut(top, *_v(0.54, 0.40)),
+                                                   *_cut(bottom, *_v(0.44, 0.60)))))
+    a, rest = _cut(_PAGE, *_v(0.42, 0.30))
+    b, rest = _cut(rest, *_h(0.28, 0.20))
+    c, rest = _cut(rest, *_h(0.56, 0.62))
+    layouts.append(_angled("Five: tall opener, slanted stack",
+                           (a, b, c, *_cut(rest, *_v(0.66, 0.78)))))
+
+    rows = []
+    rest = _PAGE
+    for left, right in ((0.30, 0.24), (0.58, 0.64)):
+        row, rest = _cut(rest, *_h(left, right))
+        rows.append(row)
+    rows.append(rest)
+    layouts.append(_angled("Six: slanted grid", tuple(
+        cell for row, cut in zip(rows, ((0.56, 0.44), (0.42, 0.58), (0.58, 0.46)))
+        for cell in _cut(row, *_v(*cut)))))
+    a, rest = _cut(_PAGE, *_h(0.24, 0.18))
+    b, rest = _cut(rest, *_h(0.46, 0.52))
+    c, rest = _cut(rest, *_h(0.70, 0.62))
+    layouts.append(_angled("Six: angled beats", (
+        a, *_cut(b, *_v(0.54, 0.40)), *_cut(c, *_v(0.40, 0.56)), rest)))
+    return layouts
+
+
 _scroll_three = _paced_column((0.18, 0.34, 0.22), (0.06, 0.08))
 _scroll_four = _paced_column((0.15, 0.27, 0.16, 0.15), (0.05, 0.08, 0.06))
 _scroll_five = _paced_column((0.11, 0.19, 0.12, 0.22, 0.12),
@@ -162,6 +268,7 @@ LAYOUTS = (
     _preset("Six: wide beats", _six_wide_beats),
     _preset("Vertical scroll: six paced beats", _scroll_six, borderless=range(6),
             description="Full-width panels with variable pauses; best on a tall canvas."),
+    *_angled_layouts(),
 )
 
 # Covers are typography/artwork composition guides rather than script-panel grids.
@@ -243,8 +350,13 @@ def for_reading_order(layout: dict, reading_order: str = "rtl") -> dict:
     first region (the opener) sits on the right, where a manga page starts."""
     if reading_order != "rtl":
         return layout
-    return {**layout, "regions": tuple((1 - x - w, y, w, h)
-                                       for x, y, w, h in layout["regions"])}
+    mirrored = {**layout, "regions": tuple((1 - x - w, y, w, h)
+                                           for x, y, w, h in layout["regions"])}
+    if layout.get("polygons"):
+        # reversing the points keeps the winding, so mirrored polygons stay consistent
+        mirrored["polygons"] = tuple(tuple((1 - x, y) for x, y in reversed(polygon))
+                                     for polygon in layout["polygons"])
+    return mirrored
 
 
 def page_layout_availability(manifest: dict, page_id: str,
@@ -339,10 +451,16 @@ def _implied_shape(panel):
     return None, 0.0
 
 
-def _area_ranks(regions):
+def _polygon_area(polygon):
+    return abs(sum(x1 * y2 - x2 * y1 for (x1, y1), (x2, y2)
+                   in zip(polygon, polygon[1:] + polygon[:1]))) / 2
+
+
+def _area_ranks(regions, polygons=None):
     """Each region's size rank, 0 (smallest) .. 1 (largest). Equal areas share a rank,
     so in a grid every frame is 0.5 and no panel is favoured by list position."""
-    areas = [width * height for _, _, width, height in regions]
+    areas = ([_polygon_area(polygon) for polygon in polygons] if polygons
+             else [width * height for _, _, width, height in regions])
     if len(areas) < 2:
         return [NEUTRAL_SIZE] * len(areas)
     ranks = []
@@ -372,20 +490,64 @@ def rank_layouts(layouts, panels, page_aspect=1.0):
         shape = [weight * abs(math.log(width / height * page_aspect / wanted))
                  for (_, _, width, height), (wanted, weight) in zip(regions, shapes, strict=False)
                  if wanted]
-        rank = _area_ranks(regions)
+        rank = _area_ranks(regions, layout.get("polygons"))
         # Only hinted panels count: a panel with no hint is happy in any frame.
         size = [abs(rank[i] - target)
                 for i, (target, hinted) in enumerate(sizes[:len(regions)]) if hinted]
+        # Angled frames are always offered, but a plain frame wins a near tie.
         return ((sum(shape) / len(shape) if shape else 0.0)
-                + (sum(size) / len(size) if len(regions) > 1 and size else 0.0))
+                + (sum(size) / len(size) if len(regions) > 1 and size else 0.0)
+                + (0.1 if layout.get("polygons") else 0.0))
 
     ranked = sorted(layouts, key=score)
     informed = any(ratios) or any(hinted for _, hinted in sizes)
     return ranked, (ranked[0]["name"] if informed and ranked else None)
 
 
-def frame_rings(region, page_width: int, page_height: int, style: dict, index: int = 0):
-    """Return outer/inner polygon pairs for the visible border rings of one frame."""
+def _inset_polygon(points, distance):
+    """Move every edge of a convex polygon ``distance`` inwards (mitred corners)."""
+    winding = sum(x1 * y2 - x2 * y1 for (x1, y1), (x2, y2)
+                  in zip(points, points[1:] + points[:1]))
+    side = 1 if winding > 0 else -1
+    lines = []
+    for (x1, y1), (x2, y2) in zip(points, points[1:] + points[:1]):
+        length = math.hypot(x2 - x1, y2 - y1) or 1.0
+        dx, dy = (x2 - x1) / length, (y2 - y1) / length
+        lines.append(((x1 - dy * side * distance, y1 + dx * side * distance), (dx, dy)))
+    inset = []
+    for index, ((px, py), (dx, dy)) in enumerate(lines):
+        (qx, qy), (ex, ey) = lines[index - 1]
+        cross = ex * dy - ey * dx
+        if abs(cross) < 1e-9:
+            inset.append((px, py))
+            continue
+        t = ((px - qx) * dy - (py - qy) * dx) / cross
+        inset.append((qx + t * ex, qy + t * ey))
+    return tuple(inset)
+
+
+def _polygon_frame_rings(polygon, page_width, page_height, style):
+    points = tuple((x * page_width, y * page_height) for x, y in polygon)
+    xs, ys = [x for x, _ in points], [y for _, y in points]
+    line = max(2, min(32, round(min(page_width, page_height) * style["weight"])))
+    border = max(1, min(line, (max(xs) - min(xs) - 2) / 2, (max(ys) - min(ys) - 2) / 2))
+    rings = [(points, _inset_polygon(points, border))]
+    if style["double"]:
+        gap = max(border * 2, min(max(xs) - min(xs), max(ys) - min(ys)) * 0.018)
+        inner_border = max(1, border // 2)
+        if min(max(xs) - min(xs), max(ys) - min(ys)) > gap * 2 + inner_border * 2:
+            rings.append((_inset_polygon(points, gap),
+                          _inset_polygon(points, gap + inner_border)))
+    return tuple(rings)
+
+
+def frame_rings(region, page_width: int, page_height: int, style: dict, index: int = 0,
+                polygon=None):
+    """Return outer/inner polygon pairs for the visible border rings of one frame.
+    An angled ``polygon`` (normalised points) replaces the rectangle ``region``; it is
+    already slanted, so the slanted style adds nothing to it."""
+    if polygon:
+        return _polygon_frame_rings(polygon, page_width, page_height, style)
     nx, ny, nw, nh = region
     x, y = round(nx * page_width), round(ny * page_height)
     width, height = round(nw * page_width), round(nh * page_height)
@@ -419,8 +581,8 @@ def layout_preview_rgb(layout: dict, style: dict, width: int, height: int) -> by
     pixels = bytearray((250, 250, 250) * (width * height))
 
     def fill_polygon(points, color):
-        minimum_y = max(0, min(y for _, y in points))
-        maximum_y = min(height, max(y for _, y in points))
+        minimum_y = max(0, int(min(y for _, y in points)))
+        maximum_y = min(height, int(max(y for _, y in points)) + 1)
         for py in range(minimum_y, maximum_y):
             scan_y = py + 0.5
             intersections = []
@@ -455,14 +617,16 @@ def layout_preview_rgb(layout: dict, style: dict, width: int, height: int) -> by
         return bytes(pixels)
 
     borderless = set(layout.get("borderless", ()))
+    polygons = layout.get("polygons") or (None,) * len(layout["regions"])
     guide_style = {"weight": 0.0035, "slant": 0.0, "double": False}
-    for index, region in enumerate(layout["regions"]):
+    for index, (region, polygon) in enumerate(zip(layout["regions"], polygons)):
         if index in borderless:
-            for outer, inner in frame_rings(region, width, height, guide_style, index):
+            for outer, inner in frame_rings(region, width, height, guide_style, index,
+                                            polygon):
                 fill_polygon(outer, (65, 160, 185))
                 fill_polygon(inner, (255, 255, 255))
             continue
-        for outer, inner in frame_rings(region, width, height, style, index):
+        for outer, inner in frame_rings(region, width, height, style, index, polygon):
             fill_polygon(outer, (20, 20, 20))
             fill_polygon(inner, (255, 255, 255))
     return bytes(pixels)

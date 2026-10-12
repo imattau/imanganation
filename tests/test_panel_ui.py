@@ -190,7 +190,7 @@ def test_page_context_offers_layout_generation_when_script_count_matches():
     inspector = build_docks(
         manifest, selected_page, generate_layout_action="proc-layout")["inspector"]
 
-    assert "Layout status\t2 script panels · 10 preview choices" in inspector
+    assert "Layout status\t2 script panels · 20 preview choices" in inspector
     assert "!proc-layout\tChoose layout…" in inspector
 
 
