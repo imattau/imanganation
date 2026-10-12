@@ -13,6 +13,7 @@ The result is a persistent ``characters.json`` the renderer can consult.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from manganation.characters.generator import DesignResult, generate_design
 from manganation.characters.registry import CharacterRegistry
@@ -133,6 +134,7 @@ def design_character(
     style: dict | None = None,
     engine: str | None = None,
     variant: dict | None = None,
+    source_image: Path | None = None,
 ) -> CharacterDesign:
     """Create (or update) one character from the author's description, derive its
     traits with the LLM, release the LLM's VRAM, then render and lock its design sheet.
@@ -154,6 +156,10 @@ def design_character(
     ``prop`` (a name from the project's props, with a picture) is drawn into the image as
     a second reference (Qwen-Image only); the base design never takes one, so the object
     doesn't follow the character into panels that don't have it.
+
+    ``source_image`` (a photo, a sketch) seeds a base design or a redesign: it goes in as a
+    reference for this one render, so the new design is drawn from it, and is not stored
+    with the character. Needs an engine that sees images (SDXL, Qwen-Image 2.1).
     """
     from manganation.script.llm import OllamaClient
 
@@ -194,6 +200,11 @@ def design_character(
         number += 1
         version_id = f"design-{number:02d}"
     engine = engine or settings.defaults.renderer.engine
+    if source_image is not None:
+        if variant is not None:
+            raise ValueError("a source image seeds the first design, not another reference")
+        if engine == "z_anime":
+            raise ValueError("Z-Anime can't take an image; pick SDXL or Qwen-Image 2.1")
     prompt = None
     prop_obj = prop_path = None
     if variant is not None and variant.get("prop"):
@@ -205,7 +216,7 @@ def design_character(
             raise ValueError("a prop reference needs the Qwen-Image 2.1 engine")
         if prop_obj is None or prop_path is None:
             raise ValueError(f"the prop {variant['prop']!r} has no reference picture")
-    if style or variant is not None:
+    if style or variant is not None or source_image is not None:
         from manganation.characters.generator import design_engine_prompt
         from manganation.render.panel import load_style
 
@@ -214,7 +225,8 @@ def design_character(
             character, engine, extra=look["tags"] if engine == "sdxl" else None,
             style=look["prose"],
             variation=" ".join(variant["description"].split()) if variant else "",
-            has_reference=variant is not None and engine == "qwen_image_21",
+            has_reference=(variant is not None or source_image is not None)
+            and engine == "qwen_image_21",
             prop=(prop_obj.name, prop_obj.description) if prop_obj and prop_path else None)
         if look["extra_negative"]:  # what the look must not bring (seinen: no monsters)
             prompt.negative = f"{prompt.negative}, {look['extra_negative']}"
@@ -222,7 +234,7 @@ def design_character(
                              settings=settings, client=comfy, prompt=prompt, engine=engine,
                              kind=VersionKind.VARIANT if variant else VersionKind.BASE,
                              reference=(registry.reference_path(character.name)
-                                        if variant else None),
+                                        if variant else source_image),
                              prop_reference=prop_path)
     return CharacterDesign(
         name=character.name, created=created,

@@ -5271,14 +5271,24 @@ def _look_options(manifest):
     return engine_ui.style_options(manifest) if engine_ui is not None and manifest else {}
 
 
-def _queue_character_design(root, manifest, character, redesign=False, describe=True):
+def _queue_character_design(root, manifest, character, redesign=False, describe=True,
+                            photo=None):
     """Ask the engine to design one character from its notes; the docks refresh when
     the sheet is ready. ``describe`` False keeps their traits (a redesign in a new
-    look, not a new description)."""
+    look, not a new description). ``photo``: a picture to draw the design from; a copy
+    goes in the project's tmp/ for the engine and is not kept as a reference."""
     body = {**_engine_project(root, manifest), "name": character["name"],
             "description": character.get("notes", "") if describe else "",
             "aliases": character.get("aliases", []), "redesign": redesign,
             **_style_options(manifest)}
+    if photo:
+        import shutil
+
+        copy = root / "tmp" / (f"gimp_photo_{time.strftime('%Y%m%d-%H%M%S')}"
+                               f"{Path(photo).suffix.lower() or '.png'}")
+        copy.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(photo, copy)
+        body["source_image"] = str(copy)
     job = _http("POST", f"{ENGINE_URL}/characters", body)
     _track_design(job, "character", character["name"], _DESIGN_JOBS)
 
@@ -5404,7 +5414,8 @@ def _design_another_reference():
 
 
 def _choose_new_character():
-    """New Character dialog -> (name, aliases, description, design now) or None."""
+    """New Character dialog -> (name, aliases, description, design now, photo path or
+    "") or None."""
     dialog = Gtk.Dialog(title="New Character", flags=Gtk.DialogFlags.MODAL)
     dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
                        "Create", Gtk.ResponseType.OK)
@@ -5423,13 +5434,28 @@ def _choose_new_character():
                      xalign=0.0, wrap=True, max_width_chars=48)
     hint.get_style_context().add_class("dim-label")
     design = Gtk.CheckButton(label="Design the character now (uses the engine)", active=True)
+    photo = Gtk.FileChooserButton(title="Choose a photo", action=Gtk.FileChooserAction.OPEN,
+                                  hexpand=True)
+    images = Gtk.FileFilter()
+    images.set_name("Images")
+    for pattern in ("*.png", "*.jpg", "*.jpeg", "*.webp"):
+        images.add_pattern(pattern)
+        images.add_pattern(pattern.upper())
+    photo.add_filter(images)
+    photo_hint = Gtk.Label(label="Optional: draw the design from this picture. It is only "
+                                 "used for the design, not kept. The description still "
+                                 "sets the traits.", xalign=0.0, wrap=True, max_width_chars=48)
+    photo_hint.get_style_context().add_class("dim-label")
     for row, (label, widget) in enumerate((("Name", name), ("Aliases", aliases),
                                            ("Description", scrolled))):
         caption = Gtk.Label(label=label, xalign=0.0, valign=Gtk.Align.START)
         grid.attach(caption, 0, row, 1, 1)
         grid.attach(widget, 1, row, 1, 1)
     grid.attach(hint, 1, 3, 1, 1)
-    grid.attach(design, 1, 4, 1, 1)
+    grid.attach(Gtk.Label(label="Photo", xalign=0.0), 0, 4, 1, 1)
+    grid.attach(photo, 1, 4, 1, 1)
+    grid.attach(photo_hint, 1, 5, 1, 1)
+    grid.attach(design, 1, 6, 1, 1)
     dialog.get_content_area().add(grid)
     dialog.show_all()
     try:
@@ -5438,10 +5464,15 @@ def _choose_new_character():
             text = buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), False)
             chosen = (" ".join(name.get_text().split()),
                       [a.strip() for a in aliases.get_text().split(",") if a.strip()],
-                      " ".join(text.split()), design.get_active())
-            if chosen[0]:
+                      " ".join(text.split()), design.get_active(),
+                      photo.get_filename() or "")
+            if not chosen[0]:
+                Gimp.message("Give the character a name.")
+            elif chosen[4] and not (chosen[2] and chosen[3]):
+                Gimp.message("A photo needs a description and Design now: it guides the "
+                             "look, the description sets the traits.")
+            else:
                 return chosen
-            Gimp.message("Give the character a name.")
         return None
     finally:
         dialog.destroy()
@@ -5468,7 +5499,7 @@ def _dock_character_menu(procedure, config, data):
         chosen = _choose_new_character()
         if chosen is None:
             return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
-        name, aliases, description, design = chosen
+        name, aliases, description, design, photo = chosen
         manifest = load_project(root)
         taken = {n.casefold() for c in manifest["cast"]
                  for n in (c["name"], *c.get("aliases", []))}
@@ -5482,7 +5513,7 @@ def _dock_character_menu(procedure, config, data):
         _DOCK_CONTEXT["selected_id"] = character_row_id(name)
         if design and description:
             try:
-                _queue_character_design(root, manifest, character)
+                _queue_character_design(root, manifest, character, photo=photo or None)
             except EngineError as exc:
                 Gimp.message(f"{name} was added but not designed: {_engine_status(exc)}. "
                              "Use Design character when the engine runs.")

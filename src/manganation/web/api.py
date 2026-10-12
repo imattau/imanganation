@@ -234,11 +234,18 @@ class CharacterRequest(BaseModel):
     variant_prop: str | None = Field(default=None, max_length=80)
     style: StyleOptions | None = None  # the project's look: the design is drawn in it
     engine: Literal["sdxl", "qwen_image_21", "z_anime"] | None = None  # the project's render engine
+    # A photo or sketch to draw the first design from. Used for that one render only;
+    # it is not kept as a version of the character.
+    source_image: str | None = None
 
     @model_validator(mode="after")
     def _one_form(self):
         if (self.project is None) == (self.project_dir is None):
             raise ValueError("send either project (container id) or project_dir")
+        if self.source_image and self.variant_id is not None:
+            raise ValueError("a source image seeds the first design, not another reference")
+        if self.source_image and self.engine == "z_anime":
+            raise ValueError("Z-Anime can't take an image; pick SDXL or Qwen-Image 2.1")
         if self.variant_id is not None and not self.variant_description.strip():
             raise ValueError("describe what is different about this reference")
         if self.variant_prop and self.variant_id is None:
@@ -491,6 +498,15 @@ def create_app(
             except IdentityError as exc:
                 raise HTTPException(400, str(exc)) from exc
         return CharacterRegistry.from_path(resolve_project(project_dir, root))
+
+    def _project_image(project_dir: str | None, raw: str) -> Path:
+        project = resolve_project(project_dir, root)
+        image = Path(raw).resolve()
+        if project not in image.parents:
+            raise HTTPException(400, f"image must be inside the project ({project})")
+        if not image.is_file():
+            raise HTTPException(404, f"image not found: {image}")
+        return image
 
     setup_state: dict = {}
 
@@ -1297,6 +1313,10 @@ def create_app(
         if req.variant_id is None and not req.description.strip() and (
                 existing is None or not existing.appearance.appearance_tags()):
             raise HTTPException(422, f"describe {req.name} first")
+        source = None
+        if req.source_image:
+            source = _engine_file(req.source_image, "source_image") if req.project else \
+                _project_image(req.project_dir, req.source_image)
         design = design_character or default_design
         return submit_job("character", req.model_dump(), lambda: design(
             reg, req.name, req.description, aliases=req.aliases, seed=req.seed,
@@ -1306,7 +1326,8 @@ def create_app(
                             **({"prop": req.variant_prop} if req.variant_prop else {})}}
                if req.variant_id else {}),
             **({"style": req.style.model_dump()} if req.style else {}),
-            **({"engine": req.engine} if req.engine else {})))
+            **({"engine": req.engine} if req.engine else {}),
+            **({"source_image": source} if source else {})))
 
     @app.get("/jobs/{job_id}")
     def status(job_id: str) -> Job:

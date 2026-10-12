@@ -267,3 +267,21 @@ def test_api_prop_goes_only_with_another_reference(tmp_path):
     body = {"project_dir": str(tmp_path), "name": "Rin", "description": "girl",
             "variant_prop": "red umbrella"}
     assert client.post("/characters", json=body).status_code == 422
+
+
+def test_source_image_seeds_the_first_design_and_is_not_kept(tmp_path):
+    photo = tmp_path / "photo.png"
+    Image.new("RGB", (8, 8)).save(photo)
+    reg = CharacterRegistry.from_path(tmp_path)
+    llm = FakeLLM()
+    comfy = FakeComfy(llm)
+    result = design_character(reg, "Rin", "girl", seed=7, llm=llm, comfy=comfy,
+                              source_image=photo)
+    assert comfy.uploads == [str(photo)]  # drawn from it ...
+    assert comfy.graphs[0]["8"]["inputs"]["image"] == "uploaded.png"
+    rin = CharacterRegistry.from_path(tmp_path).get("Rin")
+    assert [v.id for v in rin.versions] == [result.version_id]  # ... but not registered
+    assert not (tmp_path / "characters/rin/photo.png").exists()
+    with pytest.raises(ValueError, match="first design"):
+        design_character(reg, "Rin", "", llm=llm, comfy=comfy, source_image=photo,
+                         variant={"id": "x", "description": "y"})
