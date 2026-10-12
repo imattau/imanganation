@@ -8089,6 +8089,18 @@ def _register_project_docks(plugin):
             (DOCK_GALLERY, "Gallery", "tiles", contents["gallery"], "", "", "",
              DOCK_GALLERY_ITEM),
         ]
+    if root is None:
+        # A "properties" dock (Context, Panel) skips an update whose text matches what it
+        # holds, and registering stores the text without redrawing, so the update after
+        # it would be skipped and the closed project's rows would stay. Redraw first;
+        # at startup nothing is registered yet, which is fine.
+        for identifier, _title, _presentation, content, selected, *_rest in rows:
+            try:
+                _dock_pdb_call("gimp-extension-panel-update", {
+                    "identifier": identifier, "content": content,
+                    "selected-item": selected})
+            except RuntimeError:
+                break
     for identifier, title, presentation, content, selected, action_label, action, item in rows:
         _dock_pdb_call("gimp-extension-panel-register", {
             "identifier": identifier,
