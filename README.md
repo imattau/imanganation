@@ -8,9 +8,9 @@ See [`PLAN.md`](./PLAN.md) for the architecture and roadmap.
 
 ## Demo
 
-<video src="https://github.com/imattau/imanganation/raw/main/docs/demo/imanganation-demo.mp4" controls muted width="100%"></video>
+[![Imanganation demo](./docs/demo/imanganation-demo.gif)](./docs/demo/imanganation-demo.mp4)
 
-[Watch the demo](./docs/demo/imanganation-demo.mp4): a loaded project in GIMP, its script and
+Click the preview for the [full-quality video](./docs/demo/imanganation-demo.mp4): a loaded project in GIMP, its script and
 cast, finished pages, then one click on **Generate panel** to render a new take locally.
 
 ## What it does
