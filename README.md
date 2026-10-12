@@ -6,6 +6,13 @@ step in GIMP), with multi-character support, running **locally** via ComfyUI.
 
 See [`PLAN.md`](./PLAN.md) for the architecture and roadmap.
 
+## Demo
+
+https://github.com/imattau/imanganation/raw/main/docs/demo/imanganation-demo.mp4
+
+[Watch the demo](./docs/demo/imanganation-demo.mp4): a loaded project in GIMP, its script and
+cast, finished pages, then one click on **Generate panel** to render a new take locally.
+
 ## What it does
 
 - **Scripts in, panels out.** Write a script in the canonical page/panel format *or* free
