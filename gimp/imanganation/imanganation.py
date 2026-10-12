@@ -7624,7 +7624,8 @@ def _check_model_updates_at_start(deadline):
             if offers and not _SETUP_DIALOG:
                 _offer_model_updates(offers)
         except Exception as exc:  # never break the workspace over this
-            Gimp.message(f"Could not check for model updates: {exc}")
+            if "Not Found" not in str(exc):  # an older engine has no /updates: say nothing
+                Gimp.message(f"Could not check for model updates: {exc}")
         return False
 
     GLib.timeout_add_seconds(5, poll)
