@@ -116,7 +116,7 @@ missing, checkpoint first so you can render as soon as it lands:
 - **Model updates:** `models.yaml` pins every file, so models never change under a
   project. Once a day the engine asks Hugging Face whether an installed file has a newer
   version (by its hash; nothing is downloaded to find out). At start-up GIMP offers the
-  small supporting files (taggers, detectors); checkpoints and adapters change how renders
+  small supporting files (taggers, detectors); checkpoints, adapters and the optional engines (Qwen-Image, Z-Anime, face pass) change how renders
   look, so they are only listed under **Set Up Models… → Updates**, with an Update button.
   An accepted update is downloaded, checked against its SHA-256, swapped in, and pinned in
   `model-pins.yaml` in the data folder (the bundled `models.yaml` is never edited; a pin

@@ -13,8 +13,10 @@ moved on), so it can never pin an older file than the one the app ships.
   workspace offers them at start-up.
 - **manual** files (checkpoints, adapters, ControlNets) change how renders look, so they
   are only listed in Set Up Models, with an Update button.
-- Only files already on disk are checked, only files with an LFS object (a hash we can
-  compare), and trial models never.
+- The optional engines' files (``trials``: Qwen-Image, Z-Anime, the face pass) are
+  "manual" too, as ``trials.<group>.<part>``.
+- Only files already on disk are checked, and only files with an LFS object (a hash we
+  can compare).
 - At most one check a day; ``IMANGANATION_NO_UPDATE_CHECK`` or ``enabled: false`` in
   ``model-updates.json`` turns it off.
 """
@@ -101,10 +103,17 @@ def write_pin(update: Update, path: Path | None = None) -> None:
 
 def entries(models: dict):
     """(dotted path, section, entry) for every model entry that has a download."""
+    def has_download(entry):
+        return isinstance(entry, dict) and (entry.get("download") or {}).get("url")
+
     for section in (*AUTO_SECTIONS, *MANUAL_SECTIONS):
         for key, entry in (models.get(section) or {}).items():
-            if isinstance(entry, dict) and (entry.get("download") or {}).get("url"):
+            if has_download(entry):
                 yield f"{section}.{key}", section, entry
+    for group, parts in (models.get("trials") or {}).items():
+        for part, entry in (parts or {}).items():
+            if has_download(entry):
+                yield f"trials.{group}.{part}", "trials", entry
 
 
 def apply_pins(models: dict, pins: dict) -> dict:

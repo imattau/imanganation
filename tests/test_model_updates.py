@@ -62,7 +62,13 @@ def root(tmp_path):
 def test_a_changed_lfs_hash_is_an_update_with_a_pinned_url(root):
     client = _server({"o/tag": {"wd.onnx": NEW}, "o/ck": {"dir/ck.safetensors": NEW}})
     found = {u.path: u for u in mu.check(_models(), root, client=client)}
-    assert set(found) == {"taggers.wd", "checkpoints.primary"}  # not trials
+    assert set(found) == {"taggers.wd", "checkpoints.primary"}
+    trials = _server({"o/t": {"t": NEW}})
+    (root / "t").write_bytes(b"x")
+    models = _models()
+    models["trials"]["t"]["model"].update(id="t", subdir="")
+    (only,) = mu.check(models, root, client=trials)
+    assert (only.path, only.kind) == ("trials.t.model", "manual")
     wd = found["taggers.wd"]
     assert (wd.kind, wd.sha256, wd.base_sha256, wd.size, wd.old_size, wd.subdir) == (
         "auto", NEW, OLD, 99, 10, "taggers")
