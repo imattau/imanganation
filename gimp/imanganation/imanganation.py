@@ -4631,14 +4631,15 @@ _DESIGN_FAILURES = {}  # (kind, key) -> why the last design failed, until the ne
 DOCK_CANCEL_JOB = "plug-in-imanganation-dock-cancel-job"
 
 
-def _track_design(job, kind, key, jobs, name=None):
+def _track_design(job, kind, key, jobs, name=None, cleanup=None):
     """Follow an engine design job (a character, location or prop) so the docks can show
-    its queue position and time, offer Cancel, and say why it failed."""
+    its queue position and time, offer Cancel, and say why it failed. ``cleanup``: a
+    scratch file to delete once the job has ended, however it ended."""
     jobs[job["id"]] = key
     _DESIGN_FAILURES.pop((kind, key), None)
     _JOB_INFO[job["id"]] = {"kind": kind, "key": key, "name": name or key, "jobs": jobs,
                             "queued_at": time.monotonic(), "status": job["status"],
-                            "ahead": job.get("queue_position")}
+                            "ahead": job.get("queue_position"), "cleanup": cleanup}
     if len(_JOB_INFO) == 1:
         GLib.timeout_add_seconds(2, _exclusive(_poll_designs))
 
@@ -4700,6 +4701,8 @@ def _poll_designs():
             continue
         del _JOB_INFO[job_id]
         info["jobs"].pop(job_id, None)
+        if info.get("cleanup"):
+            Path(info["cleanup"]).unlink(missing_ok=True)
         finished = True
         if job["status"] == "error":
             _DESIGN_FAILURES[(info["kind"], info["key"])] = job.get("error") or "failed"
@@ -5281,6 +5284,7 @@ def _queue_character_design(root, manifest, character, redesign=False, describe=
             "description": character.get("notes", "") if describe else "",
             "aliases": character.get("aliases", []), "redesign": redesign,
             **_style_options(manifest)}
+    copy = None
     if photo:
         import shutil
 
@@ -5289,8 +5293,13 @@ def _queue_character_design(root, manifest, character, redesign=False, describe=
         copy.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(photo, copy)
         body["source_image"] = str(copy)
-    job = _http("POST", f"{ENGINE_URL}/characters", body)
-    _track_design(job, "character", character["name"], _DESIGN_JOBS)
+    try:
+        job = _http("POST", f"{ENGINE_URL}/characters", body)
+    except Exception:
+        if copy:
+            copy.unlink(missing_ok=True)  # never queued: nothing will clean it up
+        raise
+    _track_design(job, "character", character["name"], _DESIGN_JOBS, cleanup=copy)
 
 
 def _design_selected_character():
