@@ -113,6 +113,16 @@ missing, checkpoint first so you can render as soon as it lands:
 - Setup also points `config/comfyui_extra_model_paths.yaml` at your models folder.
 - In GIMP the same thing is **Imanganation → Set Up Models…**, which opens by itself on
   first start when the checkpoint is missing.
+- **Model updates:** `models.yaml` pins every file, so models never change under a
+  project. Once a day the engine asks Hugging Face whether an installed file has a newer
+  version (by its hash; nothing is downloaded to find out). At start-up GIMP offers the
+  small supporting files (taggers, detectors); checkpoints and adapters change how renders
+  look, so they are only listed under **Set Up Models… → Updates**, with an Update button.
+  An accepted update is downloaded, checked against its SHA-256, swapped in, and pinned in
+  `model-pins.yaml` in the data folder (the bundled `models.yaml` is never edited; a pin
+  yields when the app ships a different one). Switch the check off under Set Up Models,
+  or with `IMANGANATION_NO_UPDATE_CHECK=1`. Files without a Hugging Face LFS hash (the
+  upscaler, tag lists) aren't checked.
 
 ## GIMP (the interface)
 

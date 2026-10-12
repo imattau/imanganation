@@ -147,3 +147,42 @@ def test_use_files_i_have_stays_available_while_an_optional_engine_is_missing():
     assert setup_ui.actions(ready, engines)["link_enabled"] is True
     engines["engines"][1].update(installed=True, missing=[])
     assert setup_ui.actions(ready, engines)["link_enabled"] is False
+
+
+def _view(**changes):
+    updates = [
+        {"path": "taggers.wd", "display": "WD tagger", "file": "wd.onnx", "kind": "auto",
+         "size": 176_000_000, "old_size": 170_000_000, "sha256": "a" * 64,
+         "license": "Apache-2.0"},
+        {"path": "checkpoints.primary", "display": "NoobAI-XL", "file": "n.safetensors",
+         "kind": "manual", "size": 7_100_000_000, "old_size": 7_100_000_000,
+         "sha256": "b" * 64, "license": "FAIPL"},
+    ]
+    return {"enabled": True, "checking": False, "checked_at": 1, "error": "",
+            "updates": updates, "offered": ["taggers.wd", "checkpoints.primary"], **changes}
+
+
+def test_only_supporting_files_are_offered_at_startup():
+    offers = setup_ui.auto_offers(_view())
+    assert [u["path"] for u in offers] == ["taggers.wd"]  # the checkpoint is manual
+    assert setup_ui.auto_offers(_view(offered=["checkpoints.primary"])) == []  # skipped
+    assert setup_ui.auto_offers(_view(enabled=False)) == []
+    assert setup_ui.auto_offers(_view(checking=True)) == []
+    assert setup_ui.auto_offers(None) == []
+
+
+def test_offer_text_names_the_files_size_and_licences():
+    title, body = setup_ui.offer_text(setup_ui.auto_offers(_view()))
+    assert "newer version" in title
+    assert "WD tagger · 176 MB (was 170 MB)" in body and "Apache-2.0" in body
+    assert "SHA-256" in body
+
+
+def test_update_headline_and_labels():
+    assert setup_ui.updates_headline(_view()) == "2 model updates available."
+    assert setup_ui.updates_headline(_view(updates=[])) == "All models are up to date."
+    assert "off" in setup_ui.updates_headline(_view(enabled=False))
+    assert "failed" in setup_ui.updates_headline(_view(error="no network"))
+    assert setup_ui.updates_headline(_view(checking=True)).startswith("Checking")
+    assert setup_ui.update_label({"display": "X", "size": 5_000_000, "old_size": 5_000_000}
+                                 ) == "X · 5 MB"

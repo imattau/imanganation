@@ -259,6 +259,18 @@ class SetupDownloadRequest(BaseModel):
     roles: list[str] | None = Field(default=None, description="Only these (default: all missing)")
 
 
+class UpdatesCheckRequest(BaseModel):
+    force: bool = Field(default=False, description="Check now, not only when a day has passed")
+
+
+class UpdatesPathsRequest(BaseModel):
+    paths: list[str] = Field(min_length=1, description="models.yaml entries, e.g. taggers.wd_swinv2_v3")
+
+
+class UpdatesEnabledRequest(BaseModel):
+    enabled: bool
+
+
 class SetupLinkRequest(BaseModel):
     folders: list[str] = Field(min_length=1, description="Folders of models you already have")
 
@@ -533,14 +545,106 @@ def create_app(
                 comfy_paths=comfy_paths_file(),
                 renderer=lambda log: installer_for(load_settings(), log=log),
                 # the engine's own ComfyUI starts as soon as its renderer is installed
-                on_renderer_ready=comfy_process.start if comfy_process else None)
+                on_renderer_ready=comfy_process.start if comfy_process else None,
+                on_updated=_pin_update)
         return setup_state["runner"]
+
+    def _pin_update(update) -> None:
+        """A model update landed: pin it for this user and drop it from the findings."""
+        from manganation import model_updates
+
+        model_updates.write_pin(update)
+        state = model_updates.read_state()
+        state["updates"] = [u for u in state["updates"] if u["path"] != update.path]
+        model_updates.write_state(state)
 
     @app.get("/setup")
     def setup_report() -> dict:
         """Model files the settings need and their state, free disk space, and the
         running setup task (a download or a link search) with its progress."""
         return setup().report()
+
+    updates_checking = threading.Event()
+
+    def updates_view() -> dict:
+        from manganation import model_updates
+
+        state = model_updates.read_state()
+        return {"enabled": model_updates.enabled(state), "checking": updates_checking.is_set(),
+                "checked_at": state["checked_at"], "error": state["error"],
+                "updates": state["updates"],
+                "offered": [u["path"] for u in model_updates.offered(state)]}
+
+    @app.get("/updates")
+    def updates_report() -> dict:
+        """Newer versions of installed models found by the last check: ``updates`` (each
+        ``auto`` or ``manual``), ``offered`` (those not skipped), and whether a check is
+        running now."""
+        return updates_view()
+
+    @app.post("/updates/check")
+    def updates_check(req: UpdatesCheckRequest) -> dict:
+        """Look for newer models in the background (poll GET /updates). Without ``force``
+        only when a day has passed since the last check and checking is switched on."""
+        from manganation import model_updates
+        from manganation.config import load_models, load_settings, models_root
+
+        state = model_updates.read_state()
+        if ((req.force and model_updates.enabled(state)) or model_updates.due(state)) \
+                and not updates_checking.is_set():
+            updates_checking.set()
+
+            def work():
+                try:
+                    model_updates.run_check(load_models(), models_root(load_settings()))
+                except Exception:  # noqa: BLE001 - a failed check must never hurt the engine
+                    pass
+                finally:
+                    updates_checking.clear()
+
+            threading.Thread(target=work, daemon=True, name="model-update-check").start()
+        return updates_view()
+
+    @app.post("/updates/apply", status_code=202)
+    def updates_apply(req: UpdatesPathsRequest) -> dict:
+        """Download and pin the newer versions of these models. Poll GET /setup. 409 while
+        another setup task runs; 404 for a path with no known update."""
+        from manganation import model_updates
+        from manganation.models_setup import SetupError
+
+        found = {u["path"]: u for u in model_updates.read_state()["updates"]}
+        missing = [p for p in req.paths if p not in found]
+        if missing:
+            raise HTTPException(404, f"no update known for: {', '.join(missing)}")
+        runner = setup()
+        if runner.busy():
+            raise HTTPException(409, "a setup task is already running")
+        try:
+            return runner.start_update([model_updates.Update(**found[p]) for p in req.paths])
+        except SetupError as exc:
+            raise HTTPException(507 if "disk space" in str(exc) else 409, str(exc)) from exc
+
+    @app.post("/updates/skip")
+    def updates_skip(req: UpdatesPathsRequest) -> dict:
+        """Stop offering these versions (a newer one is offered again)."""
+        from manganation import model_updates
+
+        state = model_updates.read_state()
+        for update in state["updates"]:
+            if update["path"] in req.paths:
+                state["skipped"][update["path"]] = update["sha256"]
+        model_updates.write_state(state)
+        return updates_view()
+
+    @app.post("/updates/enabled")
+    def updates_enabled(req: UpdatesEnabledRequest) -> dict:
+        """Switch the daily check on or off."""
+        from manganation import model_updates
+
+        state = model_updates.read_state()
+        state["enabled"] = req.enabled
+        model_updates.write_state(state)
+        return updates_view()
 
     mask_models: dict = {}  # loaded ONNX sessions, keyed by model path
     mask_models_lock = threading.Lock()

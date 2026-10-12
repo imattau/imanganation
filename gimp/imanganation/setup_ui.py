@@ -91,6 +91,9 @@ def details(report: dict[str, Any]) -> list[str]:
         if renderer:
             lines.append(f"The renderer is installed and starts on your GPU: {renderer[0][10:-1]}.")
         lines.append("Download finished; every file was checked against its SHA-256.")
+    elif state == "done" and task.get("kind") == "update":
+        lines.append("Updated; every file was checked against its SHA-256. Restart GIMP "
+                     "so the renderer loads the new version.")
     elif state == "cancelled":
         lines.append("Download paused. Download again to resume where it stopped.")
     lines += [f"Error: {error}" for error in task.get("errors", [])]
@@ -167,3 +170,54 @@ def optional_engines(engines_report: dict[str, Any] | None) -> list[dict[str, An
 
 def optional_size(row: dict[str, Any]) -> str:
     return "" if row.get("installed") else human_size(row.get("missing_bytes") or 0)
+
+
+# --- model updates (engine GET /updates) -------------------------------------------------
+
+
+def update_label(update: dict[str, Any]) -> str:
+    """"WD tagger · 176 MB (was 170 MB)" for one found update."""
+    was = update.get("old_size")
+    old = f" (was {human_size(was)})" if was and was != update.get("size") else ""
+    return f"{update.get('display') or update.get('file')} · {human_size(update.get('size'))}{old}"
+
+
+def auto_offers(view: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """The updates to offer at start-up: small supporting files (kind "auto") the user
+    hasn't skipped. Checkpoints and adapters change how renders look, so they are only
+    listed in Set Up Models."""
+    if not view or not view.get("enabled") or view.get("checking"):
+        return []
+    offered = set(view.get("offered", ()))
+    return [u for u in view.get("updates", []) if u.get("kind") == "auto"
+            and u.get("path") in offered]
+
+
+def offer_text(updates: list[dict[str, Any]]) -> tuple[str, str]:
+    """(title, body) of the start-up offer."""
+    many = len(updates) != 1
+    title = (f"Newer versions of {len(updates)} models are available" if many
+             else "A newer version of a model is available")
+    total = sum(u.get("size") or 0 for u in updates)
+    lines = [update_label(u) for u in updates]
+    licences = sorted({u["license"] for u in updates if u.get("license")})
+    body = "\n".join(lines) + f"\n\n{human_size(total)} to download."
+    if licences:
+        body += " Downloading means accepting each file's licence: " + "; ".join(licences) + "."
+    return title, body + " Each file is checked against its SHA-256 before it replaces the old one."
+
+
+def updates_headline(view: dict[str, Any] | None) -> str:
+    if view is None:
+        return ""
+    if not view.get("enabled"):
+        return "Checking for model updates is off."
+    if view.get("checking"):
+        return "Checking for newer models…"
+    if view.get("error"):
+        return f"Update check failed: {view['error']}"
+    if not view.get("checked_at"):
+        return "Models haven't been checked for updates yet."
+    count = len(view.get("updates", []))
+    return (f"{count} model update{'s' if count != 1 else ''} available." if count
+            else "All models are up to date.")

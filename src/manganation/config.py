@@ -238,7 +238,11 @@ def load_settings() -> Settings:
 
 
 def load_models() -> dict:
-    return yaml.safe_load((CONFIG_DIR / "models.yaml").read_text()) or {}
+    """models.yaml with this user's pinned updates applied (model_updates.apply_pins)."""
+    models = yaml.safe_load((CONFIG_DIR / "models.yaml").read_text()) or {}
+    from manganation import model_updates
+
+    return model_updates.apply_pins(models, model_updates.read_pins())
 
 
 def in_flatpak() -> bool:

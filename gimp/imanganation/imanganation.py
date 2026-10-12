@@ -7330,6 +7330,19 @@ def _show_setup_dialog():
     optional = Gtk.Grid(column_spacing=12, row_spacing=4)
     box.pack_start(optional, False, False, 0)
 
+    box.pack_start(Gtk.Separator(margin_top=6), False, False, 0)
+    updates_headline = Gtk.Label(xalign=0.0, wrap=True, max_width_chars=72)
+    updates_headline.get_style_context().add_class("heading")
+    box.pack_start(updates_headline, False, False, 0)
+    updates_grid = Gtk.Grid(column_spacing=12, row_spacing=4)
+    box.pack_start(updates_grid, False, False, 0)
+    updates_bar = Gtk.Box(spacing=12)
+    check_button = Gtk.Button(label="Check Now")
+    daily = Gtk.CheckButton(label="Check for model updates once a day")
+    updates_bar.pack_start(check_button, False, False, 0)
+    updates_bar.pack_start(daily, False, False, 0)
+    box.pack_start(updates_bar, False, False, 0)
+
     link_button = dialog.add_button("Use Files I Have…", 1)
     cancel_button = dialog.add_button("Pause Download", 2)
     download_button = dialog.add_button("Download", 3)
@@ -7337,7 +7350,9 @@ def _show_setup_dialog():
     widgets = {"dialog": dialog, "grid": grid, "headline": headline, "bar": bar,
                "details": details, "licence": licence, "link": link_button,
                "cancel": cancel_button, "download": download_button, "rows": None,
-               "optional": optional, "optional_rows": None}
+               "optional": optional, "optional_rows": None,
+               "updates_headline": updates_headline, "updates_grid": updates_grid,
+               "updates_rows": None, "daily": daily, "daily_handler": None}
 
     def post(path, body):
         try:
@@ -7366,11 +7381,13 @@ def _show_setup_dialog():
         engines_report = _engines_report()
         _update_setup_dialog(widgets, _setup_report(), engines_report)
         _update_optional_engines(widgets, engines_report, post)
+        _update_model_updates(widgets, _updates_view(), post)
         return True
 
     def on_destroy(_widget):
         _SETUP_DIALOG.clear()
 
+    check_button.connect("clicked", lambda *_: post("/updates/check", {"force": True}))
     dialog.connect("response", on_response)
     dialog.connect("destroy", on_destroy)
     _SETUP_DIALOG.update(widgets)
@@ -7437,6 +7454,50 @@ def _update_setup_dialog(widgets, report, engines_report=None):
         widgets["bar"].hide()
     widgets["details"].set_text("\n".join(setup_ui.details(report)))
     widgets["licence"].set_text(setup_ui.licence_note(report))
+
+
+def _updates_view():
+    """GET /updates, or None while the engine isn't answering."""
+    try:
+        return _http("GET", f"{ENGINE_URL}/updates", timeout=3)
+    except EngineError:
+        return None
+
+
+def _update_model_updates(widgets, view, post):
+    """The Updates section of Set Up Models: one row per newer model, with Update."""
+    widgets["updates_headline"].set_text(setup_ui.updates_headline(view))
+    daily = widgets["daily"]
+    if widgets["daily_handler"] is None:
+        widgets["daily_handler"] = daily.connect(
+            "toggled", lambda button: post("/updates/enabled",
+                                           {"enabled": button.get_active()}))
+    if view is not None and daily.get_active() != bool(view.get("enabled")):
+        daily.handler_block(widgets["daily_handler"])
+        daily.set_active(bool(view.get("enabled")))
+        daily.handler_unblock(widgets["daily_handler"])
+    grid = widgets["updates_grid"]
+    updates = (view or {}).get("updates", [])
+    key = [(u["path"], u["sha256"]) for u in updates]
+    if widgets["updates_rows"] != key:
+        for child in grid.get_children():
+            grid.remove(child)
+        for index, update in enumerate(updates):
+            name = Gtk.Label(label=setup_ui.update_label(update), xalign=0.0, hexpand=True,
+                             wrap=True, max_width_chars=44)
+            kind = Gtk.Label(label="" if update.get("kind") == "auto" else
+                             "changes how renders look", xalign=0.0)
+            kind.get_style_context().add_class("dim-label")
+            licence = (Gtk.LinkButton.new_with_label(update["license_url"], "Licence")
+                       if update.get("license_url") else Gtk.Label(label=""))
+            licence.set_tooltip_text(update.get("license") or "")
+            button = Gtk.Button(label="Update")
+            button.connect("clicked", lambda *_, p=update["path"]:
+                           post("/updates/apply", {"paths": [p]}))
+            for column, widget in enumerate((name, kind, licence, button)):
+                grid.attach(widget, column, index, 1, 1)
+        grid.show_all()
+        widgets["updates_rows"] = key
 
 
 def _engines_report():
@@ -7510,6 +7571,63 @@ def _prompt_setup_when_engine_up(deadline):
         return False
 
     GLib.timeout_add_seconds(3, poll)
+
+
+def _offer_model_updates(updates):
+    """The start-up offer: Update / Not now / Skip these versions. Update downloads in
+    the engine and opens Set Up Models to show it. Never raises."""
+    title, body = setup_ui.offer_text(updates)
+    dialog = Gtk.MessageDialog(message_type=Gtk.MessageType.QUESTION, text=title)
+    dialog.format_secondary_text(body)
+    dialog.add_buttons("Skip These Versions", 1, "Not Now", Gtk.ResponseType.CLOSE,
+                       "Update", Gtk.ResponseType.ACCEPT)
+    dialog.set_default_response(Gtk.ResponseType.ACCEPT)
+    try:
+        response = dialog.run()
+    finally:
+        dialog.destroy()
+    paths = [u["path"] for u in updates]
+    try:
+        if response == Gtk.ResponseType.ACCEPT:
+            _http("POST", f"{ENGINE_URL}/updates/apply", {"paths": paths}, timeout=10)
+            _show_setup_dialog()
+        elif response == 1:
+            _http("POST", f"{ENGINE_URL}/updates/skip", {"paths": paths}, timeout=10)
+    except EngineError as exc:
+        Gimp.message(f"Model update: {exc}")
+
+
+def _check_model_updates_at_start(deadline):
+    """At startup, once the engine answers and the models are in place: look for newer
+    models (the engine asks at most once a day) and offer the small supporting files.
+    Gives up quietly after ``deadline``."""
+    started = {"asked": False}
+
+    def poll():
+        if time.monotonic() > deadline:
+            return False
+        report = _setup_report()
+        if report is None:
+            return True  # the engine is still starting
+        if setup_ui is None or not report.get("ready") or setup_ui.running(report):
+            return False  # nothing to update yet, or a download is already running
+        try:
+            if not started["asked"]:
+                started["asked"] = True
+                view = _http("POST", f"{ENGINE_URL}/updates/check", {"force": False},
+                             timeout=5)
+            else:
+                view = _updates_view()
+            if view is None or view.get("checking"):
+                return True
+            offers = setup_ui.auto_offers(view)
+            if offers and not _SETUP_DIALOG:
+                _offer_model_updates(offers)
+        except Exception as exc:  # never break the workspace over this
+            Gimp.message(f"Could not check for model updates: {exc}")
+        return False
+
+    GLib.timeout_add_seconds(5, poll)
 
 
 def _new_project_run(procedure, config, data):
@@ -8232,6 +8350,7 @@ def _autostart_run(procedure, config, data):
         _add_dock_callbacks(_DOCK_PLUGIN)
         _start_engine_services()
         _prompt_setup_when_engine_up(time.monotonic() + 180)
+        _check_model_updates_at_start(time.monotonic() + 600)
         GLib.timeout_add(1000, _exclusive(_watch_canvas_selection))
         _register_project_docks(_DOCK_PLUGIN)
     except Exception as exc:

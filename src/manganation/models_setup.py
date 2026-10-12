@@ -409,7 +409,8 @@ class SetupRunner:
 
     def __init__(self, root: Path, models: Callable[[], list[ModelFile]], *,
                  comfy_paths: Path | None = None, fetch=None, find=None, renderer=None,
-                 on_renderer_ready: Callable[[], object] | None = None):
+                 on_renderer_ready: Callable[[], object] | None = None,
+                 on_updated: Callable[[object], object] | None = None):
         import threading
 
         self.root = Path(root)
@@ -419,6 +420,7 @@ class SetupRunner:
         self._find = find or find_existing
         self.renderer = renderer
         self.on_renderer_ready = on_renderer_ready
+        self.on_updated = on_updated
         self._lock = threading.Lock()
         self._cancel = threading.Event()
         self._thread = None
@@ -480,6 +482,46 @@ class SetupRunner:
 
         return self._start("download", work, files=len(todo) + renderer, total=total,
                            renderer=renderer, phase="renderer" if renderer else "models")
+
+    def start_update(self, updates: list) -> dict:
+        """Replace installed models with their newer versions (``model_updates.Update``).
+        Each is downloaded beside the old file and swapped in once its SHA-256 matches,
+        and only then does ``on_updated`` pin it: a failed update leaves the old model
+        working and still pinned."""
+        files = [(ModelFile(role=f"update ({u.path})", feature=u.display, file=u.file,
+                            subdir=u.subdir, size=u.size, sha256=u.sha256, urls=[u.url],
+                            license=u.license, license_url=u.license_url), u)
+                 for u in updates]
+        total = sum(m.size or 0 for m, _ in files)
+        if total > free_bytes(self.root):
+            raise SetupError(f"not enough disk space: {total / 1e9:.1f} GB needed, "
+                             f"{free_bytes(self.root) / 1e9:.1f} GB free")
+
+        def work():
+            before = 0
+            for model, update in files:
+                if self._cancel.is_set():
+                    return
+                self._update(current=model.file, file_done=0, file_total=model.size or 0)
+
+                def progress(done, size, before=before):
+                    if self._cancel.is_set():
+                        raise Cancelled
+                    self._update(file_done=done, file_total=size, done=before + done)
+
+                try:
+                    self._fetch(model, self.root, progress=progress)
+                except Cancelled:
+                    return
+                except SetupError as exc:
+                    self._update(errors=[*self._task["errors"], str(exc)])
+                else:
+                    if self.on_updated is not None:
+                        self.on_updated(update)
+                    self._update(finished=[*self._task["finished"], model.file])
+                before += model.size or 0
+
+        return self._start("update", work, files=len(files), total=total, phase="models")
 
     def start_link(self, folders: list[Path], also: list[ModelFile] | None = None) -> dict:
         """Search ``folders`` for the missing models, and for ``also`` (the optional
