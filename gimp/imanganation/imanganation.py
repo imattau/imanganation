@@ -4428,7 +4428,9 @@ def _storyboard_review(root, page_id):
     if first is not None:
         beat_list.select_row(first)
     else:
-        add_text(beats_column, "No script panels are assigned to this page.", dim=True)
+        add_text(beats_column,
+                 "No story beats yet. Choose Add beat… to start shaping this page.",
+                 dim=True)
     open_panel_button = dialog.get_widget_for_response(1)
     if open_panel_button is not None:
         open_panel_button.set_sensitive(first is not None)
@@ -5052,6 +5054,48 @@ def _create_manual_project(title, parent, chapter, reading_order, text_direction
 
         shutil.rmtree(root, ignore_errors=True)
         raise
+    _offer_manual_project_storyboard(root, first_page, page_size, resolution)
+
+
+def _offer_manual_project_storyboard(root, first_page, page_size, resolution):
+    """Offer storyboarding once after creating a script-free project."""
+    dialog = Gtk.Dialog(title="Develop your story", flags=Gtk.DialogFlags.MODAL)
+    if first_page:
+        dialog.add_button("Continue to page", Gtk.ResponseType.CANCEL)
+        dialog.add_button("Start storyboarding", Gtk.ResponseType.OK)
+        message = ("Build this page's story beats before laying out and rendering panels. "
+                   "You can add, edit, and reorder beats in Storyboard Review.")
+    else:
+        dialog.add_button("Continue without a page", Gtk.ResponseType.CANCEL)
+        dialog.add_button("Create first page and storyboard", Gtk.ResponseType.OK)
+        message = ("Storyboard Review works one page at a time. Create a first page to "
+                   "start adding, editing, and reordering its story beats.")
+    dialog.set_default_response(Gtk.ResponseType.OK)
+    dialog.set_resizable(False)
+    label = Gtk.Label(label=message, xalign=0.0, wrap=True, max_width_chars=66)
+    label.set_margin_top(16)
+    label.set_margin_bottom(16)
+    label.set_margin_start(18)
+    label.set_margin_end(18)
+    dialog.get_content_area().add(label)
+    dialog.show_all()
+    try:
+        start = dialog.run() == Gtk.ResponseType.OK
+    finally:
+        dialog.destroy()
+    if not start:
+        return
+
+    manifest = load_project(root)
+    page_id = first_page
+    if page_id is None:
+        page_id = _create_project_page(root, manifest, *page_size,
+                                       resolution=resolution)
+        manifest = load_project(root)
+    _DOCK_CONTEXT["selected_id"] = page_id
+    _refresh_project_docks()
+    _show_project_page(root, manifest, page_id)
+    _storyboard_review(root, page_id)
 
 
 def _slug(text):
