@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./assets/imanganation-splash.png" alt="imanganation: manga × imagination" width="100%">
+</p>
+
 # imanganation
 
 AI manga generation: give it a **script**, get **consistent, text-free manga panels**
