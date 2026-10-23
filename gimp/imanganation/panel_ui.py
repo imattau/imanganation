@@ -173,10 +173,13 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
                 take_action: str = "",
                 generate_page_action: str = "",
                 storyboard_action: str = "",
+                placement_action: str = "",
+                finish_page_action: str = "",
                 new_prop_action: str = "", design_prop_menu: str = "",
                 delete_prop_menu: str = "",
                 design_prop_action: str = "",
                 inline_choices: bool = False,
+                compare_takes_action: str = "",
                 character_buttons: tuple[tuple[str, str], ...] = (),
                 delete_prop_action: str = "", delete_location_action: str = "") -> dict[str, str]:
     """Build generic host content and stable selections from a project manifest.
@@ -214,6 +217,10 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
     ``add_cover_page_action`` puts "Add cover page…" on the Pages heading until the
     project has a Cover page. ``take_action`` gives each take that isn't the active one a
     "Make active" button in Context (item ``<panel id>:<take id>``).
+    ``compare_takes_action`` adds a visual take picker to panels with multiple takes;
+    ``placement_action`` starts a character mask layer for the selected page or placed
+    panel; ``finish_page_action`` offers a checklist of dialogue/SFX lines without
+    bubbles on that page.
     ``generate_page_action`` (a no-item dock procedure) adds "Generate all N waiting
     panels" to a page's Context, and to a placed panel's, while panels with a frame on
     that page have no render yet. Props mirror locations: ``new_prop_action`` on the Props
@@ -546,6 +553,8 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
             f"Takes\t{len(panel.get('takes', []))}"
             + (f" · active {panel['active_take']}" if panel.get("active_take") else ""),
         ])
+        if compare_takes_action and len(panel.get("takes", [])) > 1:
+            inspector_rows.append(f"!{compare_takes_action}\tCompare takes…")
         placement = panel.get("placement") or {}
         if placement:
             frame = placement.get("frame") or []
@@ -555,6 +564,8 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
             inspector_rows.append(
                 f"Placed\t{_label(placed_on.get('label')) or 'a missing page'} · "
                 f"frame {frame_text}")
+            if placement_action:
+                inspector_rows.append(f"!{placement_action}\tAdd character blocking guide…")
         take_map = manifest.get("takes", {})
         for take_id in panel.get("takes", []):
             take = take_map.get(take_id, {})
@@ -592,6 +603,10 @@ def build_docks(manifest: dict[str, Any], selected_id: str | None = None,
         ])
         if storyboard_action:
             inspector_rows.append(f"!{storyboard_action}\tReview storyboard…")
+        if placement_action:
+            inspector_rows.append(f"!{placement_action}\tAdd character blocking guide…")
+        if finish_page_action:
+            inspector_rows.append(f"!{finish_page_action}\tFinish lettering…")
         availability = page_layout_availability(manifest, selected_id)
         inspector_rows.append("# Page layout")
         if not availability["available"]:

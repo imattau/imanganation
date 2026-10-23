@@ -196,8 +196,10 @@ page placement metadata are still being migrated. Image procedures are grouped u
   script text is unchanged keeps everything (takes, placement, Context edits) wherever
   it now sits, only renumbered; every other panel in the script is new. Edited panels
   with takes or a place on a page move to **Needs matching**, where **Match selected**
-  joins each to its new panel; edited panels with no work yet are replaced. When work
-  would move or edits be lost, it asks first. New characters and locations are added;
+  joins each to its new panel; edited panels with no work yet are replaced. Before
+  applying a changed script, the confirmation lists kept, new, removed, and Needs
+  matching beats with page/panel numbers, short action text, and retained-work notes.
+  New characters and locations are added;
   existing ones and their notes are kept. *Load script from file…* does the same with
   another file and copies it into the project as its script. An older project records
   which script text each panel came from when it is opened, as long as its script file
@@ -231,7 +233,12 @@ page placement metadata are still being migrated. Image procedures are grouped u
   provide editable width, slice-height and page-gap settings. Presets check per-image
   and combined image sizes before writing; JPEG quality is adjustable. The output folder
   includes `export-info.txt` with settings and the slice list. This stacks complete pages
-  and does not rearrange individual panels.
+  and does not rearrange individual panels. Before choosing a destination, export checks
+  selected page files and active take files; a missing page file blocks export, while a
+  missing take file, unrendered frame, or active art substantially smaller than its frame
+  is listed for confirmation. It also flags pages below 300 PPI, differing page pixel
+  dimensions, and dialogue/SFX lines without matching bubbles. It does not inspect trim
+  or bleed guides.
 
 - **Render Panel into Frame…** (the main flow): needs a selection, which is the target
   frame. It sends the next panel's `seq` and the frame's size to the engine, which
@@ -298,6 +305,12 @@ page placement metadata are still being migrated. Image procedures are grouped u
   its own, so the bar restarts with *pass 2*; while models load, or an LLM step runs, there
   is no step yet and it shows elapsed time. The engine reads the steps from ComfyUI's
   websocket (`render/progress.py`; `GET /jobs/{id}` → `progress`).
+- **Take comparison and lettering pass.** A panel with multiple renders has **Compare
+  takes…** in Context: a thumbnail grid shows each available take's kind, dimensions,
+  seed and render warnings, then makes the chosen take active on the page. A page has
+  **Finish lettering…**, which lists its dialogue and SFX lines that have no bubble;
+  select lines to open the existing bubble picker for each one. Review bubble position
+  and tails before export.
 - **Choose from lists.** In a panel's Context, **Location**, **Shot**, **Aspect ratio**
   and **Frame size** are drop-downs, and **Characters** and **Props** are check lists in a
   pop-over (▲ ▼ change the order: a character's place in the frame follows it, and an *Add
@@ -344,6 +357,14 @@ page placement metadata are still being migrated. Image procedures are grouped u
   selection the take is pixel-identical. **Characters** (comma-separated, optional)
   names who is in the selection, so their faces stay on-model; with several, each
   covers their side of the patch in the project's reading order.
+- **Select Character Region…**: select a layer containing anime figures and use the
+  locally installed person detector and foreground segmenter to create a native GIMP
+  selection from one figure's soft matte. Choose the detected figure, replace/add/
+  subtract/intersect with the current selection, and optionally grow, shrink, or feather
+  its edge. The temporary mask is removed after applying; use **Create Character Masks…**
+  when you want to keep editable per-figure mask layers instead. This currently selects
+  detected figures, not arbitrary objects described with text; overlapping figures may
+  need manual cleanup.
 - **Develop Panel in Stages…**: start with a rendered panel, select the panel or its
   group, or start from nothing: with no render yet, select the script panel in the docks
   and a frame on its page, and the first stage begins on a blank paper-white picture in
@@ -602,8 +623,9 @@ frame and repeat.
 
 ## Placement layers (where each character goes)
 
-Paint a rough blob on a layer named **`placement: Yuki`** (any case, visible or
-hidden, faint opacity is fine) wherever Yuki should stand. *Render Panel into Frame*
+Use **Add character blocking guide…** in a page or placed panel's Context to create or
+select a layer named **`placement: Yuki`**. Paint a rough blob on it (any case, visible
+or hidden, faint opacity is fine) wherever Yuki should stand. *Render Panel into Frame*
 crops every `placement: …` layer to the selected frame and sends the masks with the
 render (`gimp/imanganation/placement.py`, engine `placements`), so characters land
 where you painted them instead of in the default reading-order bands. One layer per

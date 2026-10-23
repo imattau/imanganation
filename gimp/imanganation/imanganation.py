@@ -155,6 +155,7 @@ PROC_SET_LOCATION_REF = "plug-in-imanganation-set-location-reference"
 PROC_SET_PROP_REF = "plug-in-imanganation-set-prop-reference"
 PROC_INPAINT = "plug-in-imanganation-inpaint-selection"
 PROC_MASKS = "plug-in-imanganation-create-character-masks"
+PROC_SELECT_CHARACTER = "plug-in-imanganation-select-character"
 PROC_STAGE = "plug-in-imanganation-develop-panel-stage"
 DEVELOPMENT_PHASES = (
     ("composition", "Panel composition",
@@ -262,10 +263,13 @@ DOCK_DESIGN_VARIANT = "plug-in-imanganation-dock-design-variant"
 DOCK_CHARACTER_VERSION = "plug-in-imanganation-dock-character-version"
 # Context: a take's "Make active" (item "<panel id>:<take id>")
 DOCK_ACTIVATE_TAKE = "plug-in-imanganation-dock-activate-take"
+DOCK_COMPARE_TAKES = "plug-in-imanganation-dock-compare-takes"
 # Context (a page, or a panel on one): render every panel waiting on that page
 DOCK_GENERATE_PAGE = "plug-in-imanganation-dock-generate-page"
 DOCK_GENERATE_LAYOUT = "plug-in-imanganation-dock-generate-page-layout"
 DOCK_STORYBOARD = "plug-in-imanganation-dock-storyboard-review"
+DOCK_PLACEMENT_GUIDE = "plug-in-imanganation-dock-placement-guide"
+DOCK_FINISH_PAGE = "plug-in-imanganation-dock-finish-page"
 # Speech bubbles: a script line's Bubble… (item "<panel id>:<line>"), a page's free
 # Bubble…, a Bubbles dock tile (item: template id), Fit bubble to text
 DOCK_BUBBLE_LINE = "plug-in-imanganation-dock-bubble-line"
@@ -1930,6 +1934,120 @@ def create_character_masks(procedure, run_mode, image, drawables, config, data):
             source_path.unlink(missing_ok=True)
 
 
+def _choose_character_selection(figures):
+    """Let the artist choose a detected figure and how its matte changes selection."""
+    dialog = Gtk.Dialog(title="Select Character Region", flags=Gtk.DialogFlags.MODAL)
+    dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+                       "Apply Selection", Gtk.ResponseType.OK)
+    dialog.set_default_size(420, 180)
+    content = dialog.get_content_area()
+    content.set_spacing(8)
+    content.set_margin_top(12)
+    content.set_margin_bottom(12)
+    content.set_margin_start(12)
+    content.set_margin_end(12)
+
+    figure_choice = Gtk.ComboBoxText()
+    for index, figure in enumerate(figures):
+        x0, y0, x1, y1 = figure["box"]
+        figure_choice.append(str(index),
+                             f"Figure {index + 1} · confidence {figure['score']:.2f} · "
+                             f"{x0:.0f},{y0:.0f} to {x1:.0f},{y1:.0f}")
+    figure_choice.set_active(0)
+
+    mode_choice = Gtk.ComboBoxText()
+    for mode, label in (("replace", "Replace current selection"),
+                        ("add", "Add to current selection"),
+                        ("subtract", "Subtract from current selection"),
+                        ("intersect", "Intersect with current selection")):
+        mode_choice.append(mode, label)
+    mode_choice.set_active_id("replace")
+
+    grow = Gtk.SpinButton.new_with_range(-128, 128, 1)
+    feather = Gtk.SpinButton.new_with_range(0, 64, 1)
+    grid = Gtk.Grid(column_spacing=12, row_spacing=8)
+    for row, (label, widget) in enumerate((
+            ("Detected figure", figure_choice),
+            ("Selection operation", mode_choice),
+            ("Grow/shrink edge (px; negative shrinks)", grow),
+            ("Feather edge (px)", feather))):
+        grid.attach(Gtk.Label(label=label, xalign=0), 0, row, 1, 1)
+        grid.attach(widget, 1, row, 1, 1)
+    content.pack_start(grid, True, True, 0)
+
+    dialog.show()
+    response = dialog.run()
+    selected = ((int(figure_choice.get_active_id()), mode_choice.get_active_id(),
+                 int(grow.get_value()), int(feather.get_value()))
+                if response == Gtk.ResponseType.OK else None)
+    dialog.destroy()
+    return selected
+
+
+def select_character(procedure, run_mode, image, drawables, config, data):
+    """Turn the AI matte for one detected figure into GIMP's native selection."""
+    if not drawables:
+        return _error(procedure, "Select the layer containing the character first.")
+    drawable = drawables[0]
+    source_path = None
+    mask_paths = []
+    try:
+        source_path = Path("/tmp") / f"imanganation-select-{secrets.token_hex(8)}.png"
+        _export_mask_source(drawable, source_path)
+        endpoint = (config.get_property("engine-url") or ENGINE_URL).rstrip("/")
+        result = _http_upload(endpoint + "/character-masks", source_path)
+        figures = result.get("figures", [])
+        if not figures:
+            return _error(procedure, "No characters were detected in the selected layer.")
+        mask_paths = [Path(figure["path"]) for figure in figures]
+
+        choice = (0, "replace", 0, 0)
+        if run_mode == Gimp.RunMode.INTERACTIVE:
+            choice = _choose_character_selection(figures)
+            if choice is None:
+                return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
+        index, mode, grow, feather = choice
+        mask_path = mask_paths[index]
+        layer = Gimp.file_load_layer(
+            Gimp.RunMode.NONINTERACTIVE, image, Gio.File.new_for_path(str(mask_path)))
+        _, offset_x, offset_y = drawable.get_offsets()
+        layer.set_name("AI Character Selection (temporary)")
+        layer.set_offsets(offset_x, offset_y)
+        operations = {"replace": Gimp.ChannelOps.REPLACE, "add": Gimp.ChannelOps.ADD,
+                      "subtract": Gimp.ChannelOps.SUBTRACT,
+                      "intersect": Gimp.ChannelOps.INTERSECT}
+        inserted = False
+        image.undo_group_start()
+        try:
+            image.insert_layer(layer, None, 0)
+            inserted = True
+            image.select_item(operations[mode], layer)
+            if grow > 0:
+                Gimp.Selection.grow(image, grow)
+            elif grow < 0:
+                Gimp.Selection.shrink(image, -grow)
+            if feather:
+                Gimp.Selection.feather(image, feather)
+            Gimp.displays_flush()
+        finally:
+            if inserted:
+                image.remove_layer(layer)
+            image.undo_group_end()
+        return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+    except (EngineError, OSError, ValueError, KeyError, IndexError) as exc:
+        return _error(procedure, str(exc))
+    finally:
+        if source_path is not None:
+            source_path.unlink(missing_ok=True)
+        for path in mask_paths:
+            path.unlink(missing_ok=True)
+        for folder in {path.parent for path in mask_paths}:
+            try:
+                folder.rmdir()
+            except OSError:
+                pass
+
+
 def set_character_reference(procedure, run_mode, image, drawables, config, data):
     layers = [d for d in drawables if isinstance(d, Gimp.Layer)]
     if not layers:
@@ -2834,6 +2952,57 @@ def _save_project_export_page(image, path, image_format, quality, include_frames
         copy.delete()
 
 
+def _export_page_preflight(root, manifest, pages):
+    """Combine manifest checks with page dimensions, resolution and lettering status."""
+    page_ids = {page.get("id") for page in pages}
+    open_images = {page_id: image for image in Gimp.get_images()
+                   if (page_id := _project_page_id_for_image(image, manifest))}
+    errors, warnings = export_formats.project_export_preflight(
+        manifest, root, page_ids, set(open_images))
+    dimensions = {}
+    for page in pages:
+        page_id = page.get("id")
+        source = page.get("file")
+        if not source or (page_id not in open_images and not (root / source).is_file()):
+            continue
+        image = open_images.get(page_id)
+        close_after = image is None
+        if close_after:
+            image = Gimp.file_load(Gimp.RunMode.NONINTERACTIVE,
+                                   Gio.File.new_for_path(str(root / source)))
+        try:
+            size = (image.get_width(), image.get_height())
+            dimensions[page_id] = size
+            resolution = image.get_resolution()
+            ppi = float(resolution[0]) if resolution else 72.0
+            if ppi < 300:
+                warnings.append(f"{page.get('label') or page_id}: page is {ppi:.0f} PPI; "
+                                "check the printer's resolution requirement")
+            if lettering is not None:
+                present = {(record.get("panel"), str(record.get("line")))
+                           for _group, record in lettering.find_bubbles(image)}
+                missing = 0
+                for panel in manifest.get("panels", []):
+                    if (panel.get("placement") or {}).get("page") != page_id:
+                        continue
+                    panel_id = panel.get("id")
+                    missing += sum((panel_id, str(index)) not in present
+                                   for index, _line in enumerate(panel.get("dialogue", [])))
+                    missing += sum((panel_id, f"sfx{index}") not in present
+                                   for index, _line in enumerate(panel.get("sfx", [])))
+                if missing:
+                    warnings.append(f"{page.get('label') or page_id}: {missing} dialogue/SFX "
+                                    "line(s) have no bubble")
+        finally:
+            if close_after:
+                image.delete()
+    distinct_sizes = sorted(set(dimensions.values()))
+    if len(distinct_sizes) > 1:
+        warnings.append("Selected pages have different pixel dimensions: "
+                        + ", ".join(f"{width}×{height}" for width, height in distinct_sizes))
+    return errors, warnings
+
+
 def export_project(procedure, run_mode, image, drawables, config, data):
     """Export a project volume as CBZ, PDF, or an ordered page-image folder."""
     if run_mode == Gimp.RunMode.INTERACTIVE and not _dialog(procedure, config, PROC_EXPORT_PROJECT):
@@ -2857,11 +3026,6 @@ def export_project(procedure, run_mode, image, drawables, config, data):
             return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
         chosen_pages = export_formats.parse_page_range(  # before asking where to save
             options.get("page_range"), len(pages))
-        destination = _export_destination(
-            manifest["project"].get("title", "Manga"), options["format"])
-        if destination is None:
-            return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
-
         pages = [pages[i] for i in chosen_pages]
         if not options["include_cover"]:
             pages = [page for page in pages if not export_formats.is_cover_page(page)]
@@ -2869,10 +3033,21 @@ def export_project(procedure, run_mode, image, drawables, config, data):
             pages.reverse()
         if not pages:
             raise ValueError("No pages remain after applying the export options")
-        missing = [page.get("file", "(no page file)") for page in pages
-                   if not page.get("file") or not (root / page["file"]).is_file()]
-        if missing:
-            raise ValueError("Page file is missing: " + ", ".join(missing))
+        errors, warnings = _export_page_preflight(root, manifest, pages)
+        if errors:
+            raise ValueError("Export preflight found blocking problems:\n• "
+                             + "\n• ".join(errors[:12])
+                             + (f"\n… and {len(errors) - 12} more" if len(errors) > 12 else ""))
+        if warnings and not _confirm(
+                "Export preflight found items to review",
+                "\n".join("• " + warning for warning in warnings[:12])
+                + (f"\n… and {len(warnings) - 12} more" if len(warnings) > 12 else "")
+                + "\n\nContinue with export?", "Continue"):
+            return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
+        destination = _export_destination(
+            manifest["project"].get("title", "Manga"), options["format"])
+        if destination is None:
+            return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
 
         # Save every open project page first so its current canvas, not a stale XCF,
         # is what the volume export captures.
@@ -4504,6 +4679,145 @@ def _storyboard_review(root, page_id):
         _refresh_project_docks()
 
 
+def _finish_page_lettering(root, manifest, page_id, procedure):
+    """Offer a page-scoped checklist for dialogue and SFX that lack bubbles."""
+    if lettering is None:
+        raise ValueError("Lettering support is unavailable in this plug-in install")
+    image = _show_project_page(root, manifest, page_id)
+    existing = {(record.get("panel"), str(record.get("line")))
+                for _group, record in lettering.find_bubbles(image)}
+    items = []
+    for panel in manifest.get("panels", []):
+        if (panel.get("placement") or {}).get("page") != page_id:
+            continue
+        panel_id = panel.get("id")
+        for index, line in enumerate(panel.get("dialogue", [])):
+            key = (panel_id, str(index))
+            if key not in existing:
+                who = line.get("speaker") or "Narration"
+                items.append((f"{panel_id}:{index}", who, line.get("text", ""), panel))
+        for index, text in enumerate(panel.get("sfx", [])):
+            key = (panel_id, f"sfx{index}")
+            if key not in existing:
+                items.append((f"{panel_id}:sfx{index}", "SFX", text, panel))
+    if not items:
+        Gimp.message("Every dialogue and SFX line on this page already has a bubble.")
+        return
+    dialog = Gtk.Dialog(title="Finish page lettering", flags=Gtk.DialogFlags.MODAL)
+    dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+                       "Add selected bubbles…", Gtk.ResponseType.OK)
+    dialog.set_default_size(620, 480)
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin=12)
+    box.pack_start(Gtk.Label(label=(f"{len(items)} unlettered line(s) on this page. "
+                                    "Choose which ones to add; each opens the bubble style "
+                                    "picker."), xalign=0), False, False, 0)
+    checks = []
+    for item, speaker, text, panel in items:
+        number = (panel.get("label") or {}).get("panel", "?")
+        label = " ".join(str(text or "").split())
+        if len(label) > 100:
+            label = label[:97].rstrip() + "…"
+        check = Gtk.CheckButton(label=f"Panel {number} · {speaker}: {label}")
+        check.set_active(True)
+        checks.append((check, item))
+        box.pack_start(check, False, False, 0)
+    scroll = Gtk.ScrolledWindow()
+    scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+    scroll.add(box)
+    dialog.get_content_area().add(scroll)
+    dialog.show_all()
+    response = dialog.run()
+    chosen = [item for check, item in checks if check.get_active()]
+    dialog.destroy()
+    if response != Gtk.ResponseType.OK or not chosen:
+        return
+    made = 0
+    for item in chosen:
+        result = _dock_bubble(procedure, _SavedConfig({"item": item}), "line")
+        if result.index(0) != Gimp.PDBStatusType.SUCCESS:
+            break
+        made += 1
+    _refresh_project_docks()
+    if made:
+        Gimp.message(f"Added {made} bubble(s). Review placement and tails before export.")
+
+
+def _create_placement_guide():
+    """Create/select a character placement mask layer for the selected page."""
+    root = _DOCK_CONTEXT.get("root")
+    if root is None:
+        raise ValueError("Open a project first")
+    manifest = load_project(root)
+    selected = _DOCK_CONTEXT.get("selected_id")
+    panel = next((p for p in manifest.get("panels", []) if p.get("id") == selected), None)
+    page = next((p for p in manifest.get("pages", []) if p.get("id") == selected), None)
+    page_id = selected if page else ((panel.get("placement") or {}).get("page") if panel else None)
+    if page_id is None:
+        raise ValueError("Select a page or a placed panel first")
+    names = list(panel.get("characters", [])) if panel else []
+    if not names:
+        names = [c.get("name", "") for c in manifest.get("cast", []) if c.get("name")]
+    names = list(dict.fromkeys(name.strip() for name in names if name.strip()))
+    if not names:
+        raise ValueError("Add a character to the project before creating a placement guide")
+    dialog = Gtk.Dialog(title="Character blocking guide", flags=Gtk.DialogFlags.MODAL)
+    dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+                       "Create guide layer", Gtk.ResponseType.OK)
+    row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, margin=12)
+    row.pack_start(Gtk.Label(label="Character"), False, False, 0)
+    choice = Gtk.ComboBoxText()
+    for name in names:
+        choice.append_text(name)
+    choice.set_active(0)
+    row.pack_start(choice, True, True, 0)
+    dialog.get_content_area().add(row)
+    dialog.get_content_area().pack_start(Gtk.Label(
+        label="Paint an opaque shape where the character should appear. The shape is "
+              "used as a placement mask when rendering into a frame.",
+        xalign=0, yalign=0), False, False, 12)
+    dialog.show_all()
+    response = dialog.run()
+    name = choice.get_active_text()
+    dialog.destroy()
+    if response != Gtk.ResponseType.OK or not name:
+        return False
+    image = _show_project_page(root, manifest, page_id)
+    if image is None:
+        raise ValueError("Could not open the selected project page")
+    prefix = "placement:"
+    target_name = f"{prefix} {name}"
+    existing = None
+
+    def find(layers):
+        nonlocal existing
+        for layer in layers:
+            if layer.get_name().casefold() == target_name.casefold():
+                existing = layer
+                return
+            if layer.is_group():
+                find(layer.get_children())
+            if existing is not None:
+                return
+
+    find(image.get_layers())
+    if existing is None:
+        layer = Gimp.Layer.new(image, target_name, image.get_width(), image.get_height(),
+                               Gimp.ImageType.RGBA_IMAGE, 100, Gimp.LayerMode.NORMAL)
+        image.undo_group_start()
+        try:
+            image.insert_layer(layer, None, 0)
+            image.set_selected_layers([layer])
+        finally:
+            image.undo_group_end()
+        Gimp.displays_flush()
+    else:
+        image.set_selected_layers([existing])
+        Gimp.displays_flush()
+    Gimp.message(f"{target_name} is ready. Paint the character's area on this layer, "
+                 "then render the panel into its frame.")
+    return True
+
+
 def _dock_action(procedure, config, data):
     try:
         if data == "open-project":
@@ -4566,6 +4880,19 @@ def _dock_action(procedure, config, data):
             if not any(page["id"] == selected for page in load_project(root)["pages"]):
                 raise ValueError("Select a page in the Pages or Project dock first")
             _storyboard_review(root, selected)
+        elif data == "placement-guide":
+            _create_placement_guide()
+        elif data == "finish-page":
+            root = _DOCK_CONTEXT.get("root")
+            selected = _DOCK_CONTEXT.get("selected_id")
+            manifest = load_project(root) if root else {}
+            page = next((p for p in manifest.get("pages", []) if p.get("id") == selected), None)
+            panel = next((p for p in manifest.get("panels", []) if p.get("id") == selected), None)
+            page_id = selected if page else ((panel.get("placement") or {}).get("page")
+                                             if panel else None)
+            if not page_id:
+                raise ValueError("Select a project page or a panel placed on one")
+            _finish_page_lettering(root, manifest, page_id, procedure)
         elif data == "match-panel":
             _match_selected_panel()
             _refresh_project_docks()
@@ -5224,23 +5551,14 @@ def _reload_script(root, choose=False):
     relative = (script["file"] if source == current
                 else f"script/originals/{digest[:16]}{source.suffix or '.md'}")
     updated = copy.deepcopy(manifest)
-    _archive_active_story(root, updated, "Before reload script")
     summary = reparse_script(updated, parsed, script_file=relative, script_text=text,
                              script_format=script_format)
     counts = {key: len(ids) for key, ids in summary.items()}
-    if counts["orphaned"] or counts["removed"]:
-        detail = (f"{counts['kept']} panels are unchanged and {counts['added']} are new "
-                  "or edited.")
-        if counts["orphaned"]:
-            detail += (f" {counts['orphaned']} edited panel"
-                       f"{'s' if counts['orphaned'] != 1 else ''} with takes or a place on "
-                       "a page move to Needs matching, where Match selected joins one to "
-                       "its new panel.")
-        if counts["removed"]:
-            detail += (f" {counts['removed']} panel{'s' if counts['removed'] != 1 else ''}"
-                       " with no work yet are replaced (their Context edits are lost).")
+    if counts["added"] or counts["orphaned"] or counts["removed"]:
+        detail = _script_reload_impact(manifest, updated, summary)
         if not _confirm(f"Reload the script into {title}?", detail, "Reload"):
             return False
+    _archive_active_story(root, updated, "Before reload script")
     if source != current:
         destination = Path(root) / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -5255,6 +5573,51 @@ def _reload_script(root, choose=False):
                  f"edited" + (f", {counts['orphaned']} to match" if counts["orphaned"]
                               else "") + ".")
     return True
+
+
+def _script_reload_impact(before, after, summary, limit=4):
+    """Explain the concrete panel changes before a script reload is committed."""
+    def panel_map(document):
+        return {panel.get("id"): panel for panel in document.get("panels", [])}
+
+    def describe(panel):
+        label = panel.get("label") or {}
+        page, number = label.get("page", "?"), label.get("panel", "?")
+        action = " ".join(str(panel.get("action") or "").split())
+        if len(action) > 68:
+            action = action[:65].rstrip() + "…"
+        state = []
+        if panel.get("takes"):
+            state.append(f"{len(panel['takes'])} take(s)")
+        placement = panel.get("placement") or {}
+        if placement.get("page"):
+            page_obj = next((p for p in before.get("pages", [])
+                             if p.get("id") == placement.get("page")), None)
+            state.append("placed on " + (page_obj.get("label") if page_obj else "a page"))
+        suffix = f" [{', '.join(state)}]" if state else ""
+        return f"P{page}.{number}: {action or '(no action text)'}{suffix}"
+
+    old, new = panel_map(before), panel_map(after)
+    sections = [f"Unchanged and kept: {len(summary['kept'])} panel(s).",
+                f"New script beats: {len(summary['added'])} (includes edited beats)."]
+    for key, title in (("added", "New"), ("orphaned", "Needs matching"),
+                       ("removed", "Removed")):
+        ids = summary.get(key, [])
+        if not ids:
+            continue
+        source = new if key == "added" else old
+        shown = [describe(source[ident]) for ident in ids[:limit] if ident in source]
+        if shown:
+            sections.append(title + ":\n  " + "\n  ".join(shown)
+                            + (f"\n  … and {len(ids) - len(shown)} more"
+                               if len(ids) > len(shown) else ""))
+    if summary.get("orphaned"):
+        sections.append("Needs matching panels keep their takes and placement until you "
+                        "match them to a new beat.")
+    if summary.get("removed"):
+        sections.append("Removed panels have no takes or page placement; their panel "
+                        "Context edits will be discarded.")
+    return "\n\n".join(sections)
 
 
 def _create_project_from_script(script_path, title, parent, page_size, design, style=None):
@@ -6281,6 +6644,83 @@ def _dock_activate_take(procedure, config, data):
     try:
         panel_id, _, take_id = (config.get_property("item") or "").rpartition(":")
         _activate_take(_DOCK_CONTEXT["root"], panel_id, take_id)
+    except Exception as exc:
+        return _error(procedure, str(exc))
+    return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+
+
+def _dock_compare_takes(procedure, config, data):
+    """Show a visual comparison of the selected panel's takes and activate the pick."""
+    try:
+        root = _DOCK_CONTEXT.get("root")
+        panel_id = _DOCK_CONTEXT.get("selected_id")
+        if root is None or panel_id is None:
+            raise ValueError("Select a rendered panel first")
+        manifest = load_project(root)
+        panel = next((p for p in manifest.get("panels", []) if p.get("id") == panel_id), None)
+        if panel is None:
+            raise ValueError("That panel is no longer in the project")
+        takes = [(ident, manifest.get("takes", {}).get(ident, {}))
+                 for ident in panel.get("takes", [])]
+        takes = [(ident, take) for ident, take in takes
+                 if take.get("file") and (root / take["file"]).is_file()]
+        if len(takes) < 2:
+            raise ValueError("This panel needs at least two available takes to compare")
+
+        dialog = Gtk.Dialog(title="Compare panel takes", flags=Gtk.DialogFlags.MODAL)
+        dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+                           "Use selected take", Gtk.ResponseType.OK)
+        dialog.set_default_size(760, 560)
+        content = dialog.get_content_area()
+        content.set_spacing(8)
+        content.set_margin_top(8)
+        content.set_margin_start(8)
+        content.set_margin_end(8)
+        label = panel.get("label") or {}
+        heading = Gtk.Label(label=(f"Page {label.get('page', '?')} · Panel "
+                                   f"{label.get('panel', '?')} — choose the take to keep active"))
+        heading.set_xalign(0)
+        content.pack_start(heading, False, False, 0)
+        grid = Gtk.Grid(column_spacing=12, row_spacing=12, margin=12)
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        scroll.add(grid)
+        group = None
+        choices = {}
+        from gi.repository import GdkPixbuf
+        for index, (take_id, take) in enumerate(takes):
+            path = root / take["file"]
+            card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
+            try:
+                preview = GdkPixbuf.Pixbuf.new_from_file_at_scale(str(path), 220, 180, True)
+                card.pack_start(Gtk.Image.new_from_pixbuf(preview), True, True, 0)
+            except Exception:
+                card.pack_start(Gtk.Label(label="Preview unavailable"), True, True, 0)
+            engine = take.get("engine") or {}
+            details = [take.get("kind", "take"), take_id]
+            if take.get("width") and take.get("height"):
+                details.append(f"{take['width']}×{take['height']}")
+            if engine.get("seed") is not None:
+                details.append(f"seed {engine['seed']}")
+            radio = Gtk.RadioButton.new_with_label_from_widget(
+                group, "Use this take · " + " · ".join(details))
+            if group is None:
+                group = radio
+            radio.set_active(take_id == panel.get("active_take"))
+            card.pack_start(radio, False, False, 0)
+            for warning in engine.get("warnings") or []:
+                note = Gtk.Label(label="⚠ " + str(warning), xalign=0, yalign=0)
+                note.set_line_wrap(True)
+                card.pack_start(note, False, False, 0)
+            grid.attach(card, index % 3, index // 3, 1, 1)
+            choices[radio] = take_id
+        content.pack_start(scroll, True, True, 0)
+        dialog.show_all()
+        response = dialog.run()
+        chosen = next((take_id for radio, take_id in choices.items() if radio.get_active()), None)
+        dialog.destroy()
+        if response == Gtk.ResponseType.OK and chosen:
+            _activate_take(root, panel_id, chosen)
     except Exception as exc:
         return _error(procedure, str(exc))
     return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
@@ -7736,6 +8176,9 @@ def _dock_actions(root, manifest):
             "add_cover_action": DOCK_ADD_COVER,
             "character_version_action": DOCK_CHARACTER_VERSION,
             "take_action": DOCK_ACTIVATE_TAKE,
+            "compare_takes_action": DOCK_COMPARE_TAKES,
+            "placement_action": DOCK_PLACEMENT_GUIDE,
+            "finish_page_action": DOCK_FINISH_PAGE,
             "generate_page_action": DOCK_GENERATE_PAGE,
             "design_prop_action": DOCK_DESIGN_PROP,
             "inline_choices": True,
@@ -8140,6 +8583,7 @@ def _add_dock_callbacks(plugin):
         (DOCK_ADD_COVER, _dock_panel_menu, "cover", True),
         (DOCK_CHARACTER_VERSION, _dock_character_version, "pick", True),
         (DOCK_ACTIVATE_TAKE, _dock_activate_take, "take", True),
+        (DOCK_COMPARE_TAKES, _dock_compare_takes, "compare-takes", False),
         (DOCK_GALLERY_ITEM, _dock_gallery_item, "gallery", True),
         (DOCK_CANCEL_JOB, _dock_cancel_job, "cancel", True),
         (DOCK_RENAME_CHARACTER_BUTTON, _dock_action, "rename-character", False),
@@ -8168,6 +8612,8 @@ def _add_dock_callbacks(plugin):
         (DOCK_FIT_BUBBLE, _dock_bubble, "fit", False),
         (DOCK_GENERATE_LAYOUT, _dock_action, "generate-layout", False),
         (DOCK_STORYBOARD, _dock_action, "storyboard-review", False),
+        (DOCK_PLACEMENT_GUIDE, _dock_action, "placement-guide", False),
+        (DOCK_FINISH_PAGE, _dock_action, "finish-page", False),
         (DOCK_GENERATE_PAGE, _dock_action, "generate-page", False),
         # Page strip: clicking a page opens it; the button adds one (as in Project)
         (DOCK_ACTIONS[DOCK_FILMSTRIP], _dock_action, "project-action", False),
@@ -8411,7 +8857,8 @@ class Imanganation(Gimp.PlugIn):
         return False, None, None
 
     def do_query_procedures(self):
-        return [PROC_RENDER, PROC_NEXT, PROC_REGEN, PROC_INPAINT, PROC_MASKS, PROC_STAGE,
+        return [PROC_RENDER, PROC_NEXT, PROC_REGEN, PROC_INPAINT, PROC_MASKS,
+                PROC_SELECT_CHARACTER, PROC_STAGE,
                 PROC_REFINE, PROC_SETREF,
                 PROC_SET_LOCATION_REF, PROC_SET_PROP_REF,
                 PROC_PLACE, PROC_STATUS, PROC_PROJECT_DOCKS, PROC_CLOSE_PROJECT,
@@ -8602,7 +9049,7 @@ class Imanganation(Gimp.PlugIn):
         run = {PROC_RENDER: render_panel, PROC_NEXT: place_next_panel,
                PROC_REFINE: refine_panel, PROC_REGEN: regenerate_panel,
                PROC_SETREF: set_character_reference, PROC_INPAINT: inpaint_selection,
-               PROC_MASKS: create_character_masks,
+               PROC_MASKS: create_character_masks, PROC_SELECT_CHARACTER: select_character,
                PROC_SET_LOCATION_REF: set_location_reference,
                PROC_SET_PROP_REF: set_prop_reference,
                PROC_PLACE: place_panel, PROC_STATUS: engine_status,
@@ -8637,6 +9084,7 @@ class Imanganation(Gimp.PlugIn):
             PROC_REGEN: "Edit Panel",
             PROC_INPAINT: "Edit Panel",
             PROC_MASKS: "Edit Panel",
+            PROC_SELECT_CHARACTER: "Edit Panel",
             PROC_STAGE: "Edit Panel",
             PROC_REFINE: "Edit Panel",
         }
@@ -8741,6 +9189,18 @@ class Imanganation(Gimp.PlugIn):
                 "Detect each anime figure, segment its foreground, and add one editable "
                 "mask layer per figure inside a hidden group. The optional CPU model is "
                 "installed from Set Up Models.", name)
+            proc.add_string_argument(
+                "engine-url", "_Engine URL", "imanganation engine (manganation serve)",
+                ENGINE_URL, GObject.ParamFlags.READWRITE)
+            return proc
+
+        if name == PROC_SELECT_CHARACTER:
+            proc.set_menu_label("Select Character _Region...")
+            proc.set_documentation(
+                "Select a detected character with the local AI models",
+                "Detect and segment figures in the selected layer, then apply one soft "
+                "figure matte as a native GIMP selection. Choose which figure, how to "
+                "combine it with the current selection, and optional grow or feather.", name)
             proc.add_string_argument(
                 "engine-url", "_Engine URL", "imanganation engine (manganation serve)",
                 ENGINE_URL, GObject.ParamFlags.READWRITE)

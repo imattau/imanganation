@@ -20,6 +20,59 @@ VERTICAL_PRESETS = {
 }
 
 
+def project_export_preflight(manifest: dict, root: str | Path,
+                             page_ids: set[str],
+                             available_pages: set[str] | None = None) -> tuple[list[str], list[str]]:
+    """Return (blocking errors, warnings) for the selected project pages.
+
+    This is intentionally a manifest/file check: it does not open or modify XCFs.
+    A placed panel with no usable active take is reported before output is written.
+    """
+    root = Path(root)
+    available_pages = available_pages or set()
+    errors: list[str] = []
+    warnings: list[str] = []
+    pages = {page.get("id"): page for page in manifest.get("pages", [])}
+    for ident in page_ids:
+        page = pages.get(ident)
+        if page is None:
+            continue
+        filename = page.get("file")
+        if (not filename or not (root / filename).is_file()) and ident not in available_pages:
+            errors.append(f"{page.get('label') or ident}: page XCF is missing")
+
+    takes = manifest.get("takes", {})
+    for panel in manifest.get("panels", []):
+        placement = panel.get("placement") or {}
+        if placement.get("page") not in page_ids:
+            continue
+        label = panel.get("label") or {}
+        position = f"Page {label.get('page', '?')} · Panel {label.get('panel', '?')}"
+        take_id = panel.get("active_take")
+        if not take_id:
+            warnings.append(f"{position}: no rendered art is assigned to this frame")
+            continue
+        take = takes.get(take_id)
+        if take is None:
+            warnings.append(f"{position}: active take record is missing")
+            continue
+        file = take.get("file")
+        if not file or not (root / file).is_file():
+            warnings.append(f"{position}: active take image file is missing; review the XCF page")
+            continue
+        frame = placement.get("frame") or []
+        width, height = int(take.get("width") or 0), int(take.get("height") or 0)
+        if len(frame) == 4 and width > 0 and height > 0:
+            frame_w, frame_h = int(frame[2]), int(frame[3])
+            if frame_w > 0 and frame_h > 0:
+                scale = min(width / frame_w, height / frame_h)
+                if scale < 0.75:
+                    warnings.append(
+                        f"{position}: active art is {width}×{height}px for a "
+                        f"{frame_w}×{frame_h}px frame (about {scale:.0%} of frame size)")
+    return errors, warnings
+
+
 def _png_rgb(path: Path):
     """Decode an 8-bit, non-interlaced RGB/RGBA/grayscale PNG to RGB rows."""
     data = path.read_bytes()
