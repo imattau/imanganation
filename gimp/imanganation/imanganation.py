@@ -4754,10 +4754,11 @@ def _create_placement_guide():
     page_id = selected if page else ((panel.get("placement") or {}).get("page") if panel else None)
     if page_id is None:
         raise ValueError("Select a page or a placed panel first")
-    names = list(panel.get("characters", [])) if panel else []
-    if not names:
+    names = [c.get("name", "") if isinstance(c, dict) else str(c)
+             for c in (panel.get("characters", []) if panel else [])]
+    if not any(names):
         names = [c.get("name", "") for c in manifest.get("cast", []) if c.get("name")]
-    names = list(dict.fromkeys(name.strip() for name in names if name.strip()))
+    names = list(dict.fromkeys(name.strip() for name in names if name and name.strip()))
     if not names:
         raise ValueError("Add a character to the project before creating a placement guide")
     dialog = Gtk.Dialog(title="Character blocking guide", flags=Gtk.DialogFlags.MODAL)
